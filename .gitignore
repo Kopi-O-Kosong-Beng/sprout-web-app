@@ -8,3 +8,5 @@ server/serviceAccountKey.json
 coverage/
 dist/
 .DS_Store
+**/*firebase-adminsdk*.json
+**/sprout-dev-*.json

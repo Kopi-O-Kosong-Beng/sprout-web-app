@@ -381,19 +381,19 @@ src/
 │   ├── upload/
 │   └── query/
 ├── pages/
-│   ├── LandingPage.jsx
-│   ├── LoginPage.jsx
-│   ├── SignupPage.jsx
-│   ├── DashboardPage.jsx
-│   ├── AvatarArchivePage.jsx
-│   ├── UploadPlantPage.jsx
-│   ├── PVEBattlePage.jsx
-│   └── ContactPage.jsx
+│   ├── LandingPage.tsx
+│   ├── LoginPage.tsx
+│   ├── SignupPage.tsx
+│   ├── DashboardPage.tsx
+│   ├── AvatarArchivePage.tsx
+│   ├── UploadPlantPage.tsx
+│   ├── PVEBattlePage.tsx
+│   └── ContactPage.tsx
 ├── services/
-│   ├── authApi.js
-│   ├── avatarApi.js
-│   ├── battleApi.js
-│   └── queryApi.js
+│   ├── authApi.ts
+│   ├── avatarApi.ts
+│   ├── battleApi.ts
+│   └── queryApi.ts
 ├── hooks/
 ├── utils/
 └── tests/
@@ -405,31 +405,31 @@ src/
 
 ```text
 server/
-├── app.js
+├── app.ts
 ├── routes/
-│   ├── auth.routes.js
-│   ├── avatar.routes.js
-│   ├── upload.routes.js
-│   ├── battle.routes.js
-│   └── query.routes.js
+│   ├── auth.routes.ts
+│   ├── avatar.routes.ts
+│   ├── upload.routes.ts
+│   ├── battle.routes.ts
+│   └── query.routes.ts
 ├── controllers/
-│   ├── auth.controller.js
-│   ├── avatar.controller.js
-│   ├── upload.controller.js
-│   ├── battle.controller.js
-│   └── query.controller.js
+│   ├── auth.controller.ts
+│   ├── avatar.controller.ts
+│   ├── upload.controller.ts
+│   ├── battle.controller.ts
+│   └── query.controller.ts
 ├── services/
-│   ├── email.service.js
-│   ├── plantId.service.js
-│   ├── gemma.service.js
-│   ├── flux.service.js
-│   ├── battle.service.js
-│   └── ticket.service.js
+│   ├── email.service.ts
+│   ├── plantId.service.ts
+│   ├── gemma.service.ts
+│   ├── flux.service.ts
+│   ├── battle.service.ts
+│   └── ticket.service.ts
 ├── middleware/
-│   ├── auth.middleware.js
-│   ├── upload.middleware.js
-│   ├── validation.middleware.js
-│   └── error.middleware.js
+│   ├── auth.middleware.ts
+│   ├── upload.middleware.ts
+│   ├── validation.middleware.ts
+│   └── error.middleware.ts
 ├── models/
 ├── database/
 ├── utils/

@@ -1,11 +1,11 @@
-/** Express app wiring — tasks.md Task 9. Exported separately from server.js so
+/** Express app wiring — tasks.md Task 9. Exported separately from server.ts so
  *  Supertest can drive it without opening a port. */
-require('dotenv').config({ path: require('path').join(__dirname, '.env') });
-const express = require('express');
-const cors = require('cors');
-const rateLimit = require('express-rate-limit');
-const errorMiddleware = require('./middleware/error.middleware');
-const queryRoutes = require('./routes/query.routes');
+import './env'; // MUST be the first import — loads .env before other modules read it
+import express from 'express';
+import cors from 'cors';
+import rateLimit from 'express-rate-limit';
+import errorMiddleware from './middleware/error.middleware';
+import queryRoutes from './routes/query.routes';
 
 const app = express();
 
@@ -14,13 +14,14 @@ const app = express();
 // Live Server on :5500) — the real client always runs on 5173, and production
 // CORS_ORIGIN should be a single trusted origin, not this list.
 const devOrigins = [
-  process.env.CORS_ORIGIN || 'http://localhost:5173',
+  process.env.CORS_ORIGIN ?? 'http://localhost:5173',
   'http://localhost:5500',
   'http://127.0.0.1:5500',
 ];
 app.use(
   cors({
-    origin: process.env.NODE_ENV === 'production' ? process.env.CORS_ORIGIN : devOrigins,
+    origin:
+      process.env.NODE_ENV === 'production' ? process.env.CORS_ORIGIN : devOrigins,
   })
 );
 
@@ -39,7 +40,7 @@ app.use(
 );
 
 // 9.5 health check — the Checkoff 2 "ping"
-app.get('/api/health', (req, res) =>
+app.get('/api/health', (_req, res) =>
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
 );
 
@@ -47,9 +48,9 @@ app.get('/api/health', (req, res) =>
 app.use('/api/query', queryRoutes);
 
 // 404 for unknown API paths
-app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // 9.4 central error handler — must be last
 app.use(errorMiddleware);
 
-module.exports = app;
+export default app;

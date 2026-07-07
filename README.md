@@ -107,8 +107,8 @@ The **final architecture is Firebase** (Firestore + Firebase Auth + Cloud Storag
 
 ```
 server/
-├── app.js              ← Express wiring (CORS, rate limit, routers, error handler)
-├── server.js           ← entry point (migrations + listen on :3001)
+├── app.ts              ← Express wiring (CORS, rate limit, routers, error handler)
+├── server.ts           ← entry point (migrations + listen on :3001)
 ├── routes/             ← URL definitions + validation schemas
 ├── controllers/        ← request/response handling, no business logic
 ├── services/           ← business logic (ticket refs, emails, battle math…)

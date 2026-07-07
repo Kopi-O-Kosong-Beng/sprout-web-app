@@ -1,6 +1,8 @@
 /** PVE battle sessions — Req 8, tasks.md 2.5 */
-exports.up = (knex) =>
-  knex.schema.createTable('battle_sessions', (t) => {
+import type { Knex } from 'knex';
+
+export async function up(knex: Knex): Promise<void> {
+  await knex.schema.createTable('battle_sessions', (t) => {
     t.uuid('sessionId').primary();
     t.uuid('userId')
       .notNullable()
@@ -18,5 +20,8 @@ exports.up = (knex) =>
     t.datetime('endedAt').nullable();
     t.index('userId');
   });
+}
 
-exports.down = (knex) => knex.schema.dropTableIfExists('battle_sessions');
+export async function down(knex: Knex): Promise<void> {
+  await knex.schema.dropTableIfExists('battle_sessions');
+}

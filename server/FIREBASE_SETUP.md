@@ -63,8 +63,8 @@ service cloud.firestore {
 
 | Collection | Purpose | Written by |
 |---|---|---|
-| `query_tickets` | Contact Us tickets | `ticket.repo.firestore.js` ✅ built |
-| `counters` | Atomic daily ticket sequence | `ticket.repo.firestore.js` ✅ built |
+| `query_tickets` | Contact Us tickets | `ticket.repo.firestore.ts` ✅ built |
+| `counters` | Atomic daily ticket sequence | `ticket.repo.firestore.ts` ✅ built |
 | `users` | Profile docs keyed by Firebase Auth uid | user repo (next) |
 | `password_resets` | OTP hashes + TTL for UC3 custom reset | auth flow (next) |
 | `password_history` | Last-3 reset password hashes per user | auth flow (next) |

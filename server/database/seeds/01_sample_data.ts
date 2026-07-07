@@ -2,19 +2,33 @@
  *  Demo login: demo@sprout.app / Password123!   (verified)
  *  Second user: pending@sprout.app / Password123!   (unverified)
  */
-const { randomUUID } = require('crypto');
-const bcrypt = require('bcrypt');
+import { randomUUID } from 'crypto';
+import bcrypt from 'bcrypt';
+import type { Knex } from 'knex';
 
 const BCRYPT_COST = 12; // Req 11.8
 
-const demoAvatars = (userId) => [
+interface SeedAvatar {
+  speciesName: string;
+  speciesFamily: string;
+  source: 'mobile' | 'web';
+  isTemporary: boolean;
+  stats: { hp: number; attack: number; defense: number; speed: number };
+  metadata: Record<string, unknown>;
+}
+
+const AVATARS: SeedAvatar[] = [
   {
     speciesName: 'Helianthus annuus',
     speciesFamily: 'Asteraceae',
     source: 'mobile',
     isTemporary: false,
     stats: { hp: 96, attack: 72, defense: 41, speed: 68 },
-    metadata: { taxonomy: 'flower', confidence: 0.97, locality: { city: 'Singapore', venue: 'Gardens by the Bay' } },
+    metadata: {
+      taxonomy: 'flower',
+      confidence: 0.97,
+      locality: { city: 'Singapore', venue: 'Gardens by the Bay' },
+    },
   },
   {
     speciesName: 'Quercus robur',
@@ -22,7 +36,11 @@ const demoAvatars = (userId) => [
     source: 'mobile',
     isTemporary: false,
     stats: { hp: 168, attack: 44, defense: 88, speed: 22 },
-    metadata: { taxonomy: 'tree', confidence: 0.93, locality: { city: 'Singapore', venue: 'Botanic Gardens' } },
+    metadata: {
+      taxonomy: 'tree',
+      confidence: 0.93,
+      locality: { city: 'Singapore', venue: 'Botanic Gardens' },
+    },
   },
   {
     speciesName: 'Monstera deliciosa',
@@ -48,18 +66,9 @@ const demoAvatars = (userId) => [
     stats: { hp: 74, attack: 91, defense: 28, speed: 55 },
     metadata: { taxonomy: 'fungus', confidence: 0.82 },
   },
-].map((a) => ({
-  id: randomUUID(),
-  userId,
-  spriteUrl: `/static/sprites/${a.speciesName.toLowerCase().replace(/\s+/g, '-')}.png`,
-  discoveredAt: new Date().toISOString(),
-  expiresAt: a.isTemporary ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null,
-  ...a,
-  stats: JSON.stringify(a.stats),
-  metadata: JSON.stringify(a.metadata),
-}));
+];
 
-exports.seed = async (knex) => {
+export async function seed(knex: Knex): Promise<void> {
   await knex('query_tickets').del();
   await knex('battle_sessions').del();
   await knex('avatar_records').del();
@@ -87,5 +96,21 @@ exports.seed = async (knex) => {
     },
   ]);
 
-  await knex('avatar_records').insert(demoAvatars(demoUserId));
-};
+  await knex('avatar_records').insert(
+    AVATARS.map((a) => ({
+      id: randomUUID(),
+      userId: demoUserId,
+      speciesName: a.speciesName,
+      speciesFamily: a.speciesFamily,
+      spriteUrl: `/static/sprites/${a.speciesName.toLowerCase().replace(/\s+/g, '-')}.png`,
+      discoveredAt: new Date().toISOString(),
+      source: a.source,
+      isTemporary: a.isTemporary,
+      expiresAt: a.isTemporary
+        ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        : null,
+      stats: JSON.stringify(a.stats),
+      metadata: JSON.stringify(a.metadata),
+    }))
+  );
+}

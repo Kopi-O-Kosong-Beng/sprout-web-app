@@ -20,15 +20,15 @@ not the primary scope of this requirements document.
 - **System**: The Sprout Web Platform (React frontend + Node.js/Express backend together).
 - **Backend**: The Node.js/Express server responsible for API routing, business logic, data persistence, and external service orchestration.
 - **Frontend**: The React single-page application served to the user's browser.
-- **Auth_Controller**: The backend module (`auth.controller.js`) that handles all authentication-related requests.
-- **Upload_Controller**: The backend module (`upload.controller.js`) that handles plant image upload requests and orchestrates the GenAI pipeline.
-- **Battle_Service**: The backend service (`battle.service.js`) that encapsulates PVE battle logic including damage calculation and NPC action selection.
-- **Ticket_Service**: The backend service (`ticket.service.js`) that creates query tickets and dispatches confirmation emails.
-- **Email_Service**: The backend service (`email.service.js`) that delivers transactional email via SMTP/SendGrid.
+- **Auth_Controller**: The backend module (`auth.controller.ts`) that handles all authentication-related requests.
+- **Upload_Controller**: The backend module (`upload.controller.ts`) that handles plant image upload requests and orchestrates the GenAI pipeline.
+- **Battle_Service**: The backend service (`battle.service.ts`) that encapsulates PVE battle logic including damage calculation and NPC action selection.
+- **Ticket_Service**: The backend service (`ticket.service.ts`) that creates query tickets and dispatches confirmation emails.
+- **Email_Service**: The backend service (`email.service.ts`) that delivers transactional email via SMTP/SendGrid.
 - **PlantID_Service**: The backend service wrapper for the external Plant Identification API.
 - **Gemma_Service**: The backend service wrapper for the Google Gemma API.
 - **Flux_Service**: The backend service wrapper for the FLUX image generation API.
-- **Avatar_Stats_Deriver**: The pure function `deriveAvatarStats` inside `battle.service.js` that deterministically maps species and taxonomy data to `AvatarStats`.
+- **Avatar_Stats_Deriver**: The pure function `deriveAvatarStats` inside `battle.service.ts` that deterministically maps species and taxonomy data to `AvatarStats`.
 - **Multer**: The Node.js multipart upload middleware used to receive and validate plant images.
 - **JWT**: JSON Web Token used as the bearer token for authenticated API requests.
 - **OTP**: One-time password — a 6-digit numeric code used for password reset verification.
@@ -280,14 +280,14 @@ Canonical use case numbering follows the formal Use Case Description document (C
 
 | Use Case | Requirement(s) | Primary backend module |
 |---|---|---|
-| UC1 Signup | Req 1, 10, 11 | `auth.controller.js` |
-| UC2 Login | Req 2, 10, 11 | `auth.controller.js` |
-| UC3 Reset Password (base case — not an extension of UC2) | Req 3, 11 | `auth.controller.js` |
-| UC4 Browse Plant Avatar Archival | Req 5, 10 | `avatar.controller.js` |
-| UC5 Join PVE Battle | Req 8 | `battle.service.js` |
-| UC6 Upload Plant Picture (`extends` UC5) | Req 6, 7 | `upload.controller.js` |
+| UC1 Signup | Req 1, 10, 11 | `auth.controller.ts` |
+| UC2 Login | Req 2, 10, 11 | `auth.controller.ts` |
+| UC3 Reset Password (base case — not an extension of UC2) | Req 3, 11 | `auth.controller.ts` |
+| UC4 Browse Plant Avatar Archival | Req 5, 10 | `avatar.controller.ts` |
+| UC5 Join PVE Battle | Req 8 | `battle.service.ts` |
+| UC6 Upload Plant Picture (`extends` UC5) | Req 6, 7 | `upload.controller.ts` |
 | UC7 Join PVP Battle (P2 / optional) | FR7 only — intentionally not fully specified | — |
-| UC8 Submit Query Ticket | Req 9 | `ticket.service.js` |
+| UC8 Submit Query Ticket | Req 9 | `ticket.service.ts` |
 | Landing page (UI concern, not a use case) | Req 4 | frontend only |
 | Cross-cutting (database, security, performance, testability) | Req 10, 11, 12, 13 | all modules |
 

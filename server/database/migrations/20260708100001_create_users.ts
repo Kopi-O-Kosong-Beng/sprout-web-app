@@ -1,6 +1,8 @@
 /** Users table — Req 1–3, tasks.md 2.3 */
-exports.up = (knex) =>
-  knex.schema.createTable('users', (t) => {
+import type { Knex } from 'knex';
+
+export async function up(knex: Knex): Promise<void> {
+  await knex.schema.createTable('users', (t) => {
     t.uuid('id').primary();
     t.string('email').notNullable().unique();
     t.string('passwordHash').notNullable();
@@ -12,5 +14,8 @@ exports.up = (knex) =>
     t.datetime('createdAt').notNullable().defaultTo(knex.fn.now());
     t.datetime('updatedAt').notNullable().defaultTo(knex.fn.now());
   });
+}
 
-exports.down = (knex) => knex.schema.dropTableIfExists('users');
+export async function down(knex: Knex): Promise<void> {
+  await knex.schema.dropTableIfExists('users');
+}

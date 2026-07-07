@@ -1,7 +1,9 @@
 /** Avatar records — Req 5/6/10, tasks.md 2.4. One row per avatar (Pokédex model);
  *  source + isTemporary carry the web-upload anti-abuse policy. */
-exports.up = (knex) =>
-  knex.schema.createTable('avatar_records', (t) => {
+import type { Knex } from 'knex';
+
+export async function up(knex: Knex): Promise<void> {
+  await knex.schema.createTable('avatar_records', (t) => {
     t.uuid('id').primary();
     t.uuid('userId')
       .notNullable()
@@ -19,5 +21,8 @@ exports.up = (knex) =>
     t.json('metadata').nullable(); // taxonomy, confidence, optional locality
     t.index('userId');
   });
+}
 
-exports.down = (knex) => knex.schema.dropTableIfExists('avatar_records');
+export async function down(knex: Knex): Promise<void> {
+  await knex.schema.dropTableIfExists('avatar_records');
+}

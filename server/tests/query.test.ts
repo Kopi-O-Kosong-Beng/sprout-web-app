@@ -1,12 +1,10 @@
 /** T05 — query ticket integration (tasks.md 18.4 head start).
- *  Uses a throwaway SQLite file so the dev database is never touched. */
-process.env.DB_FILENAME = './database/sprout.test.sqlite3'; // before any require
-
-const fs = require('fs');
-const path = require('path');
-const request = require('supertest');
-const app = require('../app');
-const db = require('../database/db');
+ *  Uses a throwaway SQLite file (set in setup-env.ts) so dev data is never touched. */
+import fs from 'fs';
+import path from 'path';
+import request from 'supertest';
+import app from '../app';
+import db from '../database/db';
 
 beforeAll(async () => {
   await db.migrate.latest();
@@ -57,7 +55,7 @@ describe('POST /api/query/submit (T05)', () => {
   });
 
   it('rejects a missing required field with 400 (Req 9.2)', async () => {
-    const { email, ...noEmail } = valid;
+    const { email: _omitted, ...noEmail } = valid;
     const res = await request(app).post('/api/query/submit').send(noEmail);
     expect(res.status).toBe(400);
   });
