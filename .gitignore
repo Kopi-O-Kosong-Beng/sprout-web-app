@@ -1,0 +1,10 @@
+node_modules/
+server/.env
+server/serviceAccountKey.json
+**/serviceAccountKey*.json
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+coverage/
+dist/
+.DS_Store

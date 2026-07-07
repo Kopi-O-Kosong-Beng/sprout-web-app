@@ -1,0 +1,16 @@
+{
+  "name": "sprout-webapp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sprout — Web Platform & B2B Showcase for Nature-Based Gamification (50.003 ESC C3T2)",
+  "workspaces": [
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w server",
+    "dev:server": "npm run dev -w server",
+    "migrate": "npm run migrate -w server",
+    "seed": "npm run seed -w server",
+    "test": "npm test -w server"
+  }
+}
