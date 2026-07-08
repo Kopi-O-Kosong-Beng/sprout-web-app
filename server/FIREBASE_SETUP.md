@@ -1,6 +1,12 @@
-# Firebase Setup (Zhi Feng — do this once, ~15 min)
+# Firebase Setup
 
-The backend's final architecture (per Master.docx) runs on Firebase: **Firestore** (the cross-platform database), **Firebase Auth**, and later **Cloud Storage** for sprites. Until this setup is done, the backend runs on the SQLite fallback (`DATASTORE=sqlite`) so nobody is blocked.
+> ✅ **Status: DONE.** The Firebase project (`sprout-dev-66f08`) is created, Firestore is connected, and the backend reads/writes it live. This doc is now (a) reference for how it was set up, and (b) the guide for **teammates running the backend locally** and for **the frontend's Firebase config**.
+
+The backend runs on Firebase: **Firestore** (the cross-platform database), **Firebase Auth**, and later **Cloud Storage** for sprites. A **SQLite fallback** (`DATASTORE=sqlite`) also exists so anyone can run offline without the key.
+
+## 🔑 For teammates running the backend locally
+
+You need `serviceAccountKey.json` (Zhi Feng sends it privately — it's a secret, never commit/post it). Put it in `sprout-app/server/`, then in `server/.env` set `DATASTORE=firestore` and `FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json`. Run `npm run dev`. If Firestore is empty, `npm run seed:firestore`. Don't want the key? Use `DATASTORE=sqlite` instead — see the main README.
 
 ## ⚠️ Before creating anything: ask Nathaniel
 
@@ -65,8 +71,10 @@ service cloud.firestore {
 |---|---|---|
 | `query_tickets` | Contact Us tickets | `ticket.repo.firestore.ts` ✅ built |
 | `counters` | Atomic daily ticket sequence | `ticket.repo.firestore.ts` ✅ built |
-| `users` | Profile docs keyed by Firebase Auth uid | user repo (next) |
+| `avatar_records` | Plant avatars (mobile + web, isTemporary flag) | `avatar.repo.firestore.ts` ✅ built (read) |
+| `users` | Profile docs keyed by Firebase Auth uid | seeded ✅; write path with auth flow (next) |
 | `password_resets` | OTP hashes + TTL for UC3 custom reset | auth flow (next) |
 | `password_history` | Last-3 reset password hashes per user | auth flow (next) |
-| `avatar_records` | Plant avatars (mobile + web, isTemporary flag) | avatar repo (next) |
 | `battle_sessions` | PVE battle state | battle repo (later) |
+
+Security rules to publish: see [`../firestore.rules`](../firestore.rules) (deny-all — backend-only access).

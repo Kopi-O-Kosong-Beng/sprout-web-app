@@ -3,6 +3,8 @@
 **Sprout Web Platform · 50.003 ESC · Cohort 3 Team 2**
 This folder is the single workspace for the app. Three spec documents drive everything; code lives in `client/` and `server/` beside them.
 
+> ✅ **Backend + database are set up and working** (TypeScript + Cloud Firestore). Frontend teammates: go straight to [`FRONTEND_HANDOFF.md`](FRONTEND_HANDOFF.md).
+
 ## The three documents (read in this order)
 
 | File | Role | When you touch it |

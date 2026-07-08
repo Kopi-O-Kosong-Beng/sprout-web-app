@@ -6,6 +6,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import errorMiddleware from './middleware/error.middleware';
 import queryRoutes from './routes/query.routes';
+import avatarRoutes from './routes/avatar.routes';
 
 const app = express();
 
@@ -44,8 +45,9 @@ app.get('/api/health', (_req, res) =>
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
 );
 
-// Feature routers (auth/avatar/upload/battle mount here as they land)
+// Feature routers (auth/upload/battle mount here as they land)
 app.use('/api/query', queryRoutes);
+app.use('/api/avatar', avatarRoutes);
 
 // 404 for unknown API paths
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

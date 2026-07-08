@@ -11,6 +11,8 @@
     "migrate": "tsx database/migrate.ts",
     "migrate:rollback": "tsx database/rollback.ts",
     "seed": "tsx database/seed.ts",
+    "seed:firestore": "tsx database/seed-firestore.ts",
+    "inspect": "tsx scripts/inspect-db.ts",
     "test": "jest --runInBand"
   },
   "dependencies": {
