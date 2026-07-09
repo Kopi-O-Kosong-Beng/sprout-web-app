@@ -26,6 +26,128 @@ Frontend: https://sprout-web-app-jet.vercel.app
 Backend:  https://sprout-backend-gyvk.onrender.com
 ```
 
+## How Vercel and Render Know What to Build
+
+Both platforms are connected to the same GitHub repo, but they use different
+instructions.
+
+Vercel reads `vercel.json` and the Vercel project settings:
+
+```json
+{
+  "installCommand": "npm install",
+  "buildCommand": "npm run build -w client",
+  "outputDirectory": "client/dist",
+  "framework": "vite"
+}
+```
+
+This means:
+
+```text
+Install dependencies from the repo root
+Build the client workspace only
+Deploy the generated static files from client/dist
+```
+
+Render reads `render.yaml`:
+
+```yaml
+buildCommand: npm install --include=dev && npm run build -w server
+startCommand: npm start -w server
+```
+
+This means:
+
+```text
+Install dependencies from the repo root
+Build the server workspace only
+Start the backend using server/package.json
+```
+
+Then `server/package.json` runs:
+
+```text
+node dist/server.js
+```
+
+That starts the Express backend.
+
+The `-w` flag means "workspace":
+
+```text
+npm run build -w client  -> run the build script in client/
+npm run build -w server  -> run the build script in server/
+npm start -w server      -> run the start script in server/
+```
+
+So Vercel and Render do not deploy the whole repo in the same way. They both
+clone the repo, but each platform follows its own build and start commands.
+
+## How Vercel and Render Talk to Each Other
+
+Vercel and Render do not directly talk to each other during normal app usage.
+
+The real flow is:
+
+```text
+User browser
+  -> loads frontend files from Vercel
+  -> frontend JavaScript calls the Render backend URL
+  -> Render backend talks to Firestore
+  -> response returns back to the browser
+```
+
+In other words, the browser is the thing that connects the frontend and backend.
+The frontend makes normal HTTPS API requests to Render.
+
+Current runtime flow:
+
+```text
+https://sprout-web-app-jet.vercel.app
+  -> calls
+https://sprout-backend-gyvk.onrender.com/api/...
+  -> reads/writes
+Firebase Firestore
+```
+
+The frontend knows the backend URL because Vercel has this environment variable:
+
+```text
+VITE_API_URL=https://sprout-backend-gyvk.onrender.com
+```
+
+The backend allows the frontend to call it because Render has this environment
+variable:
+
+```text
+CORS_ORIGIN=https://sprout-web-app-jet.vercel.app
+```
+
+These two env vars are the main connection between the Vercel frontend and the
+Render backend.
+
+## Where the Configuration Lives
+
+Some config is committed in the codebase. Some config lives in the platform
+dashboards because it is environment-specific or secret.
+
+| Purpose | Where it lives | Why |
+|---|---|---|
+| Tell Vercel how to build frontend | `vercel.json` | Safe to commit; same for everyone |
+| Tell Render how to build/start backend | `render.yaml` | Safe to commit; same for everyone |
+| Frontend backend URL | Vercel env var `VITE_API_URL` | Different per deployment; baked into frontend at build time |
+| Backend allowed frontend origin | Render env var `CORS_ORIGIN` | Different per frontend URL |
+| Firebase service account | Render env var `FIREBASE_SERVICE_ACCOUNT_JSON` | Secret; never commit |
+| Demo auth bypass switch | Render env vars `DEMO_AUTH_BYPASS`, `DEMO_AUTH_BYPASS_USER_ID` | Temporary deployment setting |
+
+Simple rule:
+
+```text
+Build instructions go in the repo.
+Secrets and deployment-specific URLs go in the platform dashboard.
+```
+
 ## Why Vercel for Frontend?
 
 The frontend is a React + Vite app.
