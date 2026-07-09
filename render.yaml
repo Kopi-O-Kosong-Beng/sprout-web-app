@@ -11,6 +11,8 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: "22.13.1"
       - key: DATASTORE
         value: firestore
       - key: AUTH_DEV_BYPASS

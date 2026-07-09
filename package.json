@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Sprout — Web Platform & B2B Showcase for Nature-Based Gamification (50.003 ESC C3T2)",
+  "engines": {
+    "node": "22.x"
+  },
   "workspaces": [
     "server",
     "client"
