@@ -34,55 +34,158 @@ sprout-app/
 
 | Tool | Check if you have it | If not |
 |---|---|---|
-| **Node.js ≥ 20** | run `node --version` in a terminal | install the LTS from https://nodejs.org |
+| **Node.js 22 LTS** | run `node --version` in a terminal | install the LTS from https://nodejs.org |
 | **Git** | `git --version` | https://git-scm.com/downloads |
 | A terminal | PowerShell (Windows) / Terminal (Mac) | built-in |
 | **Postman** *(optional)* | — | https://www.postman.com/downloads — nice GUI for testing APIs |
 
 > **Windows note:** if `node` isn't recognised after installing, close and reopen your terminal.
 
-## 2. Get it running (copy-paste these)
+## 2. First-time local setup
 
-There are **two ways** to run the database. Pick one:
+Follow this when you clone the repo for the first time.
 
-- **Firestore** (the real one) — needs `serviceAccountKey.json` from Zhi Feng. Use this for real work.
-- **SQLite** (offline fallback) — zero setup, no key, no internet. Great for quick local dev and it's what the tests use.
+### Step 1: Clone and install
 
 ```bash
-# 1. clone and enter
 git clone https://github.com/Kopi-O-Kosong-Beng/sprout-web-app.git
 cd sprout-web-app
-
-# 2. install dependencies (takes a minute)
 npm install
+```
 
-# 3. create your local config file
-cp .env.example server/.env      # Windows: copy in Explorer, rename to .env
+This installs dependencies for both workspaces:
 
-# 4a. FIRESTORE path: put serviceAccountKey.json in server/, then set
-#     DATASTORE=firestore in server/.env  (that's it — no migrate/seed needed;
-#     if the DB is empty, run:  npm run seed:firestore)
+```text
+client/
+server/
+```
 
-# 4b. SQLITE path: set DATASTORE=sqlite in server/.env, then:
-npm run migrate
-npm run seed
+### Step 2: Create backend env file
 
-# 5. start the backend (works the same either way)
-npm run dev
+Copy the root example env into `server/.env`:
+
+```bash
+cp .env.example server/.env
+```
+
+Windows option: copy `.env.example` in File Explorer, paste it inside
+`server/`, then rename it to `.env`.
+
+Pick one datastore:
+
+| Option | When to use | What to do |
+|---|---|---|
+| Firestore | Real shared backend data | Get `serviceAccountKey.json` privately from Zhi Feng, put it in `server/`, set `DATASTORE=firestore` in `server/.env` |
+| SQLite | Offline local testing | Set `DATASTORE=sqlite` in `server/.env`, then run `npm run migrate && npm run seed` |
+
+For local frontend work before Firebase login is implemented, keep this in
+`server/.env`:
+
+```text
+AUTH_DEV_BYPASS=true
+```
+
+That lets local requests use:
+
+```text
+x-dev-uid: demo-user-0001
+```
+
+If Firestore is empty, seed it with:
+
+```bash
+npm run seed:firestore -w server
+```
+
+### Step 3: Create frontend env file
+
+Copy the frontend example env:
+
+```bash
+cp client/.env.example client/.env.local
+```
+
+Windows option: copy `client/.env.example`, paste it in `client/`, then rename
+the copy to `.env.local`.
+
+For local development, `client/.env.local` should contain:
+
+```text
+VITE_API_URL=http://localhost:3001
+```
+
+This tells the Vite frontend where the local backend is running.
+
+### Step 4: Start the backend
+
+In terminal 1:
+
+```bash
+npm run dev:server
 ```
 
 You should see:
 
-```
-Sprout backend listening on http://localhost:3001 (datastore: firestore)
+```text
+Sprout backend listening on http://localhost:3001
 Health check: http://localhost:3001/api/health
 ```
 
-**Verify it works:** open http://localhost:3001/api/health in your browser → you should see `{"status":"ok","timestamp":"..."}`. 🎉
+Verify backend:
 
-> `cp` not working on Windows? Just copy the file in File Explorer: duplicate `.env.example`, move it into `server/`, rename it to `.env` (exactly — no `.txt` at the end).
+```text
+http://localhost:3001/api/health
+```
 
-**See what's in the database anytime:** `npm run inspect` (works for whichever datastore is active).
+Expected:
+
+```json
+{ "status": "ok", "timestamp": "..." }
+```
+
+### Step 5: Start the frontend
+
+In terminal 2:
+
+```bash
+npm run dev:client
+```
+
+Vite should print a local URL, usually:
+
+```text
+http://localhost:5173
+```
+
+Open that URL in the browser.
+
+### Step 6: Quick local checks
+
+Backend health should work:
+
+```bash
+curl http://localhost:3001/api/health
+```
+
+Query submit should return a ticket reference:
+
+```bash
+curl -X POST http://localhost:3001/api/query/submit \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"Local Smoke\",\"email\":\"local@example.com\",\"category\":\"general\",\"message\":\"Local setup test\"}"
+```
+
+Avatar demo data should work while `AUTH_DEV_BYPASS=true`:
+
+```bash
+curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
+```
+
+See the database anytime:
+
+```bash
+npm run inspect -w server
+```
 
 ## 3. Try the API
 
