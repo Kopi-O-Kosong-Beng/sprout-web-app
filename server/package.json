@@ -2,10 +2,14 @@
   "name": "server",
   "version": "0.1.0",
   "private": true,
-  "main": "server.ts",
+  "main": "dist/server.js",
+  "engines": {
+    "node": ">=20 <25"
+  },
   "scripts": {
     "dev": "tsx watch server.ts",
-    "start": "tsx server.ts",
+    "start": "node dist/server.js",
+    "start:ts": "tsx server.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "migrate": "tsx database/migrate.ts",

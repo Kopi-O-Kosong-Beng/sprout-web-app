@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: sprout-backend
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install --include=dev && npm run build -w server
+    startCommand: npm start -w server
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATASTORE
+        value: firestore
+      - key: AUTH_DEV_BYPASS
+        value: "false"
+      - key: EMAIL_MODE
+        value: console
+      - key: USE_MOCK_APIS
+        value: "true"
+      - key: MIN_CONFIDENCE_THRESHOLD
+        value: "0.70"
+      - key: CORS_ORIGIN
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false

@@ -14,6 +14,19 @@ You need `serviceAccountKey.json` (Zhi Feng sends it privately — it's a secret
 - **Yes** → the web backend should use *that* project (or mirror its Firestore schema) — the shared project literally IS the "cross-platform account database" P0 feature. Get: project access (added as Editor), and the current Firestore collection structure for users/plants.
 - **No / it's separate** → create a fresh dev project (steps below) and *we* define the shared schema — mobile adopts it later.
 
+## Production hosting secret
+
+Do **not** commit or upload `serviceAccountKey.json` as a repo file for production. On hosts such as Render, set `FIREBASE_SERVICE_ACCOUNT_JSON` to the full service-account JSON as a secret environment variable, plus:
+
+```
+DATASTORE=firestore
+NODE_ENV=production
+AUTH_DEV_BYPASS=false
+CORS_ORIGIN=https://your-vercel-frontend.vercel.app
+```
+
+`FIREBASE_SERVICE_ACCOUNT_BASE64` is also supported if the host handles multiline JSON poorly: base64-encode the JSON file contents and set that env var instead.
+
 ## Steps (fresh project path)
 
 1. Go to https://console.firebase.google.com → **Add project** → name it `sprout-dev` → Google Analytics off (not needed)
