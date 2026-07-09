@@ -6,6 +6,8 @@
 
 This README assumes **zero prior setup** — follow it top to bottom and you'll have the backend running locally in ~10 minutes. If something breaks, check [Common problems](#common-problems) before pinging the chat.
 
+> **Deploying or explaining hosting? Read [`DEPLOYMENT.md`](DEPLOYMENT.md)** for the simple Vercel + Render setup, env vars, CORS, and demo auth bypass.
+
 ---
 
 ## 0. What's in this repo?
