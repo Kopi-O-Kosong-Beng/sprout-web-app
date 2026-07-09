@@ -12,3 +12,6 @@ dist/
 .DS_Store
 **/*firebase-adminsdk*.json
 **/sprout-dev-*.json
+
+.env.local
+.env.*.local
