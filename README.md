@@ -97,6 +97,19 @@ If Firestore is empty, seed it with:
 npm run seed:firestore -w server
 ```
 
+To make the auth test panel login as the seeded avatar owner, also run:
+
+```bash
+npm run seed:firebase-auth-demo -w server
+```
+
+Demo login:
+
+```text
+email: demo@sprout.app
+password: Password123!
+```
+
 ### Step 3: Create frontend env file
 
 Copy the frontend example env:
@@ -112,9 +125,16 @@ For local development, `client/.env.local` should contain:
 
 ```text
 VITE_API_URL=http://localhost:3001
+VITE_FIREBASE_API_KEY=<from Firebase web app config>
+VITE_FIREBASE_AUTH_DOMAIN=<from Firebase web app config>
+VITE_FIREBASE_PROJECT_ID=<from Firebase web app config>
+VITE_FIREBASE_APP_ID=<from Firebase web app config>
 ```
 
-This tells the Vite frontend where the local backend is running.
+`VITE_API_URL` tells the Vite frontend where the local backend is running. The
+`VITE_FIREBASE_*` values are the Firebase **web app config**, not the secret
+service account. They are safe for frontend code and are needed for the auth
+test panel.
 
 ### Step 4: Start the backend
 
@@ -218,10 +238,14 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 | Method | Endpoint | Auth | What it does |
 |---|---|---|---|
 | GET | `/api/health` | — | liveness ping |
+| POST | `/api/auth/signup` | — | create Firebase Auth user + profile |
+| GET | `/api/auth/me` | Bearer token | current authenticated profile |
+| POST | `/api/auth/request-reset` | — | send 6-digit OTP via email log/SMTP |
+| POST | `/api/auth/verify-reset` | — | verify OTP and update password |
 | POST | `/api/query/submit` | — | create query ticket → `{refNumber}` |
 | GET | `/api/avatar` | yes | list caller's avatars (paginated) |
 | GET | `/api/avatar/:id` | yes | one avatar (ownership-checked) |
-| *(next)* | `/api/auth/*`, `/api/upload/plant`, `/api/battle/*` | Bearer token | per `requirements.md` |
+| *(next)* | `/api/upload/plant`, `/api/battle/*` | Bearer token | per `requirements.md` |
 
 The **exact** request/response contracts (status codes, error strings, limits like "5 MB", "10 attempts / 15 min") live in `requirements.md` — the tests assert those exact values, so code against the doc, not from memory. Frontend integration details: [`FRONTEND_HANDOFF.md`](FRONTEND_HANDOFF.md).
 
@@ -233,7 +257,7 @@ The **database is Cloud Firestore** (Firebase) — the real cross-platform datab
 - **SQLite** — set `DATASTORE=sqlite`, run `npm run migrate && npm run seed`. A local file, zero accounts, no internet. Perfect for offline work; it's also what the automated tests use.
 - All persistence goes through `server/repositories/` — **never** import Knex/Firestore directly in a service or controller. That seam is what makes the two datastores interchangeable (the same API code runs on both). Full Firebase steps: [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
 
-**Auth (for frontend work):** users sign in with the **Firebase JS SDK** in the React app (email/password + Google), grab the ID token, and send it as `Authorization: Bearer <idToken>` on every API call. The exact snippet is in `server/FIREBASE_SETUP.md` § "For the frontend teammate".
+**Auth (for frontend work):** users sign in with the **Firebase JS SDK** in the React app, grab the ID token, and send it as `Authorization: Bearer <idToken>` on every protected API call. The current demo flow uses email/password; other Firebase sign-in providers can be added later without changing the backend token-verification pattern.
 
 ## 6. Backend layout (where to put things)
 
@@ -274,7 +298,7 @@ Rule of thumb: routes stay thin → controllers translate HTTP → services do t
 | `no such table: query_tickets` | SQLite mode and you skipped `npm run migrate` |
 | Startup error mentioning Firebase / credentials | `DATASTORE=firestore` but `serviceAccountKey.json` is missing — add the key, or switch to `DATASTORE=sqlite` |
 | `The query requires an index` from Firestore | shouldn't happen with current code (we sort in-memory); if a new query hits it, click the link in the error to create the index, or sort in the app |
-| `401 Unauthorised` on `/api/avatar` | send header `x-dev-uid: demo-user-0001` (dev) and ensure `AUTH_DEV_BYPASS=true` in `server/.env` |
+| `401 Unauthorised` on `/api/avatar` | preferred: login in the auth test panel and send the Firebase ID token. Fallback: send `x-dev-uid: demo-user-0001` in dev with `AUTH_DEV_BYPASS=true` |
 | test.html says "Backend not reachable" | Backend isn't running (`npm run dev`), or it's on a different port |
 | "Failed to fetch" in browser but Postman works | CORS — dev server allows origins `:5173` and `:5500` only; serve your page from one of those (Vite / Live Server) |
 | `.env` questions | Never commit `server/.env` or `serviceAccountKey.json`. They're gitignored on purpose. `.env.example` shows what keys exist |

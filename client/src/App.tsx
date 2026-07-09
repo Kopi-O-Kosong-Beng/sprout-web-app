@@ -1,4 +1,5 @@
 import HealthStatus from './components/HealthStatus';
+import AuthPanel from './components/AuthPanel';
 import AvatarPanel from './components/AvatarPanel';
 import TicketPanel from './components/TicketPanel';
 import './App.css';
@@ -18,6 +19,7 @@ function App() {
       <HealthStatus />
 
       <main>
+        <AuthPanel />
         <AvatarPanel />
         <TicketPanel />
       </main>

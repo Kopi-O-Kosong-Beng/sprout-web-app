@@ -27,10 +27,10 @@ export default function AvatarPanel() {
     <section className="panel">
       <h2>GET /api/avatar</h2>
       <p className="panel-hint">
-        Protected route. Uses the <code>x-dev-uid</code> dev bypass (
-        <code>AUTH_DEV_BYPASS=true</code>) in place of a real Firebase login —
-        see <code>server/middleware/auth.middleware.ts</code>. Seeded demo
-        data belongs to <code>demo-user-0001</code>.
+        Protected route fallback test. Uses the <code>x-dev-uid</code> dev
+        bypass (<code>AUTH_DEV_BYPASS=true</code>) when you are not testing a
+        real Firebase token in the auth panel. Seeded demo data belongs to{' '}
+        <code>demo-user-0001</code>.
       </p>
 
       <label>
@@ -42,7 +42,7 @@ export default function AvatarPanel() {
         />
       </label>
       <button type="button" onClick={fetchAvatars} disabled={loading || !devUid.trim()}>
-        {loading ? 'Fetching…' : 'Fetch avatars'}
+        {loading ? 'Fetching...' : 'Fetch avatars'}
       </button>
 
       {error && <div className="result result-err">{error}</div>}
@@ -50,7 +50,7 @@ export default function AvatarPanel() {
       {result && (
         <div className="result result-ok">
           <p>
-            {result.total} avatar(s) — page {result.page}, pageSize {result.pageSize}
+            {result.total} avatar(s) - page {result.page}, pageSize {result.pageSize}
           </p>
           {result.items.length === 0 ? (
             <p>No avatars for this user.</p>
@@ -60,12 +60,12 @@ export default function AvatarPanel() {
                 <li key={a.id} className="avatar-card">
                   <div className="avatar-name">{a.speciesName}</div>
                   <div className="avatar-meta">
-                    {a.speciesFamily ?? 'Unknown family'} · {a.source}
-                    {a.isTemporary ? ' · temporary' : ''}
+                    {a.speciesFamily ?? 'Unknown family'} - {a.source}
+                    {a.isTemporary ? ' - temporary' : ''}
                   </div>
                   <div className="avatar-stats">
-                    HP {a.stats.hp} · ATK {a.stats.attack} · DEF {a.stats.defense} · SPD{' '}
-                    {a.stats.speed}
+                    HP {a.stats.hp} - ATK {a.stats.attack} - DEF {a.stats.defense} -
+                    SPD {a.stats.speed}
                   </div>
                 </li>
               ))}

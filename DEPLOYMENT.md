@@ -146,6 +146,7 @@ Some settings are safe to commit. Others must stay in the platform dashboard.
 | Tell Vercel how to build frontend | `vercel.json` | Safe repo config |
 | Tell Render how to build/start backend | `render.yaml` | Safe repo config |
 | Frontend backend URL | Vercel env var `VITE_API_URL` | Depends on deployed backend URL |
+| Frontend Firebase web config | Vercel env vars `VITE_FIREBASE_*` | Safe frontend config, but deployment-specific |
 | Backend allowed frontend origin | Render env var `CORS_ORIGIN` | Depends on deployed frontend URL |
 | Firebase service account | Render env var `FIREBASE_SERVICE_ACCOUNT_JSON` | Secret; never commit |
 | Demo auth bypass | Render env vars `DEMO_AUTH_BYPASS`, `DEMO_AUTH_BYPASS_USER_ID` | Temporary demo-only setting |
@@ -223,13 +224,18 @@ Environment variable:
 
 ```text
 VITE_API_URL=https://sprout-backend-gyvk.onrender.com
+VITE_FIREBASE_API_KEY=<Firebase web app config>
+VITE_FIREBASE_AUTH_DOMAIN=<Firebase web app config>
+VITE_FIREBASE_PROJECT_ID=<Firebase web app config>
+VITE_FIREBASE_APP_ID=<Firebase web app config>
 ```
 
 Important: Vite only exposes frontend env vars that start with `VITE_`. That is
-why the name is `VITE_API_URL`, not just `API_URL`.
+why these names start with `VITE_`. The Firebase values are the safe frontend
+web app config, not the backend service account.
 
-After changing `VITE_API_URL`, redeploy Vercel. Vite bakes env vars into the
-frontend during build.
+After changing any `VITE_*` value, redeploy Vercel. Vite bakes env vars into
+the frontend during build.
 
 ## Render Settings
 
@@ -256,11 +262,22 @@ CORS_ORIGIN=https://sprout-web-app-jet.vercel.app
 Do not commit `server/serviceAccountKey.json`. For production, paste the service
 account JSON into Render as `FIREBASE_SERVICE_ACCOUNT_JSON`.
 
-## Temporary Demo Auth Bypass
+## Auth Demo And Temporary Bypass
 
-Real Firebase login is not wired into the frontend yet.
+The React test page can now use real Firebase login. Seed the matching demo
+Firebase Auth user before demos:
 
-For demo purposes only, Render currently allows the seeded demo user:
+```bash
+npm run seed:firebase-auth-demo -w server
+```
+
+Demo login:
+
+```text
+demo@sprout.app / Password123!
+```
+
+For fallback demos only, Render can still allow the seeded demo user via header:
 
 ```text
 DEMO_AUTH_BYPASS=true
@@ -273,7 +290,7 @@ Then protected avatar requests can use:
 x-dev-uid: demo-user-0001
 ```
 
-When Firebase login is implemented, turn the bypass off in Render:
+When relying on real Firebase login, turn the bypass off in Render:
 
 ```text
 DEMO_AUTH_BYPASS=false
@@ -310,8 +327,8 @@ Use this checklist after changing deployment settings.
 1. Push latest code to `main`.
 2. Confirm Render deployed the latest commit.
 3. Confirm Render env vars are correct.
-4. Confirm Vercel has `VITE_API_URL`.
-5. Redeploy Vercel after changing `VITE_API_URL`.
+4. Confirm Vercel has `VITE_API_URL` and all `VITE_FIREBASE_*` values.
+5. Redeploy Vercel after changing any `VITE_*` value.
 6. Redeploy Render after changing Render env vars.
 7. Run the smoke tests below.
 
@@ -367,6 +384,7 @@ Expected after real Firebase login is enforced:
 | Problem | Most likely cause | Fix |
 |---|---|---|
 | Frontend still calls `http://localhost:3001` | `VITE_API_URL` was missing during Vercel build | Set `VITE_API_URL` in Vercel and redeploy |
+| Firebase login does not initialize | `VITE_FIREBASE_*` values are missing | Add Firebase web config env vars in Vercel and redeploy |
 | Browser shows CORS error | Render `CORS_ORIGIN` is wrong | Set it to `https://sprout-web-app-jet.vercel.app` without trailing slash |
 | `/api/avatar` returns `401` during demo | Demo bypass is off or Render did not redeploy | Set `DEMO_AUTH_BYPASS=true`, then redeploy Render |
 | `/api/health` works but Firestore routes fail | Firebase secret issue | Check `FIREBASE_SERVICE_ACCOUNT_JSON` in Render |

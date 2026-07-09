@@ -1,8 +1,5 @@
 import apiClient from './apiClient';
 
-// Mirrors server/models/avatar.ts and server/models/ticket.ts — keep in sync
-// with the backend if those interfaces change.
-
 export interface HealthResponse {
   status: string;
   timestamp: string;
@@ -56,13 +53,36 @@ export interface TicketResponse {
   refNumber: string;
 }
 
+export interface SignupInput {
+  email: string;
+  password: string;
+  displayName: string;
+}
+
+export interface SignupResponse {
+  uid: string;
+  email: string;
+  displayName: string;
+  emailVerified: boolean;
+  message: string;
+}
+
+export interface AuthProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  emailVerified: boolean;
+}
+
+export interface MessageResponse {
+  message: string;
+}
+
 export async function checkHealth(): Promise<HealthResponse> {
   const { data } = await apiClient.get<HealthResponse>('/api/health');
   return data;
 }
 
-/** GET /api/avatar — protected route. devUid is sent as x-dev-uid, the
- *  AUTH_DEV_BYPASS escape hatch in auth.middleware.ts (local/dev only). */
 export async function listAvatars(
   devUid: string,
   page = 1,
@@ -75,8 +95,50 @@ export async function listAvatars(
   return data;
 }
 
-/** POST /api/query/submit — public route, no auth required. */
+export async function listAvatarsWithToken(
+  idToken: string,
+  page = 1,
+  pageSize = 20
+): Promise<PaginatedAvatars> {
+  const { data } = await apiClient.get<PaginatedAvatars>('/api/avatar', {
+    params: { page, pageSize },
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  return data;
+}
+
 export async function submitTicket(input: TicketInput): Promise<TicketResponse> {
   const { data } = await apiClient.post<TicketResponse>('/api/query/submit', input);
+  return data;
+}
+
+export async function signupUser(input: SignupInput): Promise<SignupResponse> {
+  const { data } = await apiClient.post<SignupResponse>('/api/auth/signup', input);
+  return data;
+}
+
+export async function getCurrentUser(idToken: string): Promise<AuthProfile> {
+  const { data } = await apiClient.get<AuthProfile>('/api/auth/me', {
+    headers: { Authorization: `Bearer ${idToken}` },
+  });
+  return data;
+}
+
+export async function requestPasswordReset(email: string): Promise<MessageResponse> {
+  const { data } = await apiClient.post<MessageResponse>('/api/auth/request-reset', {
+    email,
+  });
+  return data;
+}
+
+export async function verifyPasswordReset(input: {
+  email: string;
+  otp: string;
+  newPassword: string;
+}): Promise<MessageResponse> {
+  const { data } = await apiClient.post<MessageResponse>(
+    '/api/auth/verify-reset',
+    input
+  );
   return data;
 }

@@ -63,6 +63,10 @@ const authMiddleware: RequestHandler = async (req, res, next) => {
     // Lazy import so SQLite/test processes never load firebase-admin.
     const { getAuthAdmin } = await import('../firebase');
     const decoded: DecodedIdToken = await getAuthAdmin().verifyIdToken(token);
+    if (decoded.email && decoded.email_verified !== true) {
+      res.status(403).json({ error: 'Email is not verified.' });
+      return;
+    }
     req.user = {
       uid: decoded.uid,
       email: decoded.email,

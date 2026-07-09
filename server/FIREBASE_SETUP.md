@@ -33,7 +33,7 @@ CORS_ORIGIN=https://your-vercel-frontend.vercel.app
 
 1. Go to https://console.firebase.google.com → **Add project** → name it `sprout-dev` → Google Analytics off (not needed)
 2. **Build → Firestore Database → Create database** → Start in **production mode** (deny-all — correct, since only our backend touches it) → location **asia-southeast1 (Singapore)**
-3. **Build → Authentication → Get started** → enable **Email/Password** and **Google** sign-in providers
+3. **Build → Authentication → Get started** → enable **Email/Password**. Google sign-in can be enabled later when the real UI supports it.
 4. **Project settings (gear) → Service accounts → Generate new private key** → save the downloaded file as:
    ```
    sprout-app/server/serviceAccountKey.json
@@ -51,6 +51,7 @@ CORS_ORIGIN=https://your-vercel-frontend.vercel.app
 They need the **web app config** (not the service account!):
 - Project settings → **Your apps → Add app → Web (</>)** → register `sprout-web`
 - Copy the `firebaseConfig` object (apiKey, authDomain, projectId, …) — this is safe to put in frontend code
+- Put those values in `client/.env.local` as `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, and `VITE_FIREBASE_APP_ID`
 - Frontend signs in with the Firebase JS SDK, then calls our API:
   ```ts
   import { initializeApp } from 'firebase/app';
@@ -64,6 +65,18 @@ They need the **web app config** (not the service account!):
     headers: { Authorization: `Bearer ${idToken}` },
   });
   ```
+
+For the built-in auth demo user, run:
+
+```bash
+npm run seed:firebase-auth-demo -w server
+```
+
+Then log in from the React test page with:
+
+```text
+demo@sprout.app / Password123!
+```
 
 ## Security rules (paste in Firestore → Rules)
 
@@ -87,9 +100,8 @@ service cloud.firestore {
 | `query_tickets` | Contact Us tickets | `ticket.repo.firestore.ts` ✅ built |
 | `counters` | Atomic daily ticket sequence | `ticket.repo.firestore.ts` ✅ built |
 | `avatar_records` | Plant avatars (mobile + web, isTemporary flag) | `avatar.repo.firestore.ts` ✅ built (read) |
-| `users` | Profile docs keyed by Firebase Auth uid | seeded ✅; write path with auth flow (next) |
-| `password_resets` | OTP hashes + TTL for UC3 custom reset | auth flow (next) |
-| `password_history` | Last-3 reset password hashes per user | auth flow (next) |
+| `users` | Profile docs keyed by Firebase Auth uid, plus reset OTP hash/TTL fields | seeded ✅; auth flow built |
+| `password_history` | Last-3 reset password hashes per user | auth flow built |
 | `battle_sessions` | PVE battle state | battle repo (later) |
 
 Security rules to publish: see [`../firestore.rules`](../firestore.rules) (deny-all — backend-only access).

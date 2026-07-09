@@ -1,115 +1,112 @@
-# 🤝 Frontend Handoff — start here
+# Frontend Handoff
 
-**Backend + database are set up and working.** This doc is everything you need to build the frontend without waiting on Zhi Feng. Read it once, top to bottom.
+This is the fast-start guide for teammates building the real React UI.
 
----
+## What Exists Today
 
-## TL;DR
+The repo already has:
 
-- Backend runs on **`http://localhost:3001`**, database is **Cloud Firestore** (already connected, already has demo data)
-- You build the React app in **`client/`** (see [Getting the frontend started](#getting-the-frontend-started))
-- Call the API with **axios**; for now you can act as the demo user with **one header** — no login needed yet
-- Live endpoints today: **health**, **submit query ticket**, **list/get avatars**. More land over time; the contract for all of them is in `requirements.md`.
+```text
+client/  -> React + Vite test app
+server/  -> Express + TypeScript backend
+Firebase -> Firestore + Firebase Auth
+```
 
----
+The current React app is intentionally a **backend test page**, not the final
+product UI. It exists so frontend/design teammates can see the API flows working
+before building polished screens.
 
-## 1. Run the backend (once, ~3 min)
+## First Local Run
 
-You need the Firebase key from Zhi Feng (a file called `serviceAccountKey.json`). **He sends it to you privately — it's a secret, never put it in Git or the group chat.** Put it in `sprout-app/server/`.
+From the repo root:
 
 ```bash
-git clone https://github.com/Kopi-O-Kosong-Beng/sprout-web-app.git
-cd sprout-web-app
 npm install
-cp .env.example server/.env          # Windows: copy the file in Explorer, rename to .env
-# put serviceAccountKey.json into server/
-# open server/.env and set:  DATASTORE=firestore
-npm run dev
+cp .env.example server/.env
+cp client/.env.example client/.env.local
 ```
 
-You should see `Sprout backend listening on http://localhost:3001 (datastore: firestore)`.
-Check it: open http://localhost:3001/api/health → `{"status":"ok",...}`.
+Windows option: copy the files in Explorer and rename the copies manually.
 
-> **Don't have the key yet / want to work offline?** Set `DATASTORE=sqlite` in `server/.env`, then `npm run migrate && npm run seed`. Everything below works identically against a local file — no Firebase needed. Switch back to `firestore` anytime.
+Backend env:
 
-## 2. See what's in the database
+```text
+server/.env
+DATASTORE=firestore
+FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json
+AUTH_DEV_BYPASS=true
+EMAIL_MODE=console
+```
+
+Put the private backend service account at:
+
+```text
+server/serviceAccountKey.json
+```
+
+Never commit that file.
+
+Frontend env:
+
+```text
+client/.env.local
+VITE_API_URL=http://localhost:3001
+VITE_FIREBASE_API_KEY=<Firebase web config>
+VITE_FIREBASE_AUTH_DOMAIN=<Firebase web config>
+VITE_FIREBASE_PROJECT_ID=<Firebase web config>
+VITE_FIREBASE_APP_ID=<Firebase web config>
+```
+
+The `VITE_FIREBASE_*` values are the Firebase **web app config**, not the
+backend service account. They are safe to use in frontend code.
+
+Run:
 
 ```bash
-npm run inspect      # prints users, avatars, tickets from whichever datastore is active
+npm run dev:server
+npm run dev:client
 ```
 
-Or open the **Firebase console → Firestore Database** to click through `users`, `avatar_records`, `query_tickets` visually.
+Use two terminals.
 
-Demo data already seeded: **1 user** (`demo@sprout.app`, id `demo-user-0001`) with **5 avatars**.
+## Demo Auth User
 
-## 3. Calling the API from React
+To test login with real Firebase Auth and still see seeded avatars:
 
-### Auth right now: the dev shortcut
-
-Full login is Firebase Auth (below), but it's not wired yet. So the backend has a **dev-only shortcut**: send the header `x-dev-uid: demo-user-0001` and the backend treats you as the demo user. This lets you build and test the avatar archive page **today**, before any login screen exists.
-
-```ts
-// client/src/services/apiClient.ts
-import axios from 'axios';
-
-export const api = axios.create({ baseURL: 'http://localhost:3001' });
-
-// TEMPORARY dev auth — remove once Firebase login is wired (see §4)
-api.defaults.headers.common['x-dev-uid'] = 'demo-user-0001';
+```bash
+npm run seed:firestore -w server
+npm run seed:firebase-auth-demo -w server
 ```
 
-```ts
-// example: fetch the avatar archive
-const { data } = await api.get('/api/avatar');       // { items, page, pageSize, total }
-data.items.forEach(a => console.log(a.speciesName, a.stats.hp));
+Then use:
+
+```text
+email: demo@sprout.app
+password: Password123!
 ```
 
-> The dev shortcut only works while `AUTH_DEV_BYPASS=true` in `server/.env` and never in production. It's just scaffolding so you're not blocked.
+This Firebase Auth user has UID:
 
-### Auth later: real Firebase login (§4)
-
-When we wire real auth, you swap the dev header for a real Firebase ID token — see [§4](#4-real-auth-when-were-ready).
-
-## 4. Endpoints available now
-
-Base URL `http://localhost:3001`. Full contracts (exact error strings, limits) are in `requirements.md`.
-
-| Method | Endpoint | Auth | Request | Response |
-|---|---|---|---|---|
-| GET | `/api/health` | none | — | `{ status, timestamp }` |
-| POST | `/api/query/submit` | none | `{ name, email, category, message }` | `201 { refNumber }` |
-| GET | `/api/avatar` | yes | `?page=1&pageSize=20` | `{ items: Avatar[], page, pageSize, total }` |
-| GET | `/api/avatar/:id` | yes | — | `Avatar` or `404` |
-
-**`category`** must be one of: `general`, `bug`, `billing`, `partnership`, `other`.
-**`message`** max 2000 chars. Invalid input → `400 { error: "..." }`.
-
-**Avatar shape:**
-```ts
-interface Avatar {
-  id: string;
-  userId: string;
-  speciesName: string;
-  speciesFamily: string | null;
-  spriteUrl: string;              // e.g. "/static/sprites/quercus-robur.png"
-  discoveredAt: string;           // ISO date
-  source: 'mobile' | 'web';       // 'web' uploads are temporary
-  isTemporary: boolean;
-  expiresAt: string | null;
-  stats: { hp: number; attack: number; defense: number; speed: number };
-  metadata: Record<string, unknown> | null;
-}
+```text
+demo-user-0001
 ```
 
-> `spriteUrl` points at placeholder paths for now (real sprite images come with the upload pipeline later). Use a placeholder image in the UI if the file 404s.
+That matches the seeded avatar owner.
 
-### Coming soon (contracts already written in `requirements.md`, code lands over the sprints)
+## Auth Flow For The Real UI
 
-`POST /api/auth/*` (signup/login/reset) · `POST /api/upload/plant` (GenAI sprite) · `POST /api/battle/pve/*`. Build the pages against the documented contracts; when the endpoint lands it'll match.
+The real frontend should use Firebase-first auth:
 
-## 5. Real auth (when we're ready)
+```text
+1. User signs up through POST /api/auth/signup.
+2. Backend creates Firebase Auth user and sends verification link.
+3. User opens verification link from email.
+4. Frontend logs in with Firebase JS SDK.
+5. Frontend gets Firebase ID token.
+6. Frontend sends Authorization: Bearer <idToken> to protected backend routes.
+```
 
-The frontend owns login via the **Firebase JS SDK** (Zhi Feng will share the web config — the safe-to-commit `firebaseConfig`, different from the secret key):
+Login example:
 
 ```ts
 import { initializeApp } from 'firebase/app';
@@ -119,38 +116,85 @@ const auth = getAuth(initializeApp(firebaseConfig));
 const cred = await signInWithEmailAndPassword(auth, email, password);
 const idToken = await cred.user.getIdToken();
 
-// then send it instead of the dev header:
-api.defaults.headers.common['Authorization'] = `Bearer ${idToken}`;
+api.defaults.headers.common.Authorization = `Bearer ${idToken}`;
 ```
 
-The backend verifies that token and knows who you are. Google sign-in (`signInWithPopup`) works the same way.
+Protected route example:
 
-## 6. Getting the frontend started
-
-The `client/` app isn't scaffolded yet (it's Task 10 in `tasks.md`). When you start:
-
-```bash
-cd sprout-app
-npm create vite@latest client -- --template react-ts
-cd client && npm install react-router-dom axios @tanstack/react-query
+```ts
+const { data } = await api.get('/api/avatar', {
+  headers: { Authorization: `Bearer ${idToken}` },
+});
 ```
 
-Suggested first page to build: the **Contact Us form** (maps to `POST /api/query/submit`, no auth) or the **Avatar Archive** (maps to `GET /api/avatar`, use the dev header). Both have working backends right now.
+## Auth Endpoints
 
-Design system (colors, fonts, mockups) is in the knowledge base repo → `03 Design/UI Design System`.
+Base URL locally:
 
-## 7. If something breaks
+```text
+http://localhost:3001
+```
+
+| Method | Endpoint | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/api/auth/signup` | none | Create Firebase user + backend profile |
+| `GET` | `/api/auth/me` | Bearer token | Get current profile |
+| `POST` | `/api/auth/request-reset` | none | Send OTP to email/log |
+| `POST` | `/api/auth/verify-reset` | none | Verify OTP and update password |
+| `GET` | `/api/avatar` | Bearer token | Fetch current user's avatars |
+| `POST` | `/api/query/submit` | none | Submit contact/query ticket |
+
+## Password Reset Flow
+
+For local demo, `EMAIL_MODE=console` prints the OTP in the backend terminal.
+
+Frontend flow:
+
+```text
+1. User enters email.
+2. Call POST /api/auth/request-reset.
+3. User enters OTP from email.
+4. User enters new password.
+5. Call POST /api/auth/verify-reset.
+6. User logs in with Firebase using the new password.
+```
+
+The backend always returns success from request-reset even if the email is not
+registered. That avoids leaking account existence.
+
+## Temporary Dev Bypass
+
+The old avatar test can still use:
+
+```text
+x-dev-uid: demo-user-0001
+```
+
+That only works when:
+
+```text
+AUTH_DEV_BYPASS=true
+NODE_ENV is not production
+```
+
+The real UI should use Firebase ID tokens instead.
+
+## Common Problems
 
 | Problem | Fix |
 |---|---|
-| `http://localhost:3001/api/health` doesn't load | backend isn't running — `npm run dev` in the repo root |
-| Avatar calls return `401` | you didn't send `x-dev-uid` (or `AUTH_DEV_BYPASS` isn't `true` in `server/.env`) |
-| `Failed to fetch` in browser, works in Postman | CORS — serve your app from `http://localhost:5173` (Vite default) |
-| Backend won't start, mentions Firebase/credential | `serviceAccountKey.json` missing or `DATASTORE=firestore` without the key — either add the key or use `DATASTORE=sqlite` |
-| Want to reset demo data | `npm run seed:firestore` (or `npm run seed` for sqlite) |
+| Frontend calls `localhost:3001` in production | Set `VITE_API_URL` in Vercel and redeploy |
+| Login button says Firebase config missing | Fill `client/.env.local` with `VITE_FIREBASE_*` values |
+| `/api/auth/me` returns `401` | No Firebase ID token was sent |
+| `/api/auth/me` returns `403` | User email is not verified yet; open verification link and refresh token |
+| Avatar list is empty after login | Use the seeded demo user or create avatars for that Firebase UID |
+| Reset OTP not visible | Check backend terminal logs with `EMAIL_MODE=console` |
 
-Still stuck after this doc? Screenshot the **full** terminal/console error into the chat. This doc + `requirements.md` should answer almost everything.
+Related docs:
 
----
-
-**Related:** `SPECS.md` (how the specs work) · `requirements.md` (exact API contracts) · `README.md` (full setup) · `server/FIREBASE_SETUP.md` (Firebase details)
+```text
+README.md
+DEPLOYMENT.md
+server/FIREBASE_SETUP.md
+requirements.md
+```

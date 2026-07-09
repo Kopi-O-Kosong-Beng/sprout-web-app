@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import errorMiddleware from './middleware/error.middleware';
+import authRoutes from './routes/auth.routes';
 import queryRoutes from './routes/query.routes';
 import avatarRoutes from './routes/avatar.routes';
 
@@ -46,6 +47,7 @@ app.get('/api/health', (_req, res) =>
 );
 
 // Feature routers (auth/upload/battle mount here as they land)
+app.use('/api/auth', authRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/avatar', avatarRoutes);
 

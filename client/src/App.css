@@ -82,6 +82,11 @@ main {
   margin: 0 0 6px;
 }
 
+.panel h3 {
+  font-size: 14px;
+  margin: 0 0 10px;
+}
+
 .panel-hint {
   font-size: 13px;
   color: #666;
@@ -135,6 +140,22 @@ button {
 button:disabled {
   background: #a7d7b8;
   cursor: not-allowed;
+}
+
+.auth-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.auth-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.auth-card button {
+  margin-right: 8px;
 }
 
 .result {
