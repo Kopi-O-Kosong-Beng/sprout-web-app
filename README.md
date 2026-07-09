@@ -19,10 +19,11 @@ sprout-app/
 ├── process.md         ← WHY (product context, priorities, prof feedback decisions §14)
 ├── tasks.md           ← ORDER (22 tasks with checkboxes + suggested owners)
 ├── FRONTEND_HANDOFF.md ← frontend teammates: your fast-start guide
+├── DEPLOYMENT.md       ← production hosting guide (Vercel + Render)
 ├── firestore.rules     ← Firestore security rules (deny-all; backend-only access)
 ├── test.html          ← throwaway browser form for poking the API by hand
 ├── server/            ← the Express + TypeScript backend (working — see below)
-└── client/            ← the React frontend (not created yet — Task 10+)
+└── client/            ← the React + Vite frontend
 ```
 
 **Read `SPECS.md` first.** It explains which document wins when they disagree and the rules for working in parallel without stepping on each other.
