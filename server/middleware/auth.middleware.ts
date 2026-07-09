@@ -8,10 +8,11 @@
  *    3. send header:  Authorization: Bearer <idToken>
  *
  *  DEV ESCAPE HATCH (local only): if AUTH_DEV_BYPASS=true in server/.env, a
- *  request may instead send `x-dev-uid: <someUserId>` to act as that user
- *  WITHOUT a real Firebase token. This lets the frontend test protected
- *  endpoints before Firebase sign-in is wired up. It is IGNORED when
- *  NODE_ENV=production. Never enable it in a deployed environment.
+ *  request may instead send `x-dev-uid: <someUserId>` to act as that user.
+ *
+ *  DEMO ESCAPE HATCH (temporary deploys only): if DEMO_AUTH_BYPASS=true, the
+ *  same header may stand in for DEMO_AUTH_BYPASS_USER_ID only. Keep this false
+ *  once real Firebase login is wired up.
  */
 import type { RequestHandler } from 'express';
 import type { DecodedIdToken } from 'firebase-admin/auth';
@@ -32,11 +33,20 @@ declare global {
 }
 
 const authMiddleware: RequestHandler = async (req, res, next) => {
-  // Dev-only bypass so the frontend can exercise protected routes pre-auth.
-  if (process.env.AUTH_DEV_BYPASS === 'true' && process.env.NODE_ENV !== 'production') {
-    const devUid = req.header('x-dev-uid');
-    if (devUid) {
-      req.user = { uid: devUid };
+  const devUid = req.header('x-dev-uid');
+
+  // Local-only bypass so the frontend can exercise protected routes pre-auth.
+  if (process.env.AUTH_DEV_BYPASS === 'true' && process.env.NODE_ENV !== 'production' && devUid) {
+    req.user = { uid: devUid };
+    next();
+    return;
+  }
+
+  // Temporary deployed-demo bypass, restricted to the seeded demo account.
+  if (process.env.DEMO_AUTH_BYPASS === 'true' && devUid) {
+    const demoUid = process.env.DEMO_AUTH_BYPASS_USER_ID ?? 'demo-user-0001';
+    if (devUid === demoUid) {
+      req.user = { uid: demoUid };
       next();
       return;
     }

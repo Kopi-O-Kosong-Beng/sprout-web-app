@@ -17,6 +17,10 @@ services:
         value: firestore
       - key: AUTH_DEV_BYPASS
         value: "false"
+      - key: DEMO_AUTH_BYPASS
+        value: "false"
+      - key: DEMO_AUTH_BYPASS_USER_ID
+        value: demo-user-0001
       - key: EMAIL_MODE
         value: console
       - key: USE_MOCK_APIS

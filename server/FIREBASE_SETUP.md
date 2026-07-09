@@ -22,6 +22,8 @@ Do **not** commit or upload `serviceAccountKey.json` as a repo file for producti
 DATASTORE=firestore
 NODE_ENV=production
 AUTH_DEV_BYPASS=false
+DEMO_AUTH_BYPASS=false
+DEMO_AUTH_BYPASS_USER_ID=demo-user-0001
 CORS_ORIGIN=https://your-vercel-frontend.vercel.app
 ```
 
