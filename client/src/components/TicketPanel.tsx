@@ -4,6 +4,7 @@ import {
   TICKET_CATEGORIES,
   type TicketCategory,
 } from '../services/sproutApi';
+import { extractApiError } from '../services/apiClient';
 
 const MAX_MESSAGE_LENGTH = 2000;
 
@@ -27,7 +28,7 @@ export default function TicketPanel() {
       const res = await submitTicket({ name, email, category, message });
       setRefNumber(res.refNumber);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Request failed.');
+      setError(extractApiError(err, 'Request failed.'));
     } finally {
       setSubmitting(false);
     }

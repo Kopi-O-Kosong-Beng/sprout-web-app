@@ -32,6 +32,8 @@ export interface PublicProfile {
   email: string;
   displayName: string;
   emailVerified: boolean;
+  lastLogin?: string | null;
+  lastLogout?: string | null;
 }
 
 function httpError(status: number, message: string): HttpError {
@@ -74,6 +76,8 @@ function toPublicProfile(profile: AuthUserProfile): PublicProfile {
     email: profile.email,
     displayName: profile.displayName,
     emailVerified: profile.isVerified,
+    lastLogin: profile.lastLogin ?? null,
+    lastLogout: profile.lastLogout ?? null,
   };
 }
 
@@ -82,12 +86,32 @@ async function getFirebaseAuthAdmin() {
   return getAuthAdmin();
 }
 
+async function getFirebaseLastSignInTime(uid: string): Promise<string | null> {
+  try {
+    const authAdmin = await getFirebaseAuthAdmin();
+    const firebaseUser = await authAdmin.getUser(uid);
+    return firebaseUser.metadata?.lastSignInTime ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function signup(input: SignupInput): Promise<SignupResult> {
   const email = normalizeEmail(input.email);
   const displayName = input.displayName.trim();
   assertStrongPassword(input.password);
 
   try {
+    const existingEmail = await authUserRepository.getByEmail(email);
+    if (existingEmail) {
+      throw httpError(409, 'An account with this email already exists.');
+    }
+
+    const existingDisplayName = await authUserRepository.getByDisplayName(displayName);
+    if (existingDisplayName) {
+      throw httpError(409, 'This display name is already taken.');
+    }
+
     const authAdmin = await getFirebaseAuthAdmin();
     const firebaseUser = await authAdmin.createUser({
       email,
@@ -118,7 +142,7 @@ export async function signup(input: SignupInput): Promise<SignupResult> {
       email: profile.email,
       displayName: profile.displayName,
       emailVerified: false,
-      message: 'Account created. Check the backend email log for the verification link.',
+      message: 'Account created. Check your email for the verification link.',
     };
   } catch (err) {
     if (isFirebaseDuplicateEmail(err)) {
@@ -147,6 +171,27 @@ export async function getCurrentUserProfile(
   if (emailVerified === true && !profile.isVerified) {
     await authUserRepository.markVerified(uid);
     profile = { ...profile, isVerified: true };
+  }
+  const lastSignInTime = await getFirebaseLastSignInTime(uid);
+  if (lastSignInTime) {
+    profile = (await authUserRepository.recordLogin(uid, lastSignInTime)) ?? profile;
+  }
+  return toPublicProfile(profile);
+}
+
+export async function recordUserLogin(uid: string): Promise<PublicProfile> {
+  const lastSignInTime = await getFirebaseLastSignInTime(uid);
+  const profile = await authUserRepository.recordLogin(uid, lastSignInTime);
+  if (!profile) {
+    throw httpError(404, 'User profile not found.');
+  }
+  return toPublicProfile(profile);
+}
+
+export async function recordUserLogout(uid: string): Promise<PublicProfile> {
+  const profile = await authUserRepository.recordLogout(uid);
+  if (!profile) {
+    throw httpError(404, 'User profile not found.');
   }
   return toPublicProfile(profile);
 }

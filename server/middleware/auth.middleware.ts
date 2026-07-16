@@ -32,7 +32,8 @@ declare global {
   }
 }
 
-const authMiddleware: RequestHandler = async (req, res, next) => {
+function createAuthMiddleware(options: { allowUnverifiedEmail?: boolean } = {}): RequestHandler {
+  return async (req, res, next) => {
   const devUid = req.header('x-dev-uid');
 
   // Local-only bypass so the frontend can exercise protected routes pre-auth.
@@ -63,7 +64,11 @@ const authMiddleware: RequestHandler = async (req, res, next) => {
     // Lazy import so SQLite/test processes never load firebase-admin.
     const { getAuthAdmin } = await import('../firebase');
     const decoded: DecodedIdToken = await getAuthAdmin().verifyIdToken(token);
-    if (decoded.email && decoded.email_verified !== true) {
+    if (
+      !options.allowUnverifiedEmail &&
+      decoded.email &&
+      decoded.email_verified !== true
+    ) {
       res.status(403).json({ error: 'Email is not verified.' });
       return;
     }
@@ -76,6 +81,13 @@ const authMiddleware: RequestHandler = async (req, res, next) => {
   } catch {
     res.status(401).json({ error: 'Unauthorised.' });
   }
-};
+  };
+}
+
+const authMiddleware = createAuthMiddleware();
+
+export const unverifiedAuthMiddleware = createAuthMiddleware({
+  allowUnverifiedEmail: true,
+});
 
 export default authMiddleware;

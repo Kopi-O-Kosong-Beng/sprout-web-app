@@ -72,6 +72,8 @@ export interface AuthProfile {
   email: string;
   displayName: string;
   emailVerified: boolean;
+  lastLogin?: string | null;
+  lastLogout?: string | null;
 }
 
 export interface MessageResponse {
@@ -117,10 +119,30 @@ export async function signupUser(input: SignupInput): Promise<SignupResponse> {
   return data;
 }
 
-export async function getCurrentUser(idToken: string): Promise<AuthProfile> {
+export async function getCurrentUser(idToken?: string): Promise<AuthProfile> {
+  // Without an explicit token the apiClient request interceptor attaches the
+  // signed-in Firebase user's token automatically.
   const { data } = await apiClient.get<AuthProfile>('/api/auth/me', {
-    headers: { Authorization: `Bearer ${idToken}` },
+    headers: idToken ? { Authorization: `Bearer ${idToken}` } : undefined,
   });
+  return data;
+}
+
+export async function recordSessionLogin(idToken?: string): Promise<AuthProfile> {
+  const { data } = await apiClient.post<AuthProfile>(
+    '/api/auth/session/login',
+    undefined,
+    { headers: idToken ? { Authorization: `Bearer ${idToken}` } : undefined }
+  );
+  return data;
+}
+
+export async function recordSessionLogout(idToken?: string): Promise<AuthProfile> {
+  const { data } = await apiClient.post<AuthProfile>(
+    '/api/auth/session/logout',
+    undefined,
+    { headers: idToken ? { Authorization: `Bearer ${idToken}` } : undefined }
+  );
   return data;
 }
 

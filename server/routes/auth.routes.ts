@@ -4,10 +4,12 @@ import Joi from 'joi';
 import {
   handleMe,
   handleRequestReset,
+  handleSessionLogin,
+  handleSessionLogout,
   handleSignup,
   handleVerifyReset,
 } from '../controllers/auth.controller';
-import authMiddleware from '../middleware/auth.middleware';
+import authMiddleware, { unverifiedAuthMiddleware } from '../middleware/auth.middleware';
 import validate from '../middleware/validation.middleware';
 
 const router = Router();
@@ -37,6 +39,8 @@ const verifyResetSchema = Joi.object({
 
 router.post('/signup', authLimiter, validate(signupSchema), handleSignup);
 router.get('/me', authMiddleware, handleMe);
+router.post('/session/login', unverifiedAuthMiddleware, handleSessionLogin);
+router.post('/session/logout', unverifiedAuthMiddleware, handleSessionLogout);
 router.post(
   '/request-reset',
   authLimiter,

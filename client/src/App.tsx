@@ -1,29 +1,49 @@
-import HealthStatus from './components/HealthStatus';
-import AuthPanel from './components/AuthPanel';
-import AvatarPanel from './components/AvatarPanel';
-import TicketPanel from './components/TicketPanel';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import AppHeader from './components/common/AppHeader';
+import ProtectedRoute from './components/common/ProtectedRoute';
+import LandingPage from './pages/LandingPage';
+import LoginPage from './pages/LoginPage';
+import SignupPage from './pages/SignupPage';
+import ContactPage from './pages/ContactPage';
+import ArchivePage from './pages/ArchivePage';
+import BattlePage from './pages/BattlePage';
+import BackendTestPage from './pages/BackendTestPage';
 import './App.css';
 
 function App() {
   return (
-    <div className="page">
-      <header>
-        <h1>🌱 Sprout — Backend Test Page</h1>
-        <p className="subtitle">
-          Exercises the live Express + Firestore/SQLite backend directly. Not
-          the real product UI — a database-interface smoke test for the team
-          to confirm the API contracts work end-to-end.
-        </p>
-      </header>
-
-      <HealthStatus />
-
-      <main>
-        <AuthPanel />
-        <AvatarPanel />
-        <TicketPanel />
-      </main>
-    </div>
+    <BrowserRouter>
+      <AuthProvider>
+        <div className="app-shell">
+          <AppHeader />
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignupPage />} />
+            <Route path="/contact" element={<ContactPage />} />
+            <Route
+              path="/archive"
+              element={
+                <ProtectedRoute>
+                  <ArchivePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/battle"
+              element={
+                <ProtectedRoute>
+                  <BattlePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/test" element={<BackendTestPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 

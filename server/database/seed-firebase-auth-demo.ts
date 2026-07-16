@@ -50,6 +50,8 @@ async function run(): Promise<void> {
       passwordHash,
       resetOtpHash: null,
       resetOtpExpiresAt: null,
+      lastLogin: null,
+      lastLogout: null,
       updatedAt: now,
       createdAt: now,
     },

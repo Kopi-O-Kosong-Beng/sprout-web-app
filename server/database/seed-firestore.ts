@@ -32,6 +32,8 @@ async function run(): Promise<void> {
       passwordHash,
       resetOtpHash: null,
       resetOtpExpiresAt: null,
+      lastLogin: null,
+      lastLogout: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

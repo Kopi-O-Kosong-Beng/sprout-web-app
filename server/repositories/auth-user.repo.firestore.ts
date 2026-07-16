@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { getDb } from '../firebase';
+import { buildAuditTimestamp } from '../utils/audit-timestamp';
 import type {
   AuthUserProfile,
   AuthUserRepository,
@@ -13,6 +14,25 @@ function toProfile(data: FirebaseFirestore.DocumentData): AuthUserProfile {
 
 function toHistory(data: FirebaseFirestore.DocumentData): PasswordHistoryEntry {
   return data as PasswordHistoryEntry;
+}
+
+function loginAuditFields(signedInAt?: string | null) {
+  const source = signedInAt ? new Date(signedInAt) : new Date();
+  const stamp = buildAuditTimestamp(
+    Number.isNaN(source.getTime()) ? new Date() : source
+  );
+  return {
+    lastLogin: stamp.readable,
+    updatedAt: stamp.iso,
+  };
+}
+
+function logoutAuditFields() {
+  const stamp = buildAuditTimestamp();
+  return {
+    lastLogout: stamp.readable,
+    updatedAt: stamp.iso,
+  };
 }
 
 const firestoreAuthUserRepository: AuthUserRepository = {
@@ -44,6 +64,18 @@ const firestoreAuthUserRepository: AuthUserRepository = {
     return snap.empty ? null : toProfile(snap.docs[0].data());
   },
 
+  async getByDisplayName(displayName: string): Promise<AuthUserProfile | null> {
+    const key = displayName.trim().toLowerCase();
+    const snap = await getDb().collection('users').get();
+    const match = snap.docs.find((doc) => {
+      const data = doc.data();
+      return typeof data.displayName === 'string'
+        ? data.displayName.trim().toLowerCase() === key
+        : false;
+    });
+    return match ? toProfile(match.data()) : null;
+  },
+
   async markVerified(id: string): Promise<void> {
     await getDb()
       .collection('users')
@@ -64,6 +96,23 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       },
       { merge: true }
     );
+  },
+
+  async recordLogin(
+    id: string,
+    signedInAt?: string | null
+  ): Promise<AuthUserProfile | null> {
+    const ref = getDb().collection('users').doc(id);
+    await ref.set(loginAuditFields(signedInAt), { merge: true });
+    const doc = await ref.get();
+    return doc.exists ? toProfile(doc.data()!) : null;
+  },
+
+  async recordLogout(id: string): Promise<AuthUserProfile | null> {
+    const ref = getDb().collection('users').doc(id);
+    await ref.set(logoutAuditFields(), { merge: true });
+    const doc = await ref.get();
+    return doc.exists ? toProfile(doc.data()!) : null;
   },
 
   async updatePasswordAndClearOtp(id: string, passwordHash: string): Promise<void> {

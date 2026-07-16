@@ -8,6 +8,8 @@ import {
 import {
   getCurrentUser,
   listAvatarsWithToken,
+  recordSessionLogin,
+  recordSessionLogout,
   requestPasswordReset,
   signupUser,
   verifyPasswordReset,
@@ -19,13 +21,25 @@ import {
   getSproutFirebaseAuth,
   isFirebaseConfigured,
 } from '../services/firebaseClient';
+import { extractApiError } from '../services/apiClient';
+import { mapFirebaseLoginError } from '../context/AuthContext';
 
 const DEMO_EMAIL = 'demo@sprout.app';
 const DEMO_PASSWORD = 'Password123!';
 const TOKEN_STORAGE_KEY = 'sprout-auth-test-id-token';
 
 function formatError(err: unknown): string {
-  return err instanceof Error ? err.message : 'Request failed.';
+  // Firebase SDK failures (login/refresh) carry an auth/* code — translate
+  // them the same way the real login page does instead of showing raw codes.
+  if (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    String((err as { code?: unknown }).code).startsWith('auth/')
+  ) {
+    return mapFirebaseLoginError(err);
+  }
+  return extractApiError(err, 'Request failed.');
 }
 
 export default function AuthPanel() {
@@ -90,10 +104,12 @@ export default function AuthPanel() {
       const auth = getSproutFirebaseAuth();
       const cred = await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
       const token = await cred.user.getIdToken(true);
+      const auditProfile = await recordSessionLogin(token);
       setFirebaseUser(cred.user);
       setIdToken(token);
+      setProfile(auditProfile);
       localStorage.setItem(TOKEN_STORAGE_KEY, token);
-      return `Signed in as ${cred.user.email}. Token stored for API tests.`;
+      return `Signed in as ${cred.user.email}. Login event recorded: lastLogin=${auditProfile.lastLogin ?? 'null'}. Token stored for API tests.`;
     });
   }
 
@@ -112,6 +128,10 @@ export default function AuthPanel() {
 
   async function handleLogout() {
     await runAction('logout', async () => {
+      let auditProfile: AuthProfile | null = null;
+      if (idToken) {
+        auditProfile = await recordSessionLogout(idToken);
+      }
       if (isFirebaseConfigured()) {
         await signOut(getSproutFirebaseAuth());
       }
@@ -120,7 +140,25 @@ export default function AuthPanel() {
       setAvatars(null);
       setIdToken('');
       localStorage.removeItem(TOKEN_STORAGE_KEY);
-      return 'Signed out and cleared local token.';
+      return `Logout event recorded: lastLogout=${auditProfile?.lastLogout ?? 'not recorded'}. Signed out and cleared local token.`;
+    });
+  }
+
+  async function recordLoginEvent() {
+    await runAction('session-login', async () => {
+      if (!idToken) throw new Error('Login first to get a Firebase ID token.');
+      const data = await recordSessionLogin(idToken);
+      setProfile(data);
+      return `POST /api/auth/session/login wrote lastLogin=${data.lastLogin ?? 'null'}.`;
+    });
+  }
+
+  async function recordLogoutEvent() {
+    await runAction('session-logout', async () => {
+      if (!idToken) throw new Error('Login first to get a Firebase ID token.');
+      const data = await recordSessionLogout(idToken);
+      setProfile(data);
+      return `POST /api/auth/session/logout wrote lastLogout=${data.lastLogout ?? 'null'}.`;
     });
   }
 
@@ -254,6 +292,12 @@ export default function AuthPanel() {
           </p>
           <button type="button" onClick={fetchMe} disabled={!idToken}>
             GET /api/auth/me
+          </button>
+          <button type="button" onClick={recordLoginEvent} disabled={!idToken}>
+            POST /api/auth/session/login
+          </button>
+          <button type="button" onClick={recordLogoutEvent} disabled={!idToken}>
+            POST /api/auth/session/logout
           </button>
           <button type="button" onClick={fetchAvatars} disabled={!idToken}>
             GET /api/avatar with token

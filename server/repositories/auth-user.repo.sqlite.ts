@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import db from '../database/db';
+import { buildAuditTimestamp } from '../utils/audit-timestamp';
 import type {
   AuthUserProfile,
   AuthUserRepository,
@@ -18,8 +19,29 @@ function toProfile(row: Record<string, unknown>): AuthUserProfile {
     resetOtpExpiresAt: row.resetOtpExpiresAt
       ? new Date(row.resetOtpExpiresAt as string).toISOString()
       : null,
+    lastLogin: (row.lastLogin as string | null | undefined) ?? null,
+    lastLogout: (row.lastLogout as string | null | undefined) ?? null,
     createdAt: row.createdAt ? new Date(row.createdAt as string).toISOString() : undefined,
     updatedAt: row.updatedAt ? new Date(row.updatedAt as string).toISOString() : undefined,
+  };
+}
+
+function loginAuditFields(signedInAt?: string | null) {
+  const source = signedInAt ? new Date(signedInAt) : new Date();
+  const stamp = buildAuditTimestamp(
+    Number.isNaN(source.getTime()) ? new Date() : source
+  );
+  return {
+    lastLogin: stamp.readable,
+    updatedAt: stamp.iso,
+  };
+}
+
+function logoutAuditFields() {
+  const stamp = buildAuditTimestamp();
+  return {
+    lastLogout: stamp.readable,
+    updatedAt: stamp.iso,
   };
 }
 
@@ -44,6 +66,14 @@ const sqliteAuthUserRepository: AuthUserRepository = {
     return row ? toProfile(row) : null;
   },
 
+  async getByDisplayName(displayName: string): Promise<AuthUserProfile | null> {
+    const key = displayName.trim().toLowerCase();
+    const row = await db('users')
+      .whereRaw('lower(displayName) = ?', [key])
+      .first();
+    return row ? toProfile(row) : null;
+  },
+
   async markVerified(id: string): Promise<void> {
     await db('users')
       .where({ id })
@@ -60,6 +90,19 @@ const sqliteAuthUserRepository: AuthUserRepository = {
       resetOtpExpiresAt,
       updatedAt: new Date().toISOString(),
     });
+  },
+
+  async recordLogin(
+    id: string,
+    signedInAt?: string | null
+  ): Promise<AuthUserProfile | null> {
+    await db('users').where({ id }).update(loginAuditFields(signedInAt));
+    return this.getById(id);
+  },
+
+  async recordLogout(id: string): Promise<AuthUserProfile | null> {
+    await db('users').where({ id }).update(logoutAuditFields());
+    return this.getById(id);
   },
 
   async updatePasswordAndClearOtp(id: string, passwordHash: string): Promise<void> {

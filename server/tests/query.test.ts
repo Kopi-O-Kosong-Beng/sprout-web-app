@@ -80,4 +80,28 @@ describe('POST /api/query/submit (T05)', () => {
       .send({ ...valid, email: 'not-an-email' });
     expect(res.status).toBe(400);
   });
+
+  it('UC8 alt-flow 5a: still returns 201 + persists when email delivery fails', async () => {
+    // EMAIL_MODE=smtp with no SMTP_* vars makes send() throw — the ticket
+    // service must log the failure and complete the request anyway (Req 9.8).
+    const prevMode = process.env.EMAIL_MODE;
+    process.env.EMAIL_MODE = 'smtp';
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const res = await request(app).post('/api/query/submit').send(valid);
+      expect(res.status).toBe(201);
+      expect(res.body.refNumber).toMatch(/^SPR-\d{8}-\d{4}$/);
+
+      const row = await db('query_tickets')
+        .where({ refNumber: res.body.refNumber })
+        .first();
+      expect(row).toBeDefined();
+      expect(
+        errSpy.mock.calls.flat().join('\n')
+      ).toContain('email delivery failed');
+    } finally {
+      process.env.EMAIL_MODE = prevMode;
+      errSpy.mockRestore();
+    }
+  });
 });

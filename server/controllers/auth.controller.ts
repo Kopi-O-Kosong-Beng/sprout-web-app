@@ -1,6 +1,8 @@
 import type { RequestHandler } from 'express';
 import {
   getCurrentUserProfile,
+  recordUserLogin,
+  recordUserLogout,
   requestPasswordReset,
   signup,
   verifyPasswordReset,
@@ -23,6 +25,26 @@ export const handleMe: RequestHandler = async (req, res, next) => {
       user.email,
       user.emailVerified
     );
+    res.status(200).json(profile);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const handleSessionLogin: RequestHandler = async (req, res, next) => {
+  try {
+    const user = req.user!;
+    const profile = await recordUserLogin(user.uid);
+    res.status(200).json(profile);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const handleSessionLogout: RequestHandler = async (req, res, next) => {
+  try {
+    const user = req.user!;
+    const profile = await recordUserLogout(user.uid);
     res.status(200).json(profile);
   } catch (err) {
     next(err);

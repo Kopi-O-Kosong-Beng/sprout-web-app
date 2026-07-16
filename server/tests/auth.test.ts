@@ -12,6 +12,9 @@ interface MockFirebaseUser {
   displayName?: string;
   emailVerified: boolean;
   password?: string;
+  metadata?: {
+    lastSignInTime?: string;
+  };
 }
 
 const mockUsersByEmail = new Map<string, MockFirebaseUser>();
@@ -179,6 +182,26 @@ describe('POST /api/auth/signup', () => {
     logSpy.mockRestore();
   });
 
+  it('returns 500 when SMTP email delivery fails during signup', async () => {
+    // Signup does NOT swallow email errors (unlike UC8): a misconfigured SMTP
+    // setup surfaces as 500 so the operator notices immediately.
+    const prevMode = process.env.EMAIL_MODE;
+    process.env.EMAIL_MODE = 'smtp'; // no SMTP_* vars set → send() throws
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const res = await request(app).post('/api/auth/signup').send({
+        email: 'smtp-failure@example.com',
+        password: 'Password123!',
+        displayName: 'Smtp Failure',
+      });
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Internal server error.');
+    } finally {
+      process.env.EMAIL_MODE = prevMode;
+      errSpy.mockRestore();
+    }
+  });
+
   it('rejects duplicate email with 409', async () => {
     const payload = {
       email: 'dup@example.com',
@@ -192,6 +215,24 @@ describe('POST /api/auth/signup', () => {
     const res = await request(app).post('/api/auth/signup').send(payload);
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('An account with this email already exists.');
+  });
+
+  it('rejects duplicate display name with 409', async () => {
+    const first = await request(app).post('/api/auth/signup').send({
+      email: 'first-display@example.com',
+      password: 'Password123!',
+      displayName: 'Taken Sprout',
+    });
+    expect(first.status).toBe(201);
+
+    const res = await request(app).post('/api/auth/signup').send({
+      email: 'second-display@example.com',
+      password: 'Password123!',
+      displayName: '  taken sprout  ',
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('This display name is already taken.');
   });
 
   it('rejects malformed email and weak password with 400', async () => {
@@ -234,6 +275,44 @@ describe('GET /api/auth/me', () => {
     expect(Boolean(row.isVerified)).toBe(true);
   });
 
+  it('records last login from Firebase Auth metadata when loading the profile', async () => {
+    const user = await createLocalUser({
+      email: 'metadata-login@example.com',
+      isVerified: true,
+    });
+    mockUsersByUid.set(user.id, {
+      uid: user.id,
+      email: user.email,
+      displayName: 'Test User',
+      emailVerified: true,
+      password: user.password,
+      metadata: {
+        lastSignInTime: 'Sat, 11 Jul 2026 10:00:00 GMT',
+      },
+    });
+    mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
+      uid: user.id,
+      email: user.email,
+      email_verified: true,
+    });
+
+    const res = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.lastLogin).toContain('SGT');
+    expect(res.body.LastLogin).toBeUndefined();
+    expect(res.body.lastLoginAt).toBeUndefined();
+    expect(res.body.lastLoginAtReadable).toBeUndefined();
+
+    const row = await db('users').where({ id: user.id }).first();
+    expect(row.lastLogin).toContain('SGT');
+    expect(row.LastLogin).toBeUndefined();
+    expect(row.lastLoginAt).toBeUndefined();
+    expect(row.lastLoginAtReadable).toBeUndefined();
+  });
+
   it('rejects missing, invalid, and unverified tokens', async () => {
     expect((await request(app).get('/api/auth/me')).status).toBe(401);
 
@@ -253,6 +332,76 @@ describe('GET /api/auth/me', () => {
       .set('Authorization', 'Bearer pending-token');
     expect(unverified.status).toBe(403);
     expect(unverified.body.error).toBe('Email is not verified.');
+  });
+});
+
+describe('POST /api/auth/session/login and /logout', () => {
+  it('records readable last login and logout timestamps on the user profile', async () => {
+    const user = await createLocalUser({
+      email: 'audit@example.com',
+      isVerified: true,
+    });
+
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid: user.id,
+      email: user.email,
+      email_verified: true,
+    });
+
+    const login = await request(app)
+      .post('/api/auth/session/login')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(login.status).toBe(200);
+    expect(login.body.lastLogin).toContain('SGT');
+    expect(login.body.LastLogin).toBeUndefined();
+    expect(login.body.lastLoginAt).toBeUndefined();
+    expect(login.body.lastLoginAtReadable).toBeUndefined();
+
+    const afterLogin = await db('users').where({ id: user.id }).first();
+    expect(afterLogin.lastLogin).toContain('SGT');
+    expect(afterLogin.LastLogin).toBeUndefined();
+    expect(afterLogin.lastLoginAt).toBeUndefined();
+    expect(afterLogin.lastLoginAtReadable).toBeUndefined();
+
+    const logout = await request(app)
+      .post('/api/auth/session/logout')
+      .set('Authorization', 'Bearer valid-token');
+
+    expect(logout.status).toBe(200);
+    expect(logout.body.lastLogout).toContain('SGT');
+    expect(logout.body.LastLogout).toBeUndefined();
+    expect(logout.body.lastLogoutAt).toBeUndefined();
+    expect(logout.body.lastLogoutAtReadable).toBeUndefined();
+
+    const afterLogout = await db('users').where({ id: user.id }).first();
+    expect(afterLogout.lastLogout).toContain('SGT');
+    expect(afterLogout.LastLogout).toBeUndefined();
+    expect(afterLogout.lastLogoutAt).toBeUndefined();
+    expect(afterLogout.lastLogoutAtReadable).toBeUndefined();
+  });
+
+  it('records login for unverified Firebase users after client sign-in', async () => {
+    const user = await createLocalUser({
+      email: 'pending-audit@example.com',
+      isVerified: false,
+    });
+
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid: user.id,
+      email: user.email,
+      email_verified: false,
+    });
+
+    const login = await request(app)
+      .post('/api/auth/session/login')
+      .set('Authorization', 'Bearer pending-token');
+
+    expect(login.status).toBe(200);
+    expect(login.body.lastLogin).toContain('SGT');
+
+    const afterLogin = await db('users').where({ id: user.id }).first();
+    expect(afterLogin.lastLogin).toContain('SGT');
   });
 });
 

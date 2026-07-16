@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { listAvatars, type PaginatedAvatars } from '../services/sproutApi';
+import { extractApiError } from '../services/apiClient';
 
 const DEFAULT_DEV_UID = 'demo-user-0001';
 
@@ -17,7 +18,7 @@ export default function AvatarPanel() {
       setResult(data);
     } catch (err) {
       setResult(null);
-      setError(err instanceof Error ? err.message : 'Request failed.');
+      setError(extractApiError(err, 'Request failed.'));
     } finally {
       setLoading(false);
     }
