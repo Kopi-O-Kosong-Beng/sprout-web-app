@@ -259,6 +259,14 @@ The **database is Cloud Firestore** (Firebase) — the real cross-platform datab
 
 **Auth (for frontend work):** users sign in with the **Firebase JS SDK** in the React app, grab the ID token, and send it as `Authorization: Bearer <idToken>` on every protected API call. The current demo flow uses email/password; other Firebase sign-in providers can be added later without changing the backend token-verification pattern.
 
+## Production auth, email, and storage
+
+Render declares SMTP delivery but does not store credentials in `render.yaml`. For `hello.sprout.team@gmail.com`, enable Google 2-Step Verification, create a Google Account -> Security -> App passwords entry named `Sprout Backend`, and place the resulting 16-character app password only in local `server/.env` (`SMTP_PASS`) and Render's secret environment dashboard. With it configured, run `npm.cmd run check:email -w server`; a live SMTP preflight is successful only when it prints `[email-check] mode=smtp verified=true`.
+
+Before deployment, add the Vercel domain in Firebase Console -> Authentication -> Settings -> Authorized domains and set Render `FRONTEND_URL` to that HTTPS origin. Verification links must point to `https://<vercel-domain>/verify-email?...`, and the page must successfully apply the Firebase action code. Firebase remains the authority for identity: the client sends Firebase ID tokens and the backend verifies them.
+
+Firebase Storage is pending activation. In project `sprout-dev-66f08`, link Blaze billing, create budget alerts (alerts are not caps), create Storage deliberately in the Firestore/backend region where possible, publish restrictive rules, set `FIREBASE_STORAGE_BUCKET`, and run its bucket preflight. Keep `STORAGE_MODE=local` until that preflight passes. The detailed procedures are in [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
+
 ## 6. Backend layout (where to put things)
 
 ```

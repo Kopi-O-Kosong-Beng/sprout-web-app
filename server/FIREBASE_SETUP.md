@@ -1,5 +1,7 @@
 # Firebase Setup
 
+> **Current status:** Firebase project `sprout-dev-66f08`, Firestore, and Firebase Auth are in use. Firebase Storage is not yet activated; keep `STORAGE_MODE=local` until the storage procedure below is complete and its bucket preflight passes.
+
 > ✅ **Status: DONE.** The Firebase project (`sprout-dev-66f08`) is created, Firestore is connected, and the backend reads/writes it live. This doc is now (a) reference for how it was set up, and (b) the guide for **teammates running the backend locally** and for **the frontend's Firebase config**.
 
 The backend runs on Firebase: **Firestore** (the cross-platform database), **Firebase Auth**, and later **Cloud Storage** for sprites. A **SQLite fallback** (`DATASTORE=sqlite`) also exists so anyone can run offline without the key.
@@ -25,9 +27,30 @@ AUTH_DEV_BYPASS=false
 DEMO_AUTH_BYPASS=false
 DEMO_AUTH_BYPASS_USER_ID=demo-user-0001
 CORS_ORIGIN=https://your-vercel-frontend.vercel.app
+FRONTEND_URL=https://your-vercel-frontend.vercel.app
 ```
 
 `FIREBASE_SERVICE_ACCOUNT_BASE64` is also supported if the host handles multiline JSON poorly: base64-encode the JSON file contents and set that env var instead.
+
+## Production auth and email checklist
+
+1. In Firebase Console for `sprout-dev-66f08`, open **Authentication -> Settings -> Authorized domains** and add the deployed Vercel domain.
+2. In Render, set `FRONTEND_URL` to that HTTPS Vercel origin. This makes verification action links use `https://<vercel-domain>/verify-email?...`.
+3. On `hello.sprout.team@gmail.com`, enable Google **2-Step Verification**, then open **Google Account -> Security -> App passwords** and create an app password named `Sprout Backend`.
+4. Put the 16-character app password only in local `server/.env` as `SMTP_PASS` and in Render's secret environment dashboard. Do not put it in this repository, screenshots, or chat.
+5. After the secret is configured, run `npm.cmd run check:email -w server`. The expected live result is `[email-check] mode=smtp verified=true`.
+6. Submit one signup, one reset request, and one Contact Us ticket with controlled addresses. Confirm the inboxes, redact OTP/action codes and private addresses in any evidence, and confirm the verification link completes `applyActionCode`.
+
+Firebase Auth remains the identity authority: the frontend obtains Firebase ID tokens and the backend verifies `Authorization: Bearer <idToken>`. Do not add a custom JWT or signup-OTP flow.
+
+## Firebase Storage activation (pending teammate)
+
+1. In Firebase project `sprout-dev-66f08`, link the **Blaze** billing plan.
+2. Create budget alerts; alerts notify but are not spending caps.
+3. Create Cloud Storage deliberately in the Firestore/backend region where Firebase allows it.
+4. Publish restrictive Storage rules before allowing client access.
+5. Set `FIREBASE_STORAGE_BUCKET` to the created bucket name in local `server/.env` and Render's secret environment dashboard.
+6. Run the bucket preflight and keep `STORAGE_MODE=local` until it passes. Only then switch the deployed environment to the storage mode required by the backend.
 
 ## Steps (fresh project path)
 
