@@ -26,6 +26,10 @@ const sqliteTicketRepository: TicketRepository = {
         category,
         message,
         status: 'open',
+        submitterEmailStatus: 'pending',
+        adminEmailStatus: 'pending',
+        lastEmailError: null,
+        notificationUpdatedAt: null,
       };
       await trx('query_tickets').insert(record);
       return record;

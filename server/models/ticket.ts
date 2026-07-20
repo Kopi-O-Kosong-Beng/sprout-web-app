@@ -23,10 +23,10 @@ export interface Ticket extends TicketInput {
   /** Format SPR-YYYYMMDD-NNNN, unique per calendar day (Req 9.5/9.10) */
   refNumber: string;
   status: 'open' | 'resolved';
-  submitterEmailStatus?: DeliveryStatus;
-  adminEmailStatus?: DeliveryStatus;
-  lastEmailError?: string | null;
-  notificationUpdatedAt?: string | null;
+  submitterEmailStatus: DeliveryStatus;
+  adminEmailStatus: DeliveryStatus;
+  lastEmailError: string | null;
+  notificationUpdatedAt: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
