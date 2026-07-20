@@ -91,10 +91,7 @@ describe('POST /api/query/submit (T05)', () => {
 
   it('UC8 alt-flow 5a: still returns 201 + persists when email delivery fails', async () => {
     mockSendEmail.mockRejectedValueOnce(new Error('delivery failed'));
-    // EMAIL_MODE=smtp with no SMTP_* vars makes send() throw — the ticket
-    // service must log the failure and complete the request anyway (Req 9.8).
-    const prevMode = process.env.EMAIL_MODE;
-    process.env.EMAIL_MODE = 'smtp';
+    // The shared email service is mocked so this failure path stays deterministic.
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const res = await request(app).post('/api/query/submit').send(valid);
@@ -109,7 +106,6 @@ describe('POST /api/query/submit (T05)', () => {
         errSpy.mock.calls.flat().join('\n')
       ).toContain('email delivery failed');
     } finally {
-      process.env.EMAIL_MODE = prevMode;
       errSpy.mockRestore();
     }
   });
@@ -119,20 +115,34 @@ describe('POST /api/query/submit (T05)', () => {
     ['admin fails', [{ delivered: true, mode: 'smtp' }, new Error('admin failed')]],
     ['both fail', [new Error('submitter failed'), new Error('admin failed')]],
   ])('persists and attempts both notifications when %s', async (_label, outcomes) => {
-    for (const outcome of outcomes) {
-      if (outcome instanceof Error) mockSendEmail.mockRejectedValueOnce(outcome);
-      else mockSendEmail.mockResolvedValueOnce(outcome);
+    const previousAdminEmail = process.env.ADMIN_EMAIL;
+    delete process.env.ADMIN_EMAIL;
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      for (const outcome of outcomes) {
+        if (outcome instanceof Error) mockSendEmail.mockRejectedValueOnce(outcome);
+        else mockSendEmail.mockResolvedValueOnce(outcome);
+      }
+
+      const res = await request(app).post('/api/query/submit').send(valid);
+
+      expect(res.status).toBe(201);
+      expect(mockSendEmail).toHaveBeenCalledTimes(2);
+      expect(mockSendEmail.mock.calls[1][0].to).toBe('hello.sprout.team@gmail.com');
+      const row = await db('query_tickets').where({ refNumber: res.body.refNumber }).first();
+      expect(row).toMatchObject({
+        submitterEmailStatus: outcomes[0] instanceof Error ? 'failed' : 'sent',
+        adminEmailStatus: outcomes[1] instanceof Error ? 'failed' : 'sent',
+      });
+      expect(errSpy).toHaveBeenCalledTimes(1);
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[ticket] email delivery failed'),
+        expect.any(String)
+      );
+    } finally {
+      if (previousAdminEmail === undefined) delete process.env.ADMIN_EMAIL;
+      else process.env.ADMIN_EMAIL = previousAdminEmail;
+      errSpy.mockRestore();
     }
-
-    const res = await request(app).post('/api/query/submit').send(valid);
-
-    expect(res.status).toBe(201);
-    expect(mockSendEmail).toHaveBeenCalledTimes(2);
-    expect(mockSendEmail.mock.calls[1][0].to).toBe('hello.sprout.team@gmail.com');
-    const row = await db('query_tickets').where({ refNumber: res.body.refNumber }).first();
-    expect(row).toMatchObject({
-      submitterEmailStatus: outcomes[0] instanceof Error ? 'failed' : 'sent',
-      adminEmailStatus: outcomes[1] instanceof Error ? 'failed' : 'sent',
-    });
   });
 });

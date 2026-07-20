@@ -30,6 +30,10 @@ const firestoreTicketRepository: TicketRepository = {
         category,
         message,
         status: 'open',
+        submitterEmailStatus: 'pending',
+        adminEmailStatus: 'pending',
+        lastEmailError: null,
+        notificationUpdatedAt: null,
         createdAt: now,
         updatedAt: now,
       };
