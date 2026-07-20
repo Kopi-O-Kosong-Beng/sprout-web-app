@@ -4,7 +4,7 @@
 **Commit under test:** `a28e6e26eecf19e8d0fa2a1fc0d6fd9b1c0d2b97`
 **Required runtime:** Node `22.x`
 **Fresh verification runtime:** disposable Node `v22.23.1`; active system shell remains Node `v24.14.0`
-**Configuration boundary:** no Firebase web credentials, Firebase Admin credentials, Gmail App Password, authorized deployed domain, controlled inbox, or Firebase Storage bucket was available.
+**Configuration boundary:** the automated gate ran without Firebase web credentials, Gmail App Password, authorized deployed domain, controlled inbox, or live-provider calls. A supplementary live Storage Admin preflight was run afterward with an existing local service account; no credential value was printed or retained.
 
 ## Automated Command Gate
 
@@ -81,6 +81,16 @@ These preflights intentionally verified fail-closed behavior only. They are not 
 | `npm.cmd run check:email -w server` | `EMAIL_MODE=smtp` with `SMTP_PASS` absent | EXPECTED BLOCKED (exit 1): missing `SMTP_PASS`; no SMTP connection attempted | 2.268s |
 | `npm.cmd run check:storage -w server` | `FIREBASE_STORAGE_BUCKET` absent | EXPECTED BLOCKED (exit 1): missing bucket before Firebase initialization | 2.488s |
 
+## Live Firebase Storage Preflight
+
+At `2026-07-21 01:49 +08:00`, the backend preflight ran under Node `v22.23.1` against `sprout-dev-66f08.firebasestorage.app` using an existing local Firebase Admin service account. It wrote a unique tiny `.preflight/` object, read and compared the exact payload, and deleted the object before returning:
+
+```text
+[storage-check] bucket=sprout-dev-66f08.firebasestorage.app writeReadDelete=true
+```
+
+**Status:** LIVE BACKEND ADMIN PASS. This proves backend credential and bucket write/read/delete access. Firebase Admin bypasses Storage Security Rules, so this does not prove direct client access or rule behavior. The current deny-all rules remain a safe backend-only default, and `STORAGE_MODE=local` remains deployed until the application Storage adapter is implemented and integrated.
+
 ## Live External Evidence
 
 | Use case | Status | Missing evidence/blocker |
@@ -89,6 +99,6 @@ These preflights intentionally verified fail-closed behavior only. They are not 
 | UC2 verified login and protected access | BLOCKED / NOT RUN | Requires the deployed origin in Firebase authorized domains and a real verified account. |
 | UC3 password reset and login with the new password | BLOCKED / NOT RUN | Requires live OTP inbox delivery and a controlled Firebase account. |
 | UC8 Contact Us persistence plus submitter/admin email | BLOCKED / NOT RUN | Requires live SMTP, controlled recipient/admin inboxes, and configured production persistence. |
-| Firebase Storage | BLOCKED / NOT RUN | Requires a configured bucket and backend credentials; Admin SDK bucket access and client rules were not tested. |
+| Firebase Storage | BACKEND ADMIN PASS; CLIENT RULES/APP ADAPTER NOT RUN | Live write/read/delete cleanup passed for `sprout-dev-66f08.firebasestorage.app`; direct client rules and the not-yet-implemented application Storage adapter remain untested. |
 
 No package manifest or lockfile changed in this fix wave. No secrets, screenshots, raw command logs, private recipient addresses, or temporary shim files are retained in this evidence.
