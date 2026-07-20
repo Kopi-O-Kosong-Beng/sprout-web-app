@@ -32,55 +32,66 @@ declare global {
   }
 }
 
-function createAuthMiddleware(options: { allowUnverifiedEmail?: boolean } = {}): RequestHandler {
+interface AuthMiddlewareOptions {
+  allowUnverifiedEmail?: boolean;
+  allowBypass?: boolean;
+}
+
+function createAuthMiddleware(options: AuthMiddlewareOptions = {}): RequestHandler {
+  const allowBypass = options.allowBypass ?? true;
   return async (req, res, next) => {
-  const devUid = req.header('x-dev-uid');
+    const devUid = req.header('x-dev-uid');
 
-  // Local-only bypass so the frontend can exercise protected routes pre-auth.
-  if (process.env.AUTH_DEV_BYPASS === 'true' && process.env.NODE_ENV !== 'production' && devUid) {
-    req.user = { uid: devUid };
-    next();
-    return;
-  }
-
-  // Temporary deployed-demo bypass, restricted to the seeded demo account.
-  if (process.env.DEMO_AUTH_BYPASS === 'true' && devUid) {
-    const demoUid = process.env.DEMO_AUTH_BYPASS_USER_ID ?? 'demo-user-0001';
-    if (devUid === demoUid) {
-      req.user = { uid: demoUid };
+    // Local-only bypass so the frontend can exercise protected routes pre-auth.
+    if (
+      allowBypass &&
+      process.env.AUTH_DEV_BYPASS === 'true' &&
+      process.env.NODE_ENV !== 'production' &&
+      devUid
+    ) {
+      req.user = { uid: devUid };
       next();
       return;
     }
-  }
 
-  const header = req.headers.authorization ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  if (!token) {
-    res.status(401).json({ error: 'Unauthorised.' });
-    return;
-  }
+    // Temporary deployed-demo bypass, restricted to the seeded demo account.
+    if (allowBypass && process.env.DEMO_AUTH_BYPASS === 'true' && devUid) {
+      const demoUid = process.env.DEMO_AUTH_BYPASS_USER_ID ?? 'demo-user-0001';
+      if (devUid === demoUid) {
+        req.user = { uid: demoUid };
+        next();
+        return;
+      }
+    }
 
-  try {
-    // Lazy import so SQLite/test processes never load firebase-admin.
-    const { getAuthAdmin } = await import('../firebase');
-    const decoded: DecodedIdToken = await getAuthAdmin().verifyIdToken(token);
-    if (
-      !options.allowUnverifiedEmail &&
-      decoded.email &&
-      decoded.email_verified !== true
-    ) {
-      res.status(403).json({ error: 'Email is not verified.' });
+    const header = req.headers.authorization ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+    if (!token) {
+      res.status(401).json({ error: 'Unauthorised.' });
       return;
     }
-    req.user = {
-      uid: decoded.uid,
-      email: decoded.email,
-      emailVerified: decoded.email_verified,
-    };
-    next();
-  } catch {
-    res.status(401).json({ error: 'Unauthorised.' });
-  }
+
+    try {
+      // Lazy import so SQLite/test processes never load firebase-admin.
+      const { getAuthAdmin } = await import('../firebase');
+      const decoded: DecodedIdToken = await getAuthAdmin().verifyIdToken(token);
+      if (
+        !options.allowUnverifiedEmail &&
+        decoded.email &&
+        decoded.email_verified !== true
+      ) {
+        res.status(403).json({ error: 'Email is not verified.' });
+        return;
+      }
+      req.user = {
+        uid: decoded.uid,
+        email: decoded.email,
+        emailVerified: decoded.email_verified,
+      };
+      next();
+    } catch {
+      res.status(401).json({ error: 'Unauthorised.' });
+    }
   };
 }
 
@@ -88,6 +99,11 @@ const authMiddleware = createAuthMiddleware();
 
 export const unverifiedAuthMiddleware = createAuthMiddleware({
   allowUnverifiedEmail: true,
+});
+
+export const strictUnverifiedAuthMiddleware = createAuthMiddleware({
+  allowUnverifiedEmail: true,
+  allowBypass: false,
 });
 
 export default authMiddleware;

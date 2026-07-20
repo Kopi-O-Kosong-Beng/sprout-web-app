@@ -3,12 +3,18 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcrypt';
 import request from 'supertest';
+jest.mock('../services/email.service', () => ({ send: jest.fn() }));
+import { send as sendEmail } from '../services/email.service';
 import app from '../app';
 import db from '../database/db';
+import { verificationResendStore } from '../routes/auth.routes';
+
+const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
+const TEST_BCRYPT_COST = 4;
 
 interface MockFirebaseUser {
   uid: string;
-  email: string;
+  email?: string;
   displayName?: string;
   emailVerified: boolean;
   password?: string;
@@ -72,7 +78,7 @@ const mockAuthAdmin = {
     }
     const updated = { ...user, ...data };
     mockUsersByUid.set(uid, updated);
-    mockUsersByEmail.set(updated.email.toLowerCase(), updated);
+    if (updated.email) mockUsersByEmail.set(updated.email.toLowerCase(), updated);
     return updated;
   }),
   generateEmailVerificationLink: jest.fn(async () =>
@@ -103,7 +109,7 @@ async function createLocalUser(input: {
   const id = input.id ?? randomUUID();
   const password = input.password ?? 'Password123!';
   const email = input.email.toLowerCase();
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await bcrypt.hash(password, TEST_BCRYPT_COST);
   await db('users').insert({
     id,
     email,
@@ -129,10 +135,10 @@ async function createLocalUser(input: {
   return { id, email, password };
 }
 
-function latestOtpFromConsole(spy: jest.SpyInstance): string {
-  const text = spy.mock.calls.flat().join('\n');
-  const match = text.match(/\b\d{6}\b/);
-  if (!match) throw new Error(`No OTP found in console output: ${text}`);
+function latestOtpFromEmailPayload(): string {
+  const text = mockSendEmail.mock.calls.at(-1)?.[0].text;
+  const match = text?.match(/\b\d{6}\b/);
+  if (!match) throw new Error('No OTP found in the email adapter payload.');
   return match[0];
 }
 
@@ -144,6 +150,8 @@ beforeEach(async () => {
   mockUsersByEmail.clear();
   mockUsersByUid.clear();
   jest.clearAllMocks();
+  mockSendEmail.mockResolvedValue({ delivered: true, mode: 'console' });
+  await verificationResendStore.resetAll();
   await resetTables();
 });
 
@@ -156,8 +164,7 @@ afterAll(async () => {
 });
 
 describe('POST /api/auth/signup', () => {
-  it('creates a Firebase user, local profile, password history, and email log', async () => {
-    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  it('creates a Firebase user, local profile, password history, and email payload', async () => {
     const res = await request(app).post('/api/auth/signup').send({
       email: 'Ada@Example.com',
       password: 'Password123!',
@@ -182,15 +189,17 @@ describe('POST /api/auth/signup', () => {
 
     const history = await db('password_history').where({ userId: res.body.uid });
     expect(history).toHaveLength(1);
-    expect(logSpy.mock.calls.flat().join('\n')).toContain(
-      'http://localhost:5173/verify-email'
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'ada@example.com',
+        subject: 'Verify your Sprout account',
+        text: expect.stringContaining('http://localhost:5173/verify-email'),
+      })
     );
-    logSpy.mockRestore();
   });
 
-  it('keeps the account and reports recovery when SMTP email delivery fails during signup', async () => {
-    const prevMode = process.env.EMAIL_MODE;
-    process.env.EMAIL_MODE = 'smtp'; // no SMTP_* vars set → send() throws
+  it('keeps the account and reports recovery when email delivery fails during signup', async () => {
+    mockSendEmail.mockRejectedValueOnce(new Error('delivery failed'));
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const res = await request(app).post('/api/auth/signup').send({
@@ -200,28 +209,28 @@ describe('POST /api/auth/signup', () => {
       });
       expect(res.status).toBe(201);
       expect(res.body.verificationEmailSent).toBe(false);
+      expect(res.body.message).toBe(
+        'Account created, but the verification email could not be sent. Sign in and request a new link.'
+      );
       expect(
         await db('users').where({ email: 'smtp-failure@example.com' }).first()
       ).toBeDefined();
     } finally {
-      process.env.EMAIL_MODE = prevMode;
       errSpy.mockRestore();
     }
   });
 
   it('sends a Sprout-hosted Firebase action link', async () => {
-    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     const res = await request(app).post('/api/auth/signup').send({
       email: 'verify@example.com',
       password: 'Password123!',
       displayName: 'Verify User',
     });
-    const emailText = log.mock.calls.flat().join('\n');
+    const emailText = mockSendEmail.mock.calls[0][0].text;
     expect(res.body.verificationEmailSent).toBe(true);
     expect(emailText).toContain('http://localhost:5173/verify-email');
-    expect(emailText).toContain('oobCode=');
+    expect(emailText).toContain('oobCode=test-code');
     expect(emailText).toContain('apiKey=test-key');
-    log.mockRestore();
   });
 
   it('rejects duplicate email with 409', async () => {
@@ -291,6 +300,51 @@ describe('POST /api/auth/signup', () => {
 });
 
 describe('POST /api/auth/resend-verification', () => {
+  it('rejects missing and invalid Firebase ID tokens', async () => {
+    const missing = await request(app).post('/api/auth/resend-verification');
+    expect(missing.status).toBe(401);
+
+    mockAuthAdmin.verifyIdToken.mockRejectedValueOnce(new Error('invalid token'));
+    const invalid = await request(app)
+      .post('/api/auth/resend-verification')
+      .set('Authorization', 'Bearer invalid-token');
+    expect(invalid.status).toBe(401);
+  });
+
+  it('rejects x-dev-uid when AUTH_DEV_BYPASS is enabled', async () => {
+    const previousAuthDevBypass = process.env.AUTH_DEV_BYPASS;
+    process.env.AUTH_DEV_BYPASS = 'true';
+    try {
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .set('x-dev-uid', 'pending-user');
+      expect(res.status).toBe(401);
+      expect(mockAuthAdmin.verifyIdToken).not.toHaveBeenCalled();
+    } finally {
+      if (previousAuthDevBypass === undefined) delete process.env.AUTH_DEV_BYPASS;
+      else process.env.AUTH_DEV_BYPASS = previousAuthDevBypass;
+    }
+  });
+
+  it('rejects x-dev-uid when DEMO_AUTH_BYPASS is enabled', async () => {
+    const previousDemoAuthBypass = process.env.DEMO_AUTH_BYPASS;
+    const previousDemoUserId = process.env.DEMO_AUTH_BYPASS_USER_ID;
+    process.env.DEMO_AUTH_BYPASS = 'true';
+    process.env.DEMO_AUTH_BYPASS_USER_ID = 'demo-user';
+    try {
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .set('x-dev-uid', 'demo-user');
+      expect(res.status).toBe(401);
+      expect(mockAuthAdmin.verifyIdToken).not.toHaveBeenCalled();
+    } finally {
+      if (previousDemoAuthBypass === undefined) delete process.env.DEMO_AUTH_BYPASS;
+      else process.env.DEMO_AUTH_BYPASS = previousDemoAuthBypass;
+      if (previousDemoUserId === undefined) delete process.env.DEMO_AUTH_BYPASS_USER_ID;
+      else process.env.DEMO_AUTH_BYPASS_USER_ID = previousDemoUserId;
+    }
+  });
+
   it('resends verification for an authenticated unverified user', async () => {
     const user = await createLocalUser({
       email: 'pending@example.com',
@@ -306,6 +360,102 @@ describe('POST /api/auth/resend-verification', () => {
       .set('Authorization', 'Bearer pending-token');
     expect(res.status).toBe(200);
     expect(res.body.verificationEmailSent).toBe(true);
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: user.email,
+        subject: 'Verify your Sprout account',
+      })
+    );
+  });
+
+  it('returns a no-send response for an already verified Firebase user', async () => {
+    const user = await createLocalUser({
+      email: 'verified-resend@example.com',
+      isVerified: true,
+    });
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid: user.id,
+      email: user.email,
+      email_verified: true,
+    });
+
+    const res = await request(app)
+      .post('/api/auth/resend-verification')
+      .set('Authorization', 'Bearer verified-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      verificationEmailSent: false,
+      message: 'Email is already verified.',
+    });
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when the Firebase user has no email address', async () => {
+    const uid = randomUUID();
+    mockUsersByUid.set(uid, { uid, emailVerified: false });
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid,
+      email_verified: false,
+    });
+
+    const res = await request(app)
+      .post('/api/auth/resend-verification')
+      .set('Authorization', 'Bearer no-email-token');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Account has no email address.');
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it('returns resend-specific recovery when delivery fails', async () => {
+    const user = await createLocalUser({
+      email: 'retry-delivery@example.com',
+      isVerified: false,
+    });
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid: user.id,
+      email: user.email,
+      email_verified: false,
+    });
+    mockSendEmail.mockRejectedValueOnce(new Error('delivery failed'));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .set('Authorization', 'Bearer pending-token');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        verificationEmailSent: false,
+        message: 'The verification email could not be sent. Please try again.',
+      });
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('limits resend attempts to three requests per 15 minutes', async () => {
+    const user = await createLocalUser({
+      email: 'rate-limited@example.com',
+      isVerified: false,
+    });
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid: user.id,
+      email: user.email,
+      email_verified: false,
+    });
+
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .set('Authorization', 'Bearer pending-token');
+      statuses.push(res.status);
+    }
+
+    expect(statuses).toEqual([200, 200, 200, 429]);
+    expect(mockSendEmail).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -465,7 +615,6 @@ describe('POST /api/auth/session/login and /logout', () => {
 describe('password reset OTP flow', () => {
   it('returns 200 for known and unknown emails without leaking account existence', async () => {
     await createLocalUser({ email: 'reset@example.com' });
-    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
 
     const known = await request(app)
       .post('/api/auth/request-reset')
@@ -480,18 +629,16 @@ describe('password reset OTP flow', () => {
 
     const row = await db('users').where({ email: 'reset@example.com' }).first();
     expect(row.resetOtpHash).toBeTruthy();
-    expect(row.resetOtpHash).not.toBe(latestOtpFromConsole(logSpy));
-    logSpy.mockRestore();
+    expect(row.resetOtpHash).not.toBe(latestOtpFromEmailPayload());
   });
 
   it('resets a password with a valid OTP and clears the stored OTP', async () => {
     const user = await createLocalUser({ email: 'success@example.com' });
-    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
 
     await request(app)
       .post('/api/auth/request-reset')
       .send({ email: user.email });
-    const otp = latestOtpFromConsole(logSpy);
+    const otp = latestOtpFromEmailPayload();
 
     const res = await request(app).post('/api/auth/verify-reset').send({
       email: user.email,
@@ -508,12 +655,11 @@ describe('password reset OTP flow', () => {
     const row = await db('users').where({ id: user.id }).first();
     expect(row.resetOtpHash).toBeNull();
     expect(await bcrypt.compare('Password123!!', row.passwordHash)).toBe(true);
-    logSpy.mockRestore();
   });
 
   it('rejects invalid OTP, expired OTP, weak password, and recent reuse', async () => {
     const user = await createLocalUser({ email: 'reject@example.com' });
-    const otpHash = await bcrypt.hash('123456', 12);
+    const otpHash = await bcrypt.hash('123456', TEST_BCRYPT_COST);
     await db('users').where({ id: user.id }).update({
       resetOtpHash: otpHash,
       resetOtpExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),

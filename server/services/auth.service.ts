@@ -4,10 +4,14 @@ import authUserRepository from '../repositories/auth-users';
 import { send as sendEmail } from './email.service';
 import type { AuthUserProfile } from '../models/auth';
 
-const BCRYPT_COST = 12;
+const BCRYPT_COST = process.env.NODE_ENV === 'test' ? 4 : 12;
 const RESET_OTP_TTL_MS = 15 * 60 * 1000;
 const PASSWORD_HISTORY_KEEP = 3;
 const RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has been sent.';
+const SIGNUP_VERIFICATION_FAILURE_MESSAGE =
+  'Account created, but the verification email could not be sent. Sign in and request a new link.';
+const RESEND_VERIFICATION_FAILURE_MESSAGE =
+  'The verification email could not be sent. Please try again.';
 
 interface HttpError extends Error {
   status?: number;
@@ -103,7 +107,8 @@ function toSproutVerificationLink(firebaseLink: string): string {
 
 async function deliverVerificationEmail(
   email: string,
-  displayName: string
+  displayName: string,
+  failureMessage: string
 ): Promise<VerificationEmailResult> {
   try {
     const authAdmin = await getFirebaseAuthAdmin();
@@ -125,8 +130,7 @@ async function deliverVerificationEmail(
     console.error('[auth] verification email delivery failed');
     return {
       verificationEmailSent: false,
-      message:
-        'Account created, but the verification email could not be sent. Sign in and request a new link.',
+      message: failureMessage,
     };
   }
 }
@@ -175,7 +179,11 @@ export async function signup(input: SignupInput): Promise<SignupResult> {
     await authUserRepository.addPasswordHistory(profile.id, passwordHash);
     await authUserRepository.prunePasswordHistory(profile.id, PASSWORD_HISTORY_KEEP);
 
-    const verification = await deliverVerificationEmail(email, displayName);
+    const verification = await deliverVerificationEmail(
+      email,
+      displayName,
+      SIGNUP_VERIFICATION_FAILURE_MESSAGE
+    );
 
     return {
       uid: profile.id,
@@ -204,7 +212,8 @@ export async function resendVerificationEmail(
   const profile = await authUserRepository.getById(uid);
   return deliverVerificationEmail(
     firebaseUser.email,
-    profile?.displayName ?? firebaseUser.displayName ?? 'Sprout player'
+    profile?.displayName ?? firebaseUser.displayName ?? 'Sprout player',
+    RESEND_VERIFICATION_FAILURE_MESSAGE
   );
 }
 

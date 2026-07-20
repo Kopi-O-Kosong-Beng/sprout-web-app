@@ -59,7 +59,7 @@ export async function send({ to, subject, text }: EmailPayload): Promise<EmailRe
   const mode = process.env.EMAIL_MODE ?? 'console';
 
   if (mode === 'console') {
-    console.log(`[email] to=${to} subject="${subject}"\n${text}\n`);
+    console.log(`[email] mode=console delivered=true to=${to} subject="${subject}"`);
     return { delivered: true, mode };
   }
 

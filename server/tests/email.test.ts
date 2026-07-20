@@ -89,16 +89,27 @@ describe('email transport', () => {
 });
 
 describe('email.service send() - console mode', () => {
-  it('logs the email and reports delivered without touching nodemailer', async () => {
+  it('logs delivery metadata without exposing message content', async () => {
     process.env.EMAIL_MODE = 'console';
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const sensitivePayload = {
+      to: 'user@example.com',
+      subject: 'Sensitive delivery',
+      text: 'OTP 123456 oobCode=secret-action-code private ticket message',
+    };
 
     const send = await freshSend();
-    const result = await send(payload);
+    const result = await send(sensitivePayload);
 
     expect(result).toEqual({ delivered: true, mode: 'console' });
-    expect(logSpy.mock.calls.flat().join('\n')).toContain('user@example.com');
-    expect(logSpy.mock.calls.flat().join('\n')).toContain('Body text');
+    const logText = logSpy.mock.calls.flat().join('\n');
+    expect(logText).toContain('to=user@example.com');
+    expect(logText).toContain('subject="Sensitive delivery"');
+    expect(logText).toContain('mode=console');
+    expect(logText).toContain('delivered=true');
+    expect(logText).not.toContain('123456');
+    expect(logText).not.toContain('secret-action-code');
+    expect(logText).not.toContain('private ticket message');
     expect(mockCreateTransport).not.toHaveBeenCalled();
     logSpy.mockRestore();
   });

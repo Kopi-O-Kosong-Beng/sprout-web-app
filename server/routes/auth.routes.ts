@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { MemoryStore } from 'express-rate-limit';
 import Joi from 'joi';
 import {
   handleMe,
@@ -10,7 +10,10 @@ import {
   handleSignup,
   handleVerifyReset,
 } from '../controllers/auth.controller';
-import authMiddleware, { unverifiedAuthMiddleware } from '../middleware/auth.middleware';
+import authMiddleware, {
+  strictUnverifiedAuthMiddleware,
+  unverifiedAuthMiddleware,
+} from '../middleware/auth.middleware';
 import validate from '../middleware/validation.middleware';
 
 const router = Router();
@@ -22,11 +25,14 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+export const verificationResendStore = new MemoryStore();
+
 const verificationResendLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 3,
+  max: 3,
   standardHeaders: true,
   legacyHeaders: false,
+  store: verificationResendStore,
 });
 
 const signupSchema = Joi.object({
@@ -49,7 +55,7 @@ router.post('/signup', authLimiter, validate(signupSchema), handleSignup);
 router.post(
   '/resend-verification',
   verificationResendLimiter,
-  unverifiedAuthMiddleware,
+  strictUnverifiedAuthMiddleware,
   handleResendVerification
 );
 router.get('/me', authMiddleware, handleMe);
