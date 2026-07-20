@@ -50,7 +50,10 @@ Firebase Auth remains the identity authority: the frontend obtains Firebase ID t
 3. Create Cloud Storage deliberately in the Firestore/backend region where Firebase allows it.
 4. Publish restrictive Storage rules before allowing client access.
 5. Set `FIREBASE_STORAGE_BUCKET` to the created bucket name in local `server/.env` and Render's secret environment dashboard.
-6. Run the bucket preflight and keep `STORAGE_MODE=local` until it passes. Only then switch the deployed environment to the storage mode required by the backend.
+6. Run `npm.cmd run check:storage -w server`. It writes, reads, and deletes one uniquely named tiny object under `.preflight/`; success prints `[storage-check] bucket=<name> writeReadDelete=true`.
+7. Keep `STORAGE_MODE=local` until that command passes. Only then switch the deployed environment to the storage mode required by the backend.
+
+This preflight uses the Firebase Admin SDK, so it verifies backend credentials and bucket access. Admin SDK requests bypass client Security Rules; passing this command does **not** test or validate the published restrictive Storage rules.
 
 ## Steps (fresh project path)
 
