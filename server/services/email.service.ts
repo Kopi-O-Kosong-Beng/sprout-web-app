@@ -16,6 +16,11 @@ export interface EmailResult {
   mode: string;
 }
 
+export interface EmailTransportStatus {
+  mode: string;
+  verified: boolean;
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -40,6 +45,14 @@ function getSmtpTransporter(): Transporter {
     });
   }
   return smtpTransporter;
+}
+
+export async function verifyEmailTransport(): Promise<EmailTransportStatus> {
+  const mode = process.env.EMAIL_MODE ?? 'console';
+  if (mode === 'console') return { mode, verified: true };
+  if (mode !== 'smtp') throw new Error(`Unsupported EMAIL_MODE: ${mode}`);
+  await getSmtpTransporter().verify();
+  return { mode, verified: true };
 }
 
 export async function send({ to, subject, text }: EmailPayload): Promise<EmailResult> {

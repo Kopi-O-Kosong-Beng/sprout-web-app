@@ -18,6 +18,7 @@
     "seed:firestore": "tsx database/seed-firestore.ts",
     "seed:firebase-auth-demo": "tsx database/seed-firebase-auth-demo.ts",
     "backfill:user-audit-fields": "tsx scripts/backfill-user-login-audit-fields.ts",
+    "check:email": "tsx scripts/check-email.ts",
     "inspect": "tsx scripts/inspect-db.ts",
     "test": "jest --runInBand"
   },
