@@ -15,3 +15,6 @@ dist/
 
 .env.local
 .env.*.local
+
+# Isolated implementation worktrees
+.worktrees/
