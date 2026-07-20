@@ -1,10 +1,10 @@
 # Firebase Setup
 
-> **Current status:** Firebase project `sprout-dev-66f08`, Firestore, and Firebase Auth are in use. Firebase Storage is not yet activated; keep `STORAGE_MODE=local` until the storage procedure below is complete and its bucket preflight passes.
+> **Current status:** Firebase project `sprout-dev-66f08`, Firestore, Firebase Auth, and bucket `sprout-dev-66f08.firebasestorage.app` are active. The live Node 22 Admin write/read/delete preflight passed on 2026-07-21. Keep `STORAGE_MODE=local` until the application adapter and separate client-rule tests pass.
 
 > ✅ **Status: DONE.** The Firebase project (`sprout-dev-66f08`) is created, Firestore is connected, and the backend reads/writes it live. This doc is now (a) reference for how it was set up, and (b) the guide for **teammates running the backend locally** and for **the frontend's Firebase config**.
 
-The backend runs on Firebase: **Firestore** (the cross-platform database), **Firebase Auth**, and later **Cloud Storage** for sprites. A **SQLite fallback** (`DATASTORE=sqlite`) also exists so anyone can run offline without the key.
+The backend runs on Firebase: **Firestore** (the cross-platform database), **Firebase Auth**, and a provisioned **Cloud Storage** bucket whose application adapter is still pending. A **SQLite fallback** (`DATASTORE=sqlite`) also exists so anyone can run offline without the key.
 
 ## 🔑 For teammates running the backend locally
 
@@ -43,17 +43,18 @@ FRONTEND_URL=https://your-vercel-frontend.vercel.app
 
 Firebase Auth remains the identity authority: the frontend obtains Firebase ID tokens and the backend verifies `Authorization: Bearer <idToken>`. Do not add a custom JWT or signup-OTP flow.
 
-## Firebase Storage activation (pending teammate)
+## Firebase Storage status and integration gate
 
-1. In Firebase project `sprout-dev-66f08`, link the **Blaze** billing plan.
-2. Create budget alerts; alerts notify but are not spending caps.
-3. Create Cloud Storage deliberately in the Firestore/backend region where Firebase allows it.
-4. Publish restrictive Storage rules before allowing client access.
-5. Set `FIREBASE_STORAGE_BUCKET` to the created bucket name in local `server/.env` and Render's secret environment dashboard.
-6. Run `npm.cmd run check:storage -w server`. It writes, reads, and deletes one uniquely named tiny object under `.preflight/`; success prints `[storage-check] bucket=<name> writeReadDelete=true`.
-7. Keep `STORAGE_MODE=local` until that command passes. Only then switch the deployed environment to the storage mode required by the backend.
+Completed on 2026-07-21: Blaze/bucket activation, restrictive deny-all client rules, and the live backend Admin preflight for `sprout-dev-66f08.firebasestorage.app`. The command wrote, read, and deleted one uniquely named tiny object under `.preflight/` and returned `[storage-check] bucket=sprout-dev-66f08.firebasestorage.app writeReadDelete=true`.
 
-This preflight uses the Firebase Admin SDK, so it verifies backend credentials and bucket access. Admin SDK requests bypass client Security Rules; passing this command does **not** test or validate the published restrictive Storage rules.
+Remaining before switching Render away from `STORAGE_MODE=local`:
+
+1. Implement and integrate the application Firebase Storage adapter.
+2. Set `FIREBASE_STORAGE_BUCKET=sprout-dev-66f08.firebasestorage.app` in the deployment environment without exposing credentials.
+3. Add emulator/rules tests for the chosen client-access model, or keep direct clients denied and serve signed/backend-mediated access.
+4. Re-run `npm.cmd run check:storage -w server` in the deployed environment and retain sanitized evidence.
+
+This preflight uses the Firebase Admin SDK, so it verifies backend credentials and bucket access. Admin SDK requests bypass client Security Rules; its passing result does **not** test or validate client rule behavior.
 
 ## Steps (fresh project path)
 

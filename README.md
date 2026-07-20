@@ -265,7 +265,7 @@ Render declares SMTP delivery but does not store credentials in `render.yaml`. F
 
 Before deployment, add the Vercel domain in Firebase Console -> Authentication -> Settings -> Authorized domains and set Render `FRONTEND_URL` to that HTTPS origin. Verification links must point to `https://<vercel-domain>/verify-email?...`, and the page must successfully apply the Firebase action code. Firebase remains the authority for identity: the client sends Firebase ID tokens and the backend verifies them.
 
-Firebase Storage is pending activation. In project `sprout-dev-66f08`, link Blaze billing, create budget alerts (alerts are not caps), create Storage deliberately in the Firestore/backend region where possible, publish restrictive rules, and set `FIREBASE_STORAGE_BUCKET`. Then run `npm.cmd run check:storage -w server` and keep `STORAGE_MODE=local` until it passes. This Admin SDK probe verifies backend credentials and bucket access, not client Security Rules. The detailed procedure is in [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
+Firebase Storage is active at `sprout-dev-66f08.firebasestorage.app`. The live Node 22 Admin preflight passed write, exact read-back, and deletion on 2026-07-21. This proves backend credential/bucket access only; Admin SDK requests bypass client Security Rules. Direct client rules and the application Storage adapter remain untested, so Render stays pinned to `STORAGE_MODE=local`. The detailed status and procedure are in [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
 
 ## 6. Backend layout (where to put things)
 
