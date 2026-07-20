@@ -7,6 +7,7 @@ jest.mock('../services/email.service', () => ({ send: jest.fn() }));
 import { send as sendEmail } from '../services/email.service';
 import app from '../app';
 import db from '../database/db';
+import authUserRepository from '../repositories/auth-users';
 import { verificationResendStore } from '../routes/auth.routes';
 
 const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
@@ -139,6 +140,14 @@ function latestOtpFromEmailPayload(): string {
   const match = text?.match(/\b\d{6}\b/);
   if (!match) throw new Error('No OTP found in the email adapter payload.');
   return match[0];
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 beforeAll(async () => {
@@ -656,6 +665,173 @@ describe('password reset OTP flow', () => {
     expect(row.resetOtpHash).toBeNull();
     expect(row.resetOtpFailedAttempts).toBe(0);
     expect(await bcrypt.compare('Password123!!', row.passwordHash)).toBe(true);
+    const history = await db('password_history').where({ userId: user.id });
+    expect(history).toHaveLength(1);
+    expect(await bcrypt.compare(user.password, history[0].passwordHash)).toBe(true);
+  });
+
+  it('allows only one parallel request to consume a valid OTP', async () => {
+    const user = await createLocalUser({ email: 'parallel-valid@example.com' });
+    await db('password_history').where({ userId: user.id }).del();
+    await request(app).post('/api/auth/request-reset').send({ email: user.email });
+    const otp = latestOtpFromEmailPayload();
+    const payload = {
+      email: user.email,
+      otp,
+      newPassword: 'Password123!!',
+    };
+
+    const responses = await Promise.all([
+      request(app).post('/api/auth/verify-reset').send(payload),
+      request(app).post('/api/auth/verify-reset').send(payload),
+    ]);
+
+    expect(responses.map((res) => res.status).sort()).toEqual([200, 400]);
+    expect(responses.find((res) => res.status === 400)?.body.error).toBe(
+      'Invalid OTP. Request a new one.'
+    );
+    expect(mockAuthAdmin.updateUser).toHaveBeenCalledTimes(1);
+    const history = await db('password_history').where({ userId: user.id });
+    expect(history).toHaveLength(1);
+    expect(await bcrypt.compare(user.password, history[0].passwordHash)).toBe(true);
+  });
+
+  it('does not let a stale invalid request increment a freshly resent OTP', async () => {
+    const user = await createLocalUser({ email: 'stale-invalid@example.com' });
+    const oldOtpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
+    await db('users').where({ id: user.id }).update({
+      resetOtpHash: oldOtpHash,
+      resetOtpExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+      resetOtpFailedAttempts: 4,
+    });
+
+    const profileRead = deferred();
+    const releaseProfile = deferred();
+    const originalGetByEmail = authUserRepository.getByEmail.bind(authUserRepository);
+    const getByEmailSpy = jest
+      .spyOn(authUserRepository, 'getByEmail')
+      .mockImplementationOnce(async (email) => {
+        const profile = await originalGetByEmail(email);
+        profileRead.resolve();
+        await releaseProfile.promise;
+        return profile;
+      });
+
+    try {
+      const staleResponsePromise = request(app)
+        .post('/api/auth/verify-reset')
+        .send({
+          email: user.email,
+          otp: '000000',
+          newPassword: 'Password123!!',
+        })
+        .then((res) => res);
+      await profileRead.promise;
+
+      const resend = await request(app)
+        .post('/api/auth/request-reset')
+        .send({ email: user.email });
+      expect(resend.status).toBe(200);
+      const freshRow = await db('users').where({ id: user.id }).first();
+      expect(freshRow.resetOtpHash).not.toBe(oldOtpHash);
+
+      releaseProfile.resolve();
+      const staleResponse = await staleResponsePromise;
+      expect(staleResponse.status).toBe(400);
+
+      const finalRow = await db('users').where({ id: user.id }).first();
+      expect(finalRow.resetOtpHash).toBe(freshRow.resetOtpHash);
+      expect(finalRow.resetOtpFailedAttempts).toBe(0);
+    } finally {
+      releaseProfile.resolve();
+      getByEmailSpy.mockRestore();
+    }
+  });
+
+  it('does not let a stale expired request clear a freshly resent OTP', async () => {
+    const user = await createLocalUser({ email: 'stale-expired@example.com' });
+    const oldOtpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
+    await db('users').where({ id: user.id }).update({
+      resetOtpHash: oldOtpHash,
+      resetOtpExpiresAt: new Date(Date.now() - 1000).toISOString(),
+      resetOtpFailedAttempts: 4,
+    });
+
+    const profileRead = deferred();
+    const releaseProfile = deferred();
+    const originalGetByEmail = authUserRepository.getByEmail.bind(authUserRepository);
+    const getByEmailSpy = jest
+      .spyOn(authUserRepository, 'getByEmail')
+      .mockImplementationOnce(async (email) => {
+        const profile = await originalGetByEmail(email);
+        profileRead.resolve();
+        await releaseProfile.promise;
+        return profile;
+      });
+
+    try {
+      const staleResponsePromise = request(app)
+        .post('/api/auth/verify-reset')
+        .send({
+          email: user.email,
+          otp: '123456',
+          newPassword: 'Password123!!',
+        })
+        .then((res) => res);
+      await profileRead.promise;
+
+      const resend = await request(app)
+        .post('/api/auth/request-reset')
+        .send({ email: user.email });
+      expect(resend.status).toBe(200);
+      const freshRow = await db('users').where({ id: user.id }).first();
+      expect(freshRow.resetOtpHash).not.toBe(oldOtpHash);
+
+      releaseProfile.resolve();
+      const staleResponse = await staleResponsePromise;
+      expect(staleResponse.status).toBe(400);
+      expect(staleResponse.body.error).toBe('OTP has expired. Request a new one.');
+
+      const finalRow = await db('users').where({ id: user.id }).first();
+      expect(finalRow.resetOtpHash).toBe(freshRow.resetOtpHash);
+      expect(finalRow.resetOtpFailedAttempts).toBe(0);
+    } finally {
+      releaseProfile.resolve();
+      getByEmailSpy.mockRestore();
+    }
+  });
+
+  it('keeps a claimed OTP consumed when the Firebase password update fails', async () => {
+    const user = await createLocalUser({ email: 'firebase-failure@example.com' });
+    await request(app).post('/api/auth/request-reset').send({ email: user.email });
+    const otp = latestOtpFromEmailPayload();
+    mockAuthAdmin.updateUser.mockRejectedValueOnce(new Error('firebase unavailable'));
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const failed = await request(app).post('/api/auth/verify-reset').send({
+        email: user.email,
+        otp,
+        newPassword: 'Password123!!',
+      });
+      expect(failed.status).toBe(500);
+      expect(failed.body.error).toBe('Internal server error.');
+
+      const row = await db('users').where({ id: user.id }).first();
+      expect(row.resetOtpHash).toBeNull();
+      expect(row.resetOtpExpiresAt).toBeNull();
+      expect(row.resetOtpFailedAttempts).toBe(0);
+
+      const retry = await request(app).post('/api/auth/verify-reset').send({
+        email: user.email,
+        otp,
+        newPassword: 'Password123!!',
+      });
+      expect(retry.status).toBe(400);
+      expect(mockAuthAdmin.updateUser).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('rejects invalid OTP, expired OTP, weak password, and recent reuse', async () => {

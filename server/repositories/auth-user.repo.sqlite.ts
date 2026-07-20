@@ -46,6 +46,21 @@ function logoutAuditFields() {
   };
 }
 
+async function clearMatchingResetOtp(
+  id: string,
+  expectedResetOtpHash: string
+): Promise<boolean> {
+  const updated = await db('users')
+    .where({ id, resetOtpHash: expectedResetOtpHash })
+    .update({
+      resetOtpHash: null,
+      resetOtpExpiresAt: null,
+      resetOtpFailedAttempts: 0,
+      updatedAt: new Date().toISOString(),
+    });
+  return updated === 1;
+}
+
 const sqliteAuthUserRepository: AuthUserRepository = {
   async createProfile(input: CreateAuthUserProfile): Promise<AuthUserProfile> {
     const now = new Date().toISOString();
@@ -94,11 +109,13 @@ const sqliteAuthUserRepository: AuthUserRepository = {
     });
   },
 
-  async recordResetOtpFailure(id: string): Promise<number> {
+  async recordResetOtpFailure(
+    id: string,
+    expectedResetOtpHash: string
+  ): Promise<number> {
     return db.transaction(async (trx) => {
       const updated = await trx('users')
-        .where({ id })
-        .whereNotNull('resetOtpHash')
+        .where({ id, resetOtpHash: expectedResetOtpHash })
         .update({
           resetOtpFailedAttempts: trx.raw('COALESCE(??, 0) + 1', [
             'resetOtpFailedAttempts',
@@ -107,27 +124,30 @@ const sqliteAuthUserRepository: AuthUserRepository = {
         });
       if (!updated) return 0;
 
-      const row = await trx('users').where({ id }).first();
+      const row = await trx('users')
+        .where({ id, resetOtpHash: expectedResetOtpHash })
+        .first();
       const failedAttempts = Number(row?.resetOtpFailedAttempts ?? 0);
       if (failedAttempts < 5) return failedAttempts;
 
-      await trx('users').where({ id }).update({
-        resetOtpHash: null,
-        resetOtpExpiresAt: null,
-        resetOtpFailedAttempts: 0,
-        updatedAt: new Date().toISOString(),
-      });
+      await trx('users')
+        .where({ id, resetOtpHash: expectedResetOtpHash })
+        .update({
+          resetOtpHash: null,
+          resetOtpExpiresAt: null,
+          resetOtpFailedAttempts: 0,
+          updatedAt: new Date().toISOString(),
+        });
       return failedAttempts;
     });
   },
 
-  async clearResetOtp(id: string): Promise<void> {
-    await db('users').where({ id }).update({
-      resetOtpHash: null,
-      resetOtpExpiresAt: null,
-      resetOtpFailedAttempts: 0,
-      updatedAt: new Date().toISOString(),
-    });
+  async clearResetOtp(id: string, expectedResetOtpHash: string): Promise<boolean> {
+    return clearMatchingResetOtp(id, expectedResetOtpHash);
+  },
+
+  async claimResetOtp(id: string, expectedResetOtpHash: string): Promise<boolean> {
+    return clearMatchingResetOtp(id, expectedResetOtpHash);
   },
 
   async recordLogin(
@@ -143,12 +163,9 @@ const sqliteAuthUserRepository: AuthUserRepository = {
     return this.getById(id);
   },
 
-  async updatePasswordAndClearOtp(id: string, passwordHash: string): Promise<void> {
+  async updatePassword(id: string, passwordHash: string): Promise<void> {
     await db('users').where({ id }).update({
       passwordHash,
-      resetOtpHash: null,
-      resetOtpExpiresAt: null,
-      resetOtpFailedAttempts: 0,
       updatedAt: new Date().toISOString(),
     });
   },

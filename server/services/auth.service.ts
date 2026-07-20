@@ -286,7 +286,7 @@ export async function requestPasswordReset(emailInput: string): Promise<{ messag
 async function assertPasswordNotRecentlyUsed(
   profile: AuthUserProfile,
   newPassword: string
-): Promise<void> {
+): Promise<Array<{ passwordHash: string }>> {
   const history = await authUserRepository.listPasswordHistory(
     profile.id,
     PASSWORD_HISTORY_KEEP
@@ -301,6 +301,7 @@ async function assertPasswordNotRecentlyUsed(
       throw httpError(400, 'This password was used recently. Choose a different password.');
     }
   }
+  return history;
 }
 
 export async function verifyPasswordReset(
@@ -315,13 +316,16 @@ export async function verifyPasswordReset(
   }
 
   if (new Date(profile.resetOtpExpiresAt).getTime() <= Date.now()) {
-    await authUserRepository.clearResetOtp(profile.id);
+    await authUserRepository.clearResetOtp(profile.id, profile.resetOtpHash);
     throw httpError(400, 'OTP has expired. Request a new one.');
   }
 
   const validOtp = await bcrypt.compare(otp, profile.resetOtpHash);
   if (!validOtp) {
-    const failedAttempts = await authUserRepository.recordResetOtpFailure(profile.id);
+    const failedAttempts = await authUserRepository.recordResetOtpFailure(
+      profile.id,
+      profile.resetOtpHash
+    );
     if (failedAttempts >= 5) {
       throw httpError(400, 'Invalid OTP. Request a new one.');
     }
@@ -329,15 +333,22 @@ export async function verifyPasswordReset(
   }
 
   assertStrongPassword(newPassword);
-  await assertPasswordNotRecentlyUsed(profile, newPassword);
+  const history = await assertPasswordNotRecentlyUsed(profile, newPassword);
 
   const newPasswordHash = await bcrypt.hash(newPassword, bcryptCost());
+  const claimed = await authUserRepository.claimResetOtp(profile.id, profile.resetOtpHash);
+  if (!claimed) {
+    throw httpError(400, 'Invalid OTP. Request a new one.');
+  }
   const authAdmin = await getFirebaseAuthAdmin();
   await authAdmin.updateUser(profile.id, { password: newPassword });
-  if (profile.passwordHash) {
+  if (
+    profile.passwordHash &&
+    !history.some((entry) => entry.passwordHash === profile.passwordHash)
+  ) {
     await authUserRepository.addPasswordHistory(profile.id, profile.passwordHash);
   }
-  await authUserRepository.updatePasswordAndClearOtp(profile.id, newPasswordHash);
+  await authUserRepository.updatePassword(profile.id, newPasswordHash);
   await authUserRepository.prunePasswordHistory(profile.id, PASSWORD_HISTORY_KEEP);
 
   return { message: 'Password reset successful.' };

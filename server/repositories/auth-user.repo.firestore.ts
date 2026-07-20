@@ -35,6 +35,31 @@ function logoutAuditFields() {
   };
 }
 
+async function clearMatchingResetOtp(
+  id: string,
+  expectedResetOtpHash: string
+): Promise<boolean> {
+  const db = getDb();
+  const ref = db.collection('users').doc(id);
+  return db.runTransaction(async (transaction) => {
+    const doc = await transaction.get(ref);
+    if (!doc.exists || doc.data()?.resetOtpHash !== expectedResetOtpHash) {
+      return false;
+    }
+    transaction.set(
+      ref,
+      {
+        resetOtpHash: null,
+        resetOtpExpiresAt: null,
+        resetOtpFailedAttempts: 0,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+    return true;
+  });
+}
+
 const firestoreAuthUserRepository: AuthUserRepository = {
   async createProfile(input: CreateAuthUserProfile): Promise<AuthUserProfile> {
     const db = getDb();
@@ -100,12 +125,15 @@ const firestoreAuthUserRepository: AuthUserRepository = {
     );
   },
 
-  async recordResetOtpFailure(id: string): Promise<number> {
+  async recordResetOtpFailure(
+    id: string,
+    expectedResetOtpHash: string
+  ): Promise<number> {
     const db = getDb();
     const ref = db.collection('users').doc(id);
     return db.runTransaction(async (transaction) => {
       const doc = await transaction.get(ref);
-      if (!doc.exists || !doc.data()?.resetOtpHash) return 0;
+      if (!doc.exists || doc.data()?.resetOtpHash !== expectedResetOtpHash) return 0;
 
       const failedAttempts = Number(doc.data()?.resetOtpFailedAttempts ?? 0) + 1;
       if (failedAttempts >= 5) {
@@ -134,16 +162,12 @@ const firestoreAuthUserRepository: AuthUserRepository = {
     });
   },
 
-  async clearResetOtp(id: string): Promise<void> {
-    await getDb().collection('users').doc(id).set(
-      {
-        resetOtpHash: null,
-        resetOtpExpiresAt: null,
-        resetOtpFailedAttempts: 0,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+  async clearResetOtp(id: string, expectedResetOtpHash: string): Promise<boolean> {
+    return clearMatchingResetOtp(id, expectedResetOtpHash);
+  },
+
+  async claimResetOtp(id: string, expectedResetOtpHash: string): Promise<boolean> {
+    return clearMatchingResetOtp(id, expectedResetOtpHash);
   },
 
   async recordLogin(
@@ -163,13 +187,10 @@ const firestoreAuthUserRepository: AuthUserRepository = {
     return doc.exists ? toProfile(doc.data()!) : null;
   },
 
-  async updatePasswordAndClearOtp(id: string, passwordHash: string): Promise<void> {
+  async updatePassword(id: string, passwordHash: string): Promise<void> {
     await getDb().collection('users').doc(id).set(
       {
         passwordHash,
-        resetOtpHash: null,
-        resetOtpExpiresAt: null,
-        resetOtpFailedAttempts: 0,
         updatedAt: new Date().toISOString(),
       },
       { merge: true }

@@ -39,11 +39,12 @@ export interface AuthUserRepository {
     resetOtpHash: string | null,
     resetOtpExpiresAt: string | null
   ): Promise<void>;
-  recordResetOtpFailure(id: string): Promise<number>;
-  clearResetOtp(id: string): Promise<void>;
+  recordResetOtpFailure(id: string, expectedResetOtpHash: string): Promise<number>;
+  clearResetOtp(id: string, expectedResetOtpHash: string): Promise<boolean>;
+  claimResetOtp(id: string, expectedResetOtpHash: string): Promise<boolean>;
   recordLogin(id: string, signedInAt?: string | null): Promise<AuthUserProfile | null>;
   recordLogout(id: string): Promise<AuthUserProfile | null>;
-  updatePasswordAndClearOtp(id: string, passwordHash: string): Promise<void>;
+  updatePassword(id: string, passwordHash: string): Promise<void>;
   addPasswordHistory(userId: string, passwordHash: string): Promise<void>;
   listPasswordHistory(userId: string, limit: number): Promise<PasswordHistoryEntry[]>;
   prunePasswordHistory(userId: string, keep: number): Promise<void>;
