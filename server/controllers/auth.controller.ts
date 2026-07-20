@@ -3,6 +3,7 @@ import {
   getCurrentUserProfile,
   recordUserLogin,
   recordUserLogout,
+  resendVerificationEmail,
   requestPasswordReset,
   signup,
   verifyPasswordReset,
@@ -12,6 +13,14 @@ export const handleSignup: RequestHandler = async (req, res, next) => {
   try {
     const result = await signup(req.body);
     res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const handleResendVerification: RequestHandler = async (req, res, next) => {
+  try {
+    res.status(200).json(await resendVerificationEmail(req.user!.uid));
   } catch (err) {
     next(err);
   }

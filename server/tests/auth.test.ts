@@ -75,9 +75,9 @@ const mockAuthAdmin = {
     mockUsersByEmail.set(updated.email.toLowerCase(), updated);
     return updated;
   }),
-  generateEmailVerificationLink: jest.fn(async (email: string) => {
-    return `https://example.test/verify?email=${encodeURIComponent(email)}`;
-  }),
+  generateEmailVerificationLink: jest.fn(async () =>
+    'https://sprout-dev-66f08.firebaseapp.com/__/auth/action?mode=verifyEmail&oobCode=test-code&apiKey=test-key'
+  ),
   verifyIdToken: jest.fn(),
 };
 
@@ -168,7 +168,11 @@ describe('POST /api/auth/signup', () => {
     expect(res.body.email).toBe('ada@example.com');
     expect(res.body.emailVerified).toBe(false);
     expect(mockAuthAdmin.generateEmailVerificationLink).toHaveBeenCalledWith(
-      'ada@example.com'
+      'ada@example.com',
+      {
+        url: 'http://localhost:5173/verify-email',
+        handleCodeInApp: false,
+      }
     );
 
     const row = await db('users').where({ id: res.body.uid }).first();
@@ -178,13 +182,13 @@ describe('POST /api/auth/signup', () => {
 
     const history = await db('password_history').where({ userId: res.body.uid });
     expect(history).toHaveLength(1);
-    expect(logSpy.mock.calls.flat().join('\n')).toContain('https://example.test/verify');
+    expect(logSpy.mock.calls.flat().join('\n')).toContain(
+      'http://localhost:5173/verify-email'
+    );
     logSpy.mockRestore();
   });
 
-  it('returns 500 when SMTP email delivery fails during signup', async () => {
-    // Signup does NOT swallow email errors (unlike UC8): a misconfigured SMTP
-    // setup surfaces as 500 so the operator notices immediately.
+  it('keeps the account and reports recovery when SMTP email delivery fails during signup', async () => {
     const prevMode = process.env.EMAIL_MODE;
     process.env.EMAIL_MODE = 'smtp'; // no SMTP_* vars set → send() throws
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -194,12 +198,30 @@ describe('POST /api/auth/signup', () => {
         password: 'Password123!',
         displayName: 'Smtp Failure',
       });
-      expect(res.status).toBe(500);
-      expect(res.body.error).toBe('Internal server error.');
+      expect(res.status).toBe(201);
+      expect(res.body.verificationEmailSent).toBe(false);
+      expect(
+        await db('users').where({ email: 'smtp-failure@example.com' }).first()
+      ).toBeDefined();
     } finally {
       process.env.EMAIL_MODE = prevMode;
       errSpy.mockRestore();
     }
+  });
+
+  it('sends a Sprout-hosted Firebase action link', async () => {
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const res = await request(app).post('/api/auth/signup').send({
+      email: 'verify@example.com',
+      password: 'Password123!',
+      displayName: 'Verify User',
+    });
+    const emailText = log.mock.calls.flat().join('\n');
+    expect(res.body.verificationEmailSent).toBe(true);
+    expect(emailText).toContain('http://localhost:5173/verify-email');
+    expect(emailText).toContain('oobCode=');
+    expect(emailText).toContain('apiKey=test-key');
+    log.mockRestore();
   });
 
   it('rejects duplicate email with 409', async () => {
@@ -249,6 +271,41 @@ describe('POST /api/auth/signup', () => {
       displayName: 'Weak',
     });
     expect(weakPassword.status).toBe(400);
+  });
+
+  it('accepts display names only up to 50 characters using letters, numbers, spaces, underscores, and hyphens', async () => {
+    const tooLong = await request(app).post('/api/auth/signup').send({
+      email: 'too-long-display@example.com',
+      password: 'Password123!',
+      displayName: 'A'.repeat(51),
+    });
+    expect(tooLong.status).toBe(400);
+
+    const invalidCharacter = await request(app).post('/api/auth/signup').send({
+      email: 'invalid-display@example.com',
+      password: 'Password123!',
+      displayName: 'Invalid.Name',
+    });
+    expect(invalidCharacter.status).toBe(400);
+  });
+});
+
+describe('POST /api/auth/resend-verification', () => {
+  it('resends verification for an authenticated unverified user', async () => {
+    const user = await createLocalUser({
+      email: 'pending@example.com',
+      isVerified: false,
+    });
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid: user.id,
+      email: user.email,
+      email_verified: false,
+    });
+    const res = await request(app)
+      .post('/api/auth/resend-verification')
+      .set('Authorization', 'Bearer pending-token');
+    expect(res.status).toBe(200);
+    expect(res.body.verificationEmailSent).toBe(true);
   });
 });
 

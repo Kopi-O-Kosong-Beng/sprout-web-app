@@ -19,12 +19,16 @@ export interface SignupInput {
   displayName: string;
 }
 
-export interface SignupResult {
+export interface VerificationEmailResult {
+  verificationEmailSent: boolean;
+  message: string;
+}
+
+export interface SignupResult extends VerificationEmailResult {
   uid: string;
   email: string;
   displayName: string;
   emailVerified: boolean;
-  message: string;
 }
 
 export interface PublicProfile {
@@ -86,6 +90,47 @@ async function getFirebaseAuthAdmin() {
   return getAuthAdmin();
 }
 
+function frontendBaseUrl(): string {
+  return process.env.FRONTEND_URL ?? process.env.CORS_ORIGIN ?? 'http://localhost:5173';
+}
+
+function toSproutVerificationLink(firebaseLink: string): string {
+  const source = new URL(firebaseLink);
+  const target = new URL('/verify-email', frontendBaseUrl());
+  source.searchParams.forEach((value, key) => target.searchParams.append(key, value));
+  return target.toString();
+}
+
+async function deliverVerificationEmail(
+  email: string,
+  displayName: string
+): Promise<VerificationEmailResult> {
+  try {
+    const authAdmin = await getFirebaseAuthAdmin();
+    const generated = await authAdmin.generateEmailVerificationLink(email, {
+      url: new URL('/verify-email', frontendBaseUrl()).toString(),
+      handleCodeInApp: false,
+    });
+    const link = toSproutVerificationLink(generated);
+    await sendEmail({
+      to: email,
+      subject: 'Verify your Sprout account',
+      text: `Welcome to Sprout, ${displayName}!\n\nOpen this link to verify your email:\n${link}\n`,
+    });
+    return {
+      verificationEmailSent: true,
+      message: 'Check your email for the verification link.',
+    };
+  } catch {
+    console.error('[auth] verification email delivery failed');
+    return {
+      verificationEmailSent: false,
+      message:
+        'Account created, but the verification email could not be sent. Sign in and request a new link.',
+    };
+  }
+}
+
 async function getFirebaseLastSignInTime(uid: string): Promise<string | null> {
   try {
     const authAdmin = await getFirebaseAuthAdmin();
@@ -130,19 +175,14 @@ export async function signup(input: SignupInput): Promise<SignupResult> {
     await authUserRepository.addPasswordHistory(profile.id, passwordHash);
     await authUserRepository.prunePasswordHistory(profile.id, PASSWORD_HISTORY_KEEP);
 
-    const link = await authAdmin.generateEmailVerificationLink(email);
-    await sendEmail({
-      to: email,
-      subject: 'Verify your Sprout account',
-      text: `Welcome to Sprout, ${displayName}!\n\nOpen this link to verify your email:\n${link}\n`,
-    });
+    const verification = await deliverVerificationEmail(email, displayName);
 
     return {
       uid: profile.id,
       email: profile.email,
       displayName: profile.displayName,
       emailVerified: false,
-      message: 'Account created. Check your email for the verification link.',
+      ...verification,
     };
   } catch (err) {
     if (isFirebaseDuplicateEmail(err)) {
@@ -150,6 +190,22 @@ export async function signup(input: SignupInput): Promise<SignupResult> {
     }
     throw err;
   }
+}
+
+export async function resendVerificationEmail(
+  uid: string
+): Promise<VerificationEmailResult> {
+  const authAdmin = await getFirebaseAuthAdmin();
+  const firebaseUser = await authAdmin.getUser(uid);
+  if (firebaseUser.emailVerified) {
+    return { verificationEmailSent: false, message: 'Email is already verified.' };
+  }
+  if (!firebaseUser.email) throw httpError(400, 'Account has no email address.');
+  const profile = await authUserRepository.getById(uid);
+  return deliverVerificationEmail(
+    firebaseUser.email,
+    profile?.displayName ?? firebaseUser.displayName ?? 'Sprout player'
+  );
 }
 
 export async function getCurrentUserProfile(
