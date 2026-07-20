@@ -9,6 +9,7 @@ export const TICKET_CATEGORIES = [
 ] as const;
 
 export type TicketCategory = (typeof TICKET_CATEGORIES)[number];
+export type DeliveryStatus = 'pending' | 'sent' | 'failed';
 
 export interface TicketInput {
   name: string;
@@ -26,8 +27,16 @@ export interface Ticket extends TicketInput {
   updatedAt?: string;
 }
 
+export interface TicketNotificationPatch {
+  submitterEmailStatus: DeliveryStatus;
+  adminEmailStatus: DeliveryStatus;
+  lastEmailError: string | null;
+  notificationUpdatedAt: string;
+}
+
 /** The seam every datastore implementation must satisfy — services depend on
  *  this interface, never on Knex or Firestore directly. */
 export interface TicketRepository {
   create(input: TicketInput): Promise<Ticket>;
+  updateNotificationState(id: string, patch: TicketNotificationPatch): Promise<void>;
 }

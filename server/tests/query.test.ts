@@ -3,8 +3,12 @@
 import fs from 'fs';
 import path from 'path';
 import request from 'supertest';
+jest.mock('../services/email.service', () => ({ send: jest.fn() }));
+import { send as sendEmail } from '../services/email.service';
 import app from '../app';
 import db from '../database/db';
+
+const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
 
 beforeAll(async () => {
   await db.migrate.latest();
@@ -34,6 +38,10 @@ describe('POST /api/query/submit (T05)', () => {
     category: 'general',
     message: 'Hello Sprout team!',
   };
+
+  beforeEach(() => {
+    mockSendEmail.mockReset();
+  });
 
   it('creates a ticket, returns 201 + SPR-YYYYMMDD-NNNN, persists the row', async () => {
     const res = await request(app).post('/api/query/submit').send(valid);
@@ -82,6 +90,7 @@ describe('POST /api/query/submit (T05)', () => {
   });
 
   it('UC8 alt-flow 5a: still returns 201 + persists when email delivery fails', async () => {
+    mockSendEmail.mockRejectedValueOnce(new Error('delivery failed'));
     // EMAIL_MODE=smtp with no SMTP_* vars makes send() throw — the ticket
     // service must log the failure and complete the request anyway (Req 9.8).
     const prevMode = process.env.EMAIL_MODE;
@@ -103,5 +112,27 @@ describe('POST /api/query/submit (T05)', () => {
       process.env.EMAIL_MODE = prevMode;
       errSpy.mockRestore();
     }
+  });
+
+  it.each([
+    ['submitter fails', [new Error('submitter failed'), { delivered: true, mode: 'smtp' }]],
+    ['admin fails', [{ delivered: true, mode: 'smtp' }, new Error('admin failed')]],
+    ['both fail', [new Error('submitter failed'), new Error('admin failed')]],
+  ])('persists and attempts both notifications when %s', async (_label, outcomes) => {
+    for (const outcome of outcomes) {
+      if (outcome instanceof Error) mockSendEmail.mockRejectedValueOnce(outcome);
+      else mockSendEmail.mockResolvedValueOnce(outcome);
+    }
+
+    const res = await request(app).post('/api/query/submit').send(valid);
+
+    expect(res.status).toBe(201);
+    expect(mockSendEmail).toHaveBeenCalledTimes(2);
+    expect(mockSendEmail.mock.calls[1][0].to).toBe('hello.sprout.team@gmail.com');
+    const row = await db('query_tickets').where({ refNumber: res.body.refNumber }).first();
+    expect(row).toMatchObject({
+      submitterEmailStatus: outcomes[0] instanceof Error ? 'failed' : 'sent',
+      adminEmailStatus: outcomes[1] instanceof Error ? 'failed' : 'sent',
+    });
   });
 });

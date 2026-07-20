@@ -1,7 +1,12 @@
 /** SQLite implementation of the ticket repository (dev fallback / tests). */
 import { randomUUID } from 'crypto';
 import db from '../database/db';
-import type { Ticket, TicketInput, TicketRepository } from '../models/ticket';
+import type {
+  Ticket,
+  TicketInput,
+  TicketNotificationPatch,
+  TicketRepository,
+} from '../models/ticket';
 
 /** Creates a ticket with an atomic daily-sequence RefNumber (Req 9.5/9.10). */
 const sqliteTicketRepository: TicketRepository = {
@@ -25,6 +30,10 @@ const sqliteTicketRepository: TicketRepository = {
       await trx('query_tickets').insert(record);
       return record;
     });
+  },
+
+  async updateNotificationState(id: string, patch: TicketNotificationPatch): Promise<void> {
+    await db('query_tickets').where({ id }).update(patch);
   },
 };
 

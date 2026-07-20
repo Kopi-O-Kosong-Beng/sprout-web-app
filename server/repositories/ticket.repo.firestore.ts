@@ -5,7 +5,12 @@
 import { randomUUID } from 'crypto';
 import type { Transaction } from 'firebase-admin/firestore';
 import { getDb } from '../firebase';
-import type { Ticket, TicketInput, TicketRepository } from '../models/ticket';
+import type {
+  Ticket,
+  TicketInput,
+  TicketNotificationPatch,
+  TicketRepository,
+} from '../models/ticket';
 
 const firestoreTicketRepository: TicketRepository = {
   async create({ name, email, category, message }: TicketInput): Promise<Ticket> {
@@ -32,6 +37,10 @@ const firestoreTicketRepository: TicketRepository = {
       tx.set(db.collection('query_tickets').doc(record.id), record);
       return record;
     });
+  },
+
+  async updateNotificationState(id: string, patch: TicketNotificationPatch): Promise<void> {
+    await getDb().collection('query_tickets').doc(id).set(patch, { merge: true });
   },
 };
 
