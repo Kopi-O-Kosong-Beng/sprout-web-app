@@ -7,6 +7,7 @@ jest.mock('../services/email.service', () => ({ send: jest.fn() }));
 import { send as sendEmail } from '../services/email.service';
 import app from '../app';
 import db from '../database/db';
+import ticketRepository from '../repositories/tickets';
 
 const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
 
@@ -133,6 +134,11 @@ describe('POST /api/query/submit (T05)', () => {
       expect(row).toMatchObject({
         submitterEmailStatus: outcomes[0] instanceof Error ? 'failed' : 'sent',
         adminEmailStatus: outcomes[1] instanceof Error ? 'failed' : 'sent',
+        lastEmailError: outcomes[0] instanceof Error
+          ? outcomes[1] instanceof Error
+            ? 'submitter_email_delivery_failed;admin_email_delivery_failed'
+            : 'submitter_email_delivery_failed'
+          : 'admin_email_delivery_failed',
       });
       expect(errSpy).toHaveBeenCalledTimes(1);
       expect(errSpy).toHaveBeenCalledWith(
@@ -142,6 +148,51 @@ describe('POST /api/query/submit (T05)', () => {
     } finally {
       if (previousAdminEmail === undefined) delete process.env.ADMIN_EMAIL;
       else process.env.ADMIN_EMAIL = previousAdminEmail;
+      errSpy.mockRestore();
+    }
+  });
+
+  it('never persists or logs secret-bearing provider rejection text', async () => {
+    const submitterSecret = 'smtp-password=submitter-secret';
+    const adminSecret = 'provider-token=admin-secret';
+    mockSendEmail
+      .mockRejectedValueOnce(new Error(submitterSecret))
+      .mockRejectedValueOnce(new Error(adminSecret));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const res = await request(app).post('/api/query/submit').send(valid);
+      expect(res.status).toBe(201);
+      const row = await db('query_tickets').where({ refNumber: res.body.refNumber }).first();
+      expect(row.lastEmailError).toBe(
+        'submitter_email_delivery_failed;admin_email_delivery_failed'
+      );
+      const output = errSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('submitter_email_delivery_failed');
+      expect(output).toContain('admin_email_delivery_failed');
+      expect(output).not.toContain(submitterSecret);
+      expect(output).not.toContain(adminSecret);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('never logs raw notification-state persistence errors', async () => {
+    const secret = 'database-url=secret-persistence-value';
+    mockSendEmail.mockResolvedValue({ delivered: true, mode: 'smtp' });
+    const updateSpy = jest
+      .spyOn(ticketRepository, 'updateNotificationState')
+      .mockRejectedValueOnce(new Error(secret));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const res = await request(app).post('/api/query/submit').send(valid);
+      expect(res.status).toBe(201);
+      const output = errSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('notification_status_update_failed');
+      expect(output).not.toContain(secret);
+    } finally {
+      updateSpy.mockRestore();
       errSpy.mockRestore();
     }
   });

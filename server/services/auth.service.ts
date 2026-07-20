@@ -3,6 +3,7 @@ import { randomInt } from 'crypto';
 import authUserRepository from '../repositories/auth-users';
 import { send as sendEmail } from './email.service';
 import type { AuthUserProfile } from '../models/auth';
+import { backgroundDispatcher } from '../utils/background-dispatch';
 
 const RESET_OTP_TTL_MS = 15 * 60 * 1000;
 const PASSWORD_HISTORY_KEEP = 3;
@@ -266,20 +267,24 @@ export async function recordUserLogout(uid: string): Promise<PublicProfile> {
 export async function requestPasswordReset(emailInput: string): Promise<{ message: string }> {
   const email = normalizeEmail(emailInput);
   const profile = await authUserRepository.getByEmail(email);
-  if (!profile) {
-    return { message: RESET_REQUEST_MESSAGE };
-  }
-
   const otp = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const resetOtpHash = await bcrypt.hash(otp, bcryptCost());
   const resetOtpExpiresAt = new Date(Date.now() + RESET_OTP_TTL_MS).toISOString();
 
-  await authUserRepository.setResetOtp(profile.id, resetOtpHash, resetOtpExpiresAt);
-  await sendEmail({
-    to: profile.email,
-    subject: 'Your Sprout password reset code',
-    text: `Your Sprout password reset code is ${otp}.\n\nIt expires in 15 minutes.\n`,
-  });
+  if (profile) {
+    try {
+      await authUserRepository.setResetOtp(profile.id, resetOtpHash, resetOtpExpiresAt);
+      backgroundDispatcher.dispatch('password_reset_email_delivery_failed', () =>
+        sendEmail({
+          to: profile.email,
+          subject: 'Your Sprout password reset code',
+          text: `Your Sprout password reset code is ${otp}.\n\nIt expires in 15 minutes.\n`,
+        }).then(() => undefined)
+      );
+    } catch {
+      console.error('[auth] password_reset_state_write_failed');
+    }
+  }
   return { message: RESET_REQUEST_MESSAGE };
 }
 

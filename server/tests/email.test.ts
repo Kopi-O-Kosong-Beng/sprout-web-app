@@ -131,9 +131,9 @@ describe('email.service send() - smtp mode', () => {
     process.env.EMAIL_MODE = 'smtp';
     process.env.SMTP_HOST = 'smtp.gmail.com';
     process.env.SMTP_PORT = '587';
-    process.env.SMTP_USER = 'sproutteamadmin@gmail.com';
+    process.env.SMTP_USER = 'hello.sprout.team@gmail.com';
     process.env.SMTP_PASS = 'app-password';
-    process.env.EMAIL_FROM = 'sproutteamadmin@gmail.com';
+    process.env.EMAIL_FROM = 'hello.sprout.team@gmail.com';
     for (const [key, value] of Object.entries(overrides)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -150,10 +150,10 @@ describe('email.service send() - smtp mode', () => {
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
-      auth: { user: 'sproutteamadmin@gmail.com', pass: 'app-password' },
+      auth: { user: 'hello.sprout.team@gmail.com', pass: 'app-password' },
     });
     expect(mockSendMail).toHaveBeenCalledWith({
-      from: 'sproutteamadmin@gmail.com',
+      from: 'hello.sprout.team@gmail.com',
       to: payload.to,
       subject: payload.subject,
       text: payload.text,
@@ -176,7 +176,7 @@ describe('email.service send() - smtp mode', () => {
     await send(payload);
 
     expect(mockSendMail).toHaveBeenCalledWith(
-      expect.objectContaining({ from: 'sproutteamadmin@gmail.com' })
+      expect.objectContaining({ from: 'hello.sprout.team@gmail.com' })
     );
   });
 
@@ -208,5 +208,40 @@ describe('email.service send() - invalid mode', () => {
     process.env.EMAIL_MODE = 'carrier-pigeon';
     const send = await freshSend();
     await expect(send(payload)).rejects.toThrow('Unsupported EMAIL_MODE: carrier-pigeon');
+  });
+});
+
+describe('check-email command', () => {
+  it('preserves the explicit missing-environment message', async () => {
+    process.env.EMAIL_MODE = 'smtp';
+    const error = jest.fn();
+    const { runEmailCheck } = await import('../scripts/check-email');
+
+    const exitCode = await runEmailCheck({ error, log: jest.fn() });
+
+    expect(exitCode).toBe(1);
+    expect(error).toHaveBeenCalledWith(
+      '[email-check] failed: Missing required email env var: SMTP_HOST (required when EMAIL_MODE=smtp)'
+    );
+  });
+
+  it('maps secret-bearing transport exceptions to a stable failure message', async () => {
+    const secret = 'smtp-password=transport-secret';
+    const error = jest.fn();
+    const { runEmailCheck } = await import('../scripts/check-email');
+
+    const exitCode = await runEmailCheck({
+      verify: async () => {
+        throw new Error(secret);
+      },
+      error,
+      log: jest.fn(),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(error).toHaveBeenCalledWith(
+      '[email-check] failed: transport_verification_failed'
+    );
+    expect(error.mock.calls.flat().join('\n')).not.toContain(secret);
   });
 });

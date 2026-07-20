@@ -15,6 +15,8 @@ services:
         value: "22.13.1"
       - key: DATASTORE
         value: firestore
+      - key: STORAGE_MODE
+        value: local
       - key: AUTH_DEV_BYPASS
         value: "false"
       - key: DEMO_AUTH_BYPASS

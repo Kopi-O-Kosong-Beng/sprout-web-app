@@ -11,6 +11,18 @@ import avatarRoutes from './routes/avatar.routes';
 
 const app = express();
 
+export function resolveTrustProxy(
+  nodeEnv = process.env.NODE_ENV,
+  configuredHops = process.env.TRUST_PROXY_HOPS
+): false | number {
+  if (nodeEnv !== 'production') return false;
+  if (configuredHops === undefined) return 1;
+  const hops = Number(configuredHops);
+  return Number.isInteger(hops) && hops >= 1 && hops <= 5 ? hops : 1;
+}
+
+app.set('trust proxy', resolveTrustProxy());
+
 // 9.1 CORS — dev frontend origin only (Req 11.4).
 // Extra origins here are for manual browser testing (e.g. test.html served via
 // Live Server on :5500) — the real client always runs on 5173, and production

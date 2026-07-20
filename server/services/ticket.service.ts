@@ -23,10 +23,11 @@ export async function createTicket(input: TicketInput): Promise<Ticket> {
     }),
   ]);
 
-  const failures = [submitterResult, adminResult]
-    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-    .map((result) => result.reason instanceof Error ? result.reason.message : 'Unknown delivery error');
-  const lastEmailError = failures.length > 0 ? failures.join('; ').slice(0, 500) : null;
+  const failureCodes = [
+    submitterResult.status === 'rejected' ? 'submitter_email_delivery_failed' : null,
+    adminResult.status === 'rejected' ? 'admin_email_delivery_failed' : null,
+  ].filter((code): code is string => code !== null);
+  const lastEmailError = failureCodes.length > 0 ? failureCodes.join(';') : null;
 
   if (lastEmailError) {
     console.error(
@@ -40,10 +41,9 @@ export async function createTicket(input: TicketInput): Promise<Ticket> {
     adminEmailStatus: adminResult.status === 'fulfilled' ? 'sent' : 'failed',
     lastEmailError,
     notificationUpdatedAt: new Date().toISOString(),
-  }).catch((error: unknown) => {
+  }).catch(() => {
     console.error(
-      `[ticket] notification status update failed for ${ticket.refNumber}`,
-      error instanceof Error ? error.message : 'Unknown persistence error'
+      `[ticket] notification_status_update_failed ref=${ticket.refNumber}`
     );
   });
 

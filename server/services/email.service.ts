@@ -21,10 +21,19 @@ export interface EmailTransportStatus {
   verified: boolean;
 }
 
+export class MissingEmailEnvironmentError extends Error {
+  readonly code = 'missing_email_environment';
+
+  constructor(name: string) {
+    super(`Missing required email env var: ${name} (required when EMAIL_MODE=smtp)`);
+    this.name = 'MissingEmailEnvironmentError';
+  }
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    throw new Error(`Missing required email env var: ${name} (required when EMAIL_MODE=smtp)`);
+    throw new MissingEmailEnvironmentError(name);
   }
   return value;
 }

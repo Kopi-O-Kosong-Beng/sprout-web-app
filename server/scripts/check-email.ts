@@ -1,12 +1,35 @@
 import '../env';
-import { verifyEmailTransport } from '../services/email.service';
+import {
+  MissingEmailEnvironmentError,
+  verifyEmailTransport,
+} from '../services/email.service';
 
-verifyEmailTransport()
-  .then((result) => {
-    console.log(`[email-check] mode=${result.mode} verified=${result.verified}`);
-  })
-  .catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : 'Unknown email error';
-    console.error(`[email-check] failed: ${message}`);
-    process.exitCode = 1;
+interface EmailCheckOptions {
+  verify?: typeof verifyEmailTransport;
+  log?: (message: string) => void;
+  error?: (message: string) => void;
+}
+
+export async function runEmailCheck(options: EmailCheckOptions = {}): Promise<number> {
+  const verify = options.verify ?? verifyEmailTransport;
+  const log = options.log ?? console.log;
+  const errorLog = options.error ?? console.error;
+
+  try {
+    const result = await verify();
+    log(`[email-check] mode=${result.mode} verified=${result.verified}`);
+    return 0;
+  } catch (error: unknown) {
+    const reason = error instanceof MissingEmailEnvironmentError
+      ? error.message
+      : 'transport_verification_failed';
+    errorLog(`[email-check] failed: ${reason}`);
+    return 1;
+  }
+}
+
+if (require.main === module) {
+  void runEmailCheck().then((exitCode) => {
+    process.exitCode = exitCode;
   });
+}

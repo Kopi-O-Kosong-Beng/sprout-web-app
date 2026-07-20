@@ -77,7 +77,6 @@ function createAuthMiddleware(options: AuthMiddlewareOptions = {}): RequestHandl
       const decoded: DecodedIdToken = await getAuthAdmin().verifyIdToken(token);
       if (
         !options.allowUnverifiedEmail &&
-        decoded.email &&
         decoded.email_verified !== true
       ) {
         res.status(403).json({ error: 'Email is not verified.' });

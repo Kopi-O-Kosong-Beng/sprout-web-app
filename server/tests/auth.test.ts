@@ -8,7 +8,10 @@ import { send as sendEmail } from '../services/email.service';
 import app from '../app';
 import db from '../database/db';
 import authUserRepository from '../repositories/auth-users';
-import { verificationResendStore } from '../routes/auth.routes';
+import {
+  verificationResendAccountStore,
+  verificationResendIpStore,
+} from '../routes/auth.routes';
 
 const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
 
@@ -159,7 +162,8 @@ beforeEach(async () => {
   mockUsersByUid.clear();
   jest.clearAllMocks();
   mockSendEmail.mockResolvedValue({ delivered: true, mode: 'console' });
-  await verificationResendStore.resetAll();
+  await verificationResendAccountStore.resetAll();
+  await verificationResendIpStore.resetAll();
   await resetTables();
 });
 
@@ -465,6 +469,99 @@ describe('POST /api/auth/resend-verification', () => {
     expect(statuses).toEqual([200, 200, 200, 429]);
     expect(mockSendEmail).toHaveBeenCalledTimes(3);
   });
+
+  it('does not consume account quota for missing or invalid bearer attempts', async () => {
+    const user = await createLocalUser({
+      email: 'quota-after-auth@example.com',
+      isVerified: false,
+    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const missing = await request(app).post('/api/auth/resend-verification');
+      expect(missing.status).toBe(401);
+    }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      mockAuthAdmin.verifyIdToken.mockRejectedValueOnce(new Error('invalid token'));
+      const invalid = await request(app)
+        .post('/api/auth/resend-verification')
+        .set('Authorization', `Bearer invalid-${attempt}`);
+      expect(invalid.status).toBe(401);
+    }
+
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid: user.id,
+      email: user.email,
+      email_verified: false,
+    });
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      statuses.push((await request(app)
+        .post('/api/auth/resend-verification')
+        .set('Authorization', 'Bearer pending-token')).status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 429]);
+  });
+
+  it('limits one account across changing client IPs', async () => {
+    const previousTrustProxy = app.get('trust proxy');
+    app.set('trust proxy', 1);
+    const user = await createLocalUser({
+      email: 'multi-ip-account@example.com',
+      isVerified: false,
+    });
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid: user.id,
+      email: user.email,
+      email_verified: false,
+    });
+
+    try {
+      const statuses: number[] = [];
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        statuses.push((await request(app)
+          .post('/api/auth/resend-verification')
+          .set('Authorization', 'Bearer pending-token')
+          .set('X-Forwarded-For', `198.51.100.${attempt + 1}`)).status);
+      }
+      expect(statuses).toEqual([200, 200, 200, 429]);
+    } finally {
+      app.set('trust proxy', previousTrustProxy);
+    }
+  });
+
+  it('isolates account quotas for different users on one IP', async () => {
+    const first = await createLocalUser({
+      email: 'shared-ip-first@example.com',
+      isVerified: false,
+    });
+    const second = await createLocalUser({
+      email: 'shared-ip-second@example.com',
+      isVerified: false,
+    });
+    mockAuthAdmin.verifyIdToken.mockImplementation(async (token: string) => {
+      const user = token === 'first-token' ? first : second;
+      return { uid: user.id, email: user.email, email_verified: false };
+    });
+
+    const statuses: number[] = [];
+    for (const token of ['first-token', 'second-token']) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        statuses.push((await request(app)
+          .post('/api/auth/resend-verification')
+          .set('Authorization', `Bearer ${token}`)).status);
+      }
+    }
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 200]);
+  });
+
+  it('caps unauthenticated resend abuse at 20 requests per 15 minutes per IP', async () => {
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 21; attempt += 1) {
+      statuses.push((await request(app).post('/api/auth/resend-verification')).status);
+    }
+    expect(statuses.slice(0, 20)).toEqual(Array(20).fill(401));
+    expect(statuses[20]).toBe(429);
+    expect(mockAuthAdmin.verifyIdToken).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /api/auth/me', () => {
@@ -547,6 +644,16 @@ describe('GET /api/auth/me', () => {
       .set('Authorization', 'Bearer pending-token');
     expect(unverified.status).toBe(403);
     expect(unverified.body.error).toBe('Email is not verified.');
+
+    mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
+      uid: 'no-email-user',
+      email_verified: false,
+    });
+    const noEmail = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer no-email-token');
+    expect(noEmail.status).toBe(403);
+    expect(noEmail.body.error).toBe('Email is not verified.');
   });
 });
 
@@ -633,11 +740,126 @@ describe('password reset OTP flow', () => {
 
     expect(known.status).toBe(200);
     expect(unknown.status).toBe(200);
-    expect(known.body.message).toBe(unknown.body.message);
+    expect(known.body).toEqual({
+      message: 'If an account exists, a reset code has been sent.',
+    });
+    expect(unknown.body).toEqual(known.body);
 
     const row = await db('users').where({ email: 'reset@example.com' }).first();
     expect(row.resetOtpHash).toBeTruthy();
     expect(row.resetOtpHash).not.toBe(latestOtpFromEmailPayload());
+  });
+
+  it('performs one bcrypt hash for both known and unknown valid-email requests', async () => {
+    await createLocalUser({ email: 'work-parity@example.com' });
+    const hashSpy = jest.spyOn(bcrypt, 'hash');
+
+    const beforeKnown = hashSpy.mock.calls.length;
+    const known = await request(app)
+      .post('/api/auth/request-reset')
+      .send({ email: 'work-parity@example.com' });
+    const knownHashCalls = hashSpy.mock.calls.length - beforeKnown;
+
+    const beforeUnknown = hashSpy.mock.calls.length;
+    const unknown = await request(app)
+      .post('/api/auth/request-reset')
+      .send({ email: 'never-stored@example.com' });
+    const unknownHashCalls = hashSpy.mock.calls.length - beforeUnknown;
+
+    expect(known.status).toBe(200);
+    expect(unknown.status).toBe(200);
+    expect(known.body).toEqual(unknown.body);
+    expect(knownHashCalls).toBe(1);
+    expect(unknownHashCalls).toBe(1);
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
+    expect(await db('users').where({ email: 'never-stored@example.com' }).first()).toBeUndefined();
+  });
+
+  it('keeps the generic 200 response and controlled logs when reset delivery rejects', async () => {
+    const secret = 'smtp-token=provider-secret-value';
+    await createLocalUser({ email: 'provider-failure@example.com' });
+    mockSendEmail.mockRejectedValueOnce(new Error(secret));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const known = await request(app)
+        .post('/api/auth/request-reset')
+        .send({ email: 'provider-failure@example.com' });
+      const unknown = await request(app)
+        .post('/api/auth/request-reset')
+        .send({ email: 'provider-failure-unknown@example.com' });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(known.status).toBe(200);
+      expect(unknown.status).toBe(200);
+      expect(known.body).toEqual(unknown.body);
+      const logs = errSpy.mock.calls.flat().join('\n');
+      expect(logs).toContain('password_reset_email_delivery_failed');
+      expect(logs).not.toContain(secret);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('keeps the generic 200 response when known-account OTP persistence rejects', async () => {
+    const secret = 'database-password=reset-state-secret';
+    await createLocalUser({ email: 'state-failure@example.com' });
+    const persistenceSpy = jest
+      .spyOn(authUserRepository, 'setResetOtp')
+      .mockRejectedValueOnce(new Error(secret));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const known = await request(app)
+        .post('/api/auth/request-reset')
+        .send({ email: 'state-failure@example.com' });
+      const unknown = await request(app)
+        .post('/api/auth/request-reset')
+        .send({ email: 'state-failure-unknown@example.com' });
+
+      expect(known.status).toBe(200);
+      expect(unknown.status).toBe(200);
+      expect(known.body).toEqual(unknown.body);
+      expect(mockSendEmail).not.toHaveBeenCalled();
+      const logs = errSpy.mock.calls.flat().join('\n');
+      expect(logs).toContain('password_reset_state_write_failed');
+      expect(logs).not.toContain(secret);
+    } finally {
+      persistenceSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  });
+
+  it('returns before the reset email provider settles', async () => {
+    await createLocalUser({ email: 'slow-provider@example.com' });
+    const providerStarted = deferred();
+    let rejectProvider!: (reason: unknown) => void;
+    mockSendEmail.mockImplementationOnce(() => {
+      providerStarted.resolve();
+      return new Promise((_, reject) => {
+        rejectProvider = reject;
+      });
+    });
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const responsePromise = request(app)
+      .post('/api/auth/request-reset')
+      .send({ email: 'slow-provider@example.com' })
+      .then((response) => response);
+
+    try {
+      await providerStarted.promise;
+      const response = await Promise.race([
+        responsePromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
+      ]);
+      expect(response).not.toBeNull();
+      expect(response?.status).toBe(200);
+    } finally {
+      rejectProvider(new Error('smtp-token=slow-provider-secret'));
+      await responsePromise;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      errSpy.mockRestore();
+    }
   });
 
   it('resets a password with a valid OTP and clears the stored OTP', async () => {
@@ -903,6 +1125,39 @@ describe('password reset OTP flow', () => {
 
     const row = await db('users').where({ id: user.id }).first();
     expect(row.resetOtpHash).toBeNull();
+    expect(row.resetOtpFailedAttempts).toBe(0);
+  });
+
+  it('atomically invalidates one issuance under five concurrent wrong OTPs', async () => {
+    const user = await createLocalUser({ email: 'concurrent-attempts@example.com' });
+    const otpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
+    await db('users').where({ id: user.id }).update({
+      resetOtpHash: otpHash,
+      resetOtpExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+      resetOtpFailedAttempts: 0,
+    });
+
+    const responses = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app).post('/api/auth/verify-reset').send({
+          email: user.email,
+          otp: '000000',
+          newPassword: 'Password123!!',
+        })
+      )
+    );
+
+    expect(responses.map((response) => response.status)).toEqual(Array(5).fill(400));
+    expect(responses.map((response) => response.body.error).sort()).toEqual([
+      'Invalid OTP.',
+      'Invalid OTP.',
+      'Invalid OTP.',
+      'Invalid OTP.',
+      'Invalid OTP. Request a new one.',
+    ]);
+    const row = await db('users').where({ id: user.id }).first();
+    expect(row.resetOtpHash).toBeNull();
+    expect(row.resetOtpExpiresAt).toBeNull();
     expect(row.resetOtpFailedAttempts).toBe(0);
   });
 });

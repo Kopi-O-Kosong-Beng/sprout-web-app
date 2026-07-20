@@ -25,14 +25,24 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-export const verificationResendStore = new MemoryStore();
+export const verificationResendIpStore = new MemoryStore();
+export const verificationResendAccountStore = new MemoryStore();
 
-const verificationResendLimiter = rateLimit({
+const verificationResendIpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: verificationResendIpStore,
+});
+
+const verificationResendAccountLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 3,
   standardHeaders: true,
   legacyHeaders: false,
-  store: verificationResendStore,
+  store: verificationResendAccountStore,
+  keyGenerator: (req) => req.user!.uid,
 });
 
 const signupSchema = Joi.object({
@@ -54,8 +64,9 @@ const verifyResetSchema = Joi.object({
 router.post('/signup', authLimiter, validate(signupSchema), handleSignup);
 router.post(
   '/resend-verification',
-  verificationResendLimiter,
+  verificationResendIpLimiter,
   strictUnverifiedAuthMiddleware,
+  verificationResendAccountLimiter,
   handleResendVerification
 );
 router.get('/me', authMiddleware, handleMe);
