@@ -14,6 +14,7 @@ export default function VerifyEmailPage() {
   const [view, setView] = useState<ViewState>('idle');
   const [message, setMessage] = useState('Verify your email to continue.');
   const handledCode = useRef<string | null>(null);
+  const applyingCode = useRef(false);
   const mode = params.get('mode');
   const code = params.get('oobCode');
 
@@ -21,19 +22,30 @@ export default function VerifyEmailPage() {
     if (mode !== 'verifyEmail' || !code || handledCode.current === code) return;
     handledCode.current = code;
     const actionCode = code;
+    applyingCode.current = true;
     setView('applying');
+    setMessage('Verifying your email...');
 
     async function verifyEmail() {
       try {
         await applyActionCode(getSproutFirebaseAuth(), actionCode);
-        await refreshProfile();
-        setView('verified');
-        setMessage('Email verified. You can continue to Sprout.');
       } catch {
+        applyingCode.current = false;
         setView('invalid');
         setMessage(
           'This verification link is invalid or expired. Request a new link.'
         );
+        return;
+      }
+
+      applyingCode.current = false;
+      setView('verified');
+      setMessage('Email verified. You can continue to Sprout.');
+
+      try {
+        await refreshProfile();
+      } catch {
+        setMessage('Email verified. Sign in again to refresh your Sprout session.');
       }
     }
 
@@ -41,6 +53,7 @@ export default function VerifyEmailPage() {
   }, [code, mode, refreshProfile]);
 
   async function handleResend() {
+    if (applyingCode.current || view === 'applying' || view === 'sending') return;
     setView('sending');
     try {
       const result = await resendVerification();
@@ -66,7 +79,7 @@ export default function VerifyEmailPage() {
             className="primary-cta form-submit"
             type="button"
             onClick={handleResend}
-            disabled={view === 'sending'}
+            disabled={view === 'applying' || view === 'sending'}
           >
             <span aria-hidden="true">-&gt;</span>
             {view === 'sending' ? 'Sending...' : 'Resend verification email'}

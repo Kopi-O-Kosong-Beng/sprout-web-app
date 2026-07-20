@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -75,6 +75,43 @@ describe('VerifyEmailPage', () => {
 
     expect(await screen.findByText(/invalid or expired/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /resend verification email/i })).toBeEnabled();
+  });
+
+  it('keeps verified success when refreshing the session fails', async () => {
+    mocks.refreshProfile.mockRejectedValue(new Error('refresh failed'));
+
+    renderAt('/verify-email?mode=verifyEmail&oobCode=valid-code');
+
+    expect(
+      await screen.findByRole('heading', { name: /email verified/i })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/sign in again to refresh/i)).toBeInTheDocument();
+    expect(screen.queryByText(/invalid or expired/i)).not.toBeInTheDocument();
+  });
+
+  it('blocks resend while an action code is being applied', async () => {
+    let resolveApply: (() => void) | undefined;
+    mocks.applyActionCode.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveApply = resolve;
+      })
+    );
+    const user = userEvent.setup();
+
+    renderAt('/verify-email?mode=verifyEmail&oobCode=pending-code');
+
+    expect(await screen.findByText('Verifying your email...')).toBeInTheDocument();
+    const resend = screen.getByRole('button', {
+      name: /resend verification email/i,
+    });
+    expect(resend).toBeDisabled();
+    await user.click(resend);
+    expect(mocks.resendVerification).not.toHaveBeenCalled();
+
+    await act(async () => resolveApply?.());
+    expect(
+      await screen.findByRole('heading', { name: /email verified/i })
+    ).toBeInTheDocument();
   });
 
   it('offers resend for an authenticated unverified user', async () => {

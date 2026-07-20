@@ -62,10 +62,8 @@ export default function ContactPage() {
               Reference number: <strong>{refNumber}</strong>
             </h2>
             <p>
-              Keep this reference for follow-ups. A confirmation email is sent
-              to you and the Sprout team is notified (in dev,{' '}
-              <code>EMAIL_MODE=console</code> prints both to the backend
-              terminal).
+              Keep this reference for follow-ups. Your ticket was submitted
+              successfully, and the Sprout team has been notified.
             </p>
             <button
               className="primary-cta form-submit"

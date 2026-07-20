@@ -61,9 +61,7 @@ export default function LoginPage() {
     setError(null);
     try {
       const res = await requestPasswordReset(email.trim());
-      setNotice(
-        `${res.message} With EMAIL_MODE=console the 6-digit code is printed in the backend terminal.`
-      );
+      setNotice(res.message);
       setMode('reset-verify');
     } catch (err) {
       setError(extractApiError(err, 'Could not request a reset code.'));

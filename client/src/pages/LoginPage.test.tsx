@@ -1,10 +1,15 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthContextValue, AuthStatus } from '../context/AuthContext';
 import LoginPage from './LoginPage';
 
 const authState = vi.hoisted(() => ({ status: 'signed-out' as AuthStatus }));
+const apiMocks = vi.hoisted(() => ({
+  requestPasswordReset: vi.fn(),
+  verifyPasswordReset: vi.fn(),
+}));
 
 vi.mock('../hooks/useAuth', () => ({
   useAuth: (): AuthContextValue => ({
@@ -16,6 +21,8 @@ vi.mock('../hooks/useAuth', () => ({
     refreshProfile: vi.fn(),
   }),
 }));
+
+vi.mock('../services/sproutApi', () => apiMocks);
 
 function renderLogin(status: AuthStatus) {
   authState.status = status;
@@ -31,6 +38,12 @@ function renderLogin(status: AuthStatus) {
 }
 
 describe('LoginPage auth redirects', () => {
+  beforeEach(() => {
+    apiMocks.requestPasswordReset.mockResolvedValue({
+      message: 'If an account exists, a reset code has been sent.',
+    });
+  });
+
   it('sends an unverified account to email verification', () => {
     renderLogin('unverified');
 
@@ -41,5 +54,20 @@ describe('LoginPage auth redirects', () => {
     renderLogin('authenticated');
 
     expect(screen.getByText(/private archive/i)).toBeInTheDocument();
+  });
+
+  it('shows mode-neutral copy after requesting a reset code', async () => {
+    const user = userEvent.setup();
+    renderLogin('signed-out');
+
+    await user.click(screen.getByRole('button', { name: /reset password/i }));
+    await user.click(screen.getByRole('button', { name: /send reset otp/i }));
+
+    expect(
+      await screen.findByText('If an account exists, a reset code has been sent.')
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/EMAIL_MODE|backend (?:terminal|log)/i)
+    ).not.toBeInTheDocument();
   });
 });
