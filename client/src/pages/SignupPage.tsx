@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
-import { signupUser } from '../services/sproutApi';
+import { signupUser, type SignupResponse } from '../services/sproutApi';
 import { extractApiError } from '../services/apiClient';
 import { getPasswordCriteria, isStrongPassword } from '../utils/validation';
 
@@ -13,7 +13,7 @@ export default function SignupPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicateEmail, setDuplicateEmail] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [signupResult, setSignupResult] = useState<SignupResponse | null>(null);
 
   const criteria = getPasswordCriteria(password);
   const passwordsMatch = password === confirm;
@@ -51,7 +51,7 @@ export default function SignupPage() {
         password,
         displayName: displayName.trim(),
       });
-      setSuccessMessage(res.message);
+      setSignupResult(res);
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 409) {
         const message = err.response.data;
@@ -68,18 +68,22 @@ export default function SignupPage() {
     }
   }
 
-  if (successMessage) {
+  if (signupResult) {
     return (
       <main className="auth-page">
         <section className="auth-panel" aria-labelledby="signup-success-title">
           <div>
             <p className="eyebrow">Account created</p>
-            <h1 id="signup-success-title">Check your inbox to verify</h1>
-            <p>{successMessage}</p>
+            <h1 id="signup-success-title">
+              {signupResult.verificationEmailSent
+                ? 'Check your inbox to verify'
+                : 'Your account is ready'}
+            </h1>
+            <p>{signupResult.message}</p>
             <p>
-              Open the verification link, then log in. With{' '}
-              <code>EMAIL_MODE=console</code> the link is printed in the backend
-              terminal instead of a real inbox.
+              {signupResult.verificationEmailSent
+                ? 'Open the verification link, then log in.'
+                : 'Log in to request a new verification email.'}
             </p>
           </div>
           <div className="auth-footer">
@@ -118,7 +122,7 @@ export default function SignupPage() {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="Fern Keeper"
-              maxLength={80}
+              maxLength={50}
               required
             />
           </label>

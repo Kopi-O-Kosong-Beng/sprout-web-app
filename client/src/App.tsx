@@ -5,6 +5,7 @@ import ProtectedRoute from './components/common/ProtectedRoute';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
 import ContactPage from './pages/ContactPage';
 import ArchivePage from './pages/ArchivePage';
 import BattlePage from './pages/BattlePage';
@@ -21,6 +22,7 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/verify-email" element={<VerifyEmailPage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route
               path="/archive"

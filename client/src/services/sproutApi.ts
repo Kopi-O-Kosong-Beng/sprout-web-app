@@ -64,6 +64,12 @@ export interface SignupResponse {
   email: string;
   displayName: string;
   emailVerified: boolean;
+  verificationEmailSent: boolean;
+  message: string;
+}
+
+export interface VerificationEmailResponse {
+  verificationEmailSent: boolean;
   message: string;
 }
 
@@ -116,6 +122,13 @@ export async function submitTicket(input: TicketInput): Promise<TicketResponse> 
 
 export async function signupUser(input: SignupInput): Promise<SignupResponse> {
   const { data } = await apiClient.post<SignupResponse>('/api/auth/signup', input);
+  return data;
+}
+
+export async function resendVerification(): Promise<VerificationEmailResponse> {
+  const { data } = await apiClient.post<VerificationEmailResponse>(
+    '/api/auth/resend-verification'
+  );
   return data;
 }
 
