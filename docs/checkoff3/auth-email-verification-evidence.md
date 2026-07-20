@@ -1,7 +1,7 @@
 # Checkoff 3 Auth and Email Verification Evidence
 
 **Recorded:** 2026-07-21 (Asia/Singapore)
-**Commit under test:** `cd7e8366d2001f49909cf166347d593c8c0e148a`
+**Commit under test:** `a28e6e26eecf19e8d0fa2a1fc0d6fd9b1c0d2b97`
 **Required runtime:** Node `22.x`
 **Fresh verification runtime:** disposable Node `v22.23.1`; active system shell remains Node `v24.14.0`
 **Configuration boundary:** no Firebase web credentials, Firebase Admin credentials, Gmail App Password, authorized deployed domain, controlled inbox, or Firebase Storage bucket was available.
@@ -12,12 +12,12 @@ The commands below are the logical npm commands required by the gate. Duration i
 
 | Logical npm command | Actual result | Duration |
 | --- | --- | ---: |
-| `npm.cmd run typecheck -w server` | AUTOMATED PASS (exit 0): `tsc --noEmit` | 32.390s |
-| `npm.cmd test -w server` | AUTOMATED PASS (exit 0): Jest 7 suites, 63 tests, 0 snapshots | 43.227s |
-| `npm.cmd test -w client` | AUTOMATED PASS (exit 0): Vitest 5 files, 17 tests | 24.415s |
-| `npm.cmd run lint -w client` | AUTOMATED PASS (exit 0): 0 errors, 3 existing Fast Refresh warnings | 4.442s |
-| `npm.cmd run build -w client` | AUTOMATED PASS (exit 0): TypeScript and Vite; 109 modules transformed | 20.497s |
-| `npm.cmd test` | AUTOMATED PASS (exit 0): server 7 suites/63 tests; client 5 files/17 tests | 97.406s |
+| `npm.cmd run typecheck -w server` | AUTOMATED PASS (exit 0): `tsc --noEmit` | 2.852s |
+| `npm.cmd test -w server` | AUTOMATED PASS (exit 0): Jest 9 suites, 79 tests, 0 snapshots | 6.867s |
+| `npm.cmd test -w client` | AUTOMATED PASS (exit 0): Vitest 6 files, 18 tests | 11.781s |
+| `npm.cmd run lint -w client` | AUTOMATED PASS (exit 0): 0 errors, 3 existing Fast Refresh warnings | 3.356s |
+| `npm.cmd run build -w client` | AUTOMATED PASS (exit 0): TypeScript and Vite; 109 modules transformed | 15.621s |
+| `npm.cmd test` | AUTOMATED PASS (exit 0): server 9 suites/79 tests; client 6 files/18 tests | 46.090s |
 
 The three lint warnings are `react(only-export-components)`: `client/src/context/AuthContext.tsx:43`, `client/src/context/AuthContext.tsx:49`, and `client/src/components/common/PlantVisuals.tsx:19`.
 
@@ -29,16 +29,18 @@ The first five logical commands used this direct wrapper form, with the logical 
 & 'C:\Users\zhife\AppData\Local\npm-cache\_npx\52027bd8fc0022aa\node_modules\node\bin\node.exe' 'D:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js' <logical npm arguments>
 ```
 
-The root command needed recursive npm proof. A disposable `npm.cmd` was created outside the repository at `C:\Users\zhife\AppData\Local\Temp\sprout-task7-npm22-shim-cd7e836\npm.cmd`. Its dispatch command was:
+The root command needed recursive npm proof. A disposable `npm.cmd` was created outside the repository at `C:\Users\zhife\AppData\Local\Temp\sprout-final-npm22-shim-a28e6e2\npm.cmd`. Its complete contents were:
 
 ```cmd
+@echo off
+echo node=v22.23.1
 "C:\Users\zhife\AppData\Local\npm-cache\_npx\52027bd8fc0022aa\node_modules\node\bin\node.exe" "D:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" %*
 ```
 
 Only that shim directory was prepended for the root run:
 
 ```powershell
-$env:Path = 'C:\Users\zhife\AppData\Local\Temp\sprout-task7-npm22-shim-cd7e836;' + $env:Path
+$env:Path = 'C:\Users\zhife\AppData\Local\Temp\sprout-final-npm22-shim-a28e6e2;' + $env:Path
 npm.cmd test
 ```
 
@@ -48,19 +50,27 @@ npm.cmd test
 
 | ID | Use case | Actual result | Status | Commit under test | Owner | Evidence path/test file |
 | --- | --- | --- | --- | --- | --- | --- |
-| AUTH-U01 | UC1: signup input and display-name boundaries | Signup validation, Firebase-user/profile creation, and 50-character/allowed-character boundaries passed in the server suite. | AUTOMATED PASS | `cd7e836` | Zhi Feng/backend | `server/tests/auth.test.ts:174` |
-| AUTH-U02 | UC1: recoverable verification delivery and resend limit | Delivery-failure recovery, strict bearer-token handling, resend for unverified users, and the 3 requests/15 minutes limit passed. | AUTOMATED PASS | `cd7e836` | Zhi Feng/backend | `server/tests/auth.test.ts:209`, `server/tests/auth.test.ts:310` |
-| AUTH-I01 | UC1/UC2: Firebase action code, profile refresh, protected access | Firebase/admin and client action-code behavior passed with fakes; live action-code completion and deployed authorized-domain access were not run. | AUTOMATED PASS; LIVE BLOCKED | `cd7e836` | team | `server/tests/auth.test.ts:174`, `client/src/pages/VerifyEmailPage.test.tsx:49`, `client/src/components/common/ProtectedRoute.test.tsx:40` |
-| AUTH-U03 | UC2: invalid, unverified, and verified auth states | Backend token rejection/profile access and frontend signed-out/unverified/verified route guards passed. | AUTOMATED PASS | `cd7e836` | team | `server/tests/auth.test.ts:470`, `client/src/pages/LoginPage.test.tsx:40`, `client/src/components/common/ProtectedRoute.test.tsx:40` |
-| AUTH-U04 | UC3: wrong/expired OTP and five-attempt invalidation | OTP expiry, atomic one-time consume, stale-request isolation, password reuse, and exact fifth-attempt invalidation passed. | AUTOMATED PASS | `cd7e836` | Zhi Feng/backend | `server/tests/auth.test.ts:623` |
-| AUTH-I02 | UC3: request, email OTP, reset, new login | Supertest/Firebase-fake reset integration passed; live SMTP inbox receipt and login with the new password were not run. | AUTOMATED PASS; LIVE BLOCKED | `cd7e836` | Zhi Feng/backend | `server/tests/auth.test.ts:623`, `client/src/pages/LoginPage.test.tsx:59` |
-| TKT-U01 | UC8: submitter/admin notification outcomes | Pairwise submitter failure, admin failure, and dual failure each attempted both notifications and persisted independent outcome states. | AUTOMATED PASS | `cd7e836` | Zhi Feng/backend | `server/tests/query.test.ts:92` |
-| TKT-I01 | UC8: atomic reference and persisted ticket/outcomes | Supertest plus repository fakes returned 201, generated a unique reference, and persisted the ticket/outcome state; live recipient/admin delivery was not run. | AUTOMATED PASS; LIVE NOT RUN | `cd7e836` | Zhi Feng/backend | `server/tests/query.test.ts:34`, `server/tests/ticket-repo-sqlite.test.ts`, `server/tests/ticket-repo-firestore.test.ts` |
-| FE-U01 | UC1/UC2 frontend verification and protected-route states | Component tests passed; local `/login`, `/signup`, `/verify-email`, and signed-out `/archive` smoke checks rendered/redirected as expected. No deployed Firebase flow was run. | AUTOMATED PASS + LOCAL SMOKE PASS; DEPLOYED NOT RUN | `cd7e836` | FE | `client/src/pages/SignupPage.test.tsx:19`, `client/src/pages/VerifyEmailPage.test.tsx:49`, `client/src/components/common/ProtectedRoute.test.tsx:40` |
+| AUTH-U01 | UC1: signup input and display-name boundaries | Signup validation, Firebase-user/profile creation, and 50-character/allowed-character boundaries passed in the server suite. | AUTOMATED PASS | `a28e6e2` | Zhi Feng/backend | `server/tests/auth.test.ts:179` |
+| AUTH-U02 | UC1: recoverable verification delivery and resend abuse controls | Strict unverified bearer auth precedes the UID-keyed 3 requests/15 minutes quota; account isolation across IP/NAT and the separate 20 requests/15 minutes pre-auth IP cap passed. | AUTOMATED PASS | `a28e6e2` | Zhi Feng/backend | `server/tests/auth.test.ts:360`, `server/tests/auth.test.ts:473`, `server/tests/auth.test.ts:504`, `server/tests/auth.test.ts:531`, `server/tests/auth.test.ts:556` |
+| AUTH-I01 | UC1/UC2: Firebase action code, profile refresh, protected access | Firebase/admin and client action-code behavior passed with fakes; live action-code completion and deployed authorized-domain access were not run. | AUTOMATED PASS; LIVE BLOCKED | `a28e6e2` | team | `server/tests/auth.test.ts:179`, `client/src/pages/VerifyEmailPage.test.tsx:49`, `client/src/components/common/ProtectedRoute.test.tsx:40` |
+| AUTH-U03 | UC2: invalid, unverified, no-email, and verified auth states | Normal backend protection requires `email_verified === true`, including tokens without an email claim; strict resend/session paths still accept authenticated unverified tokens. Frontend guards also passed. | AUTOMATED PASS | `a28e6e2` | team | `server/tests/auth.test.ts:360`, `server/tests/auth.test.ts:628`, `client/src/pages/LoginPage.test.tsx:40`, `client/src/components/common/ProtectedRoute.test.tsx:40` |
+| AUTH-U04 | UC3: wrong/expired OTP and five-attempt invalidation | OTP expiry, atomic one-time consume, stale-request isolation, password reuse, sequential fifth-attempt invalidation, and five concurrent wrong attempts against one issuance passed. | AUTOMATED PASS | `a28e6e2` | Zhi Feng/backend | `server/tests/auth.test.ts:731`, `server/tests/auth.test.ts:1131` |
+| AUTH-I02 | UC3: reset request anti-enumeration, email OTP, reset, new login | Known/unknown valid emails returned the exact generic 200 body and performed one bcrypt hash each; unknown PII was not persisted or mailed, provider latency was decoupled, and provider/persistence failures emitted controlled codes only. Live SMTP inbox receipt and login with the new password were not run. | AUTOMATED PASS; LIVE BLOCKED | `a28e6e2` | Zhi Feng/backend | `server/tests/auth.test.ts:731`, `server/tests/auth.test.ts:753`, `server/tests/auth.test.ts:778`, `server/tests/auth.test.ts:804`, `server/tests/background-dispatch.test.ts:3`, `client/src/pages/LoginPage.test.tsx:59` |
+| EMAIL-U01 | Email failure secrecy and preflight reporting | Background dispatch rejection, ticket provider/persistence failures, and SMTP verification rejection did not expose injected secret text; explicit missing-env diagnostics remained intact. | AUTOMATED PASS | `a28e6e2` | Zhi Feng/backend | `server/tests/background-dispatch.test.ts:3`, `server/tests/query.test.ts:155`, `server/tests/query.test.ts:180`, `server/tests/email.test.ts:214` |
+| TKT-U01 | UC8: submitter/admin notification outcomes | Pairwise submitter failure, admin failure, and dual failure each attempted both notifications and persisted independent statuses plus controlled reason codes only. | AUTOMATED PASS | `a28e6e2` | Zhi Feng/backend | `server/tests/query.test.ts:118`, `server/tests/query.test.ts:155` |
+| TKT-I01 | UC8: atomic reference and persisted ticket/outcomes | Supertest plus repository fakes returned 201, generated a unique reference, and persisted the ticket/outcome state; live recipient/admin delivery was not run. | AUTOMATED PASS; LIVE NOT RUN | `a28e6e2` | Zhi Feng/backend | `server/tests/query.test.ts:47`, `server/tests/ticket-repo-sqlite.test.ts`, `server/tests/ticket-repo-firestore.test.ts` |
+| FE-U01 | UC1/UC2 frontend verification and protected-route states | Component tests passed. The prior local smoke was not repeated in this fix wave, and no deployed Firebase flow was run. | AUTOMATED PASS; LOCAL/DEPLOYED NOT RUN THIS WAVE | `a28e6e2` | FE | `client/src/pages/SignupPage.test.tsx:19`, `client/src/pages/VerifyEmailPage.test.tsx:49`, `client/src/components/common/ProtectedRoute.test.tsx:40` |
+| FE-U02 | UC8 honest notification copy | The ContactPage flow confirms ticket storage and describes submitter/team notification delivery as attempted rather than guaranteed. | AUTOMATED PASS | `a28e6e2` | FE | `client/src/pages/ContactPage.test.tsx:18` |
+
+## Password Reset Timing Boundary
+
+The anti-enumeration work is best-effort, not perfect side-channel elimination. For every schema-valid email, the service performs the same repository lookup, generates an OTP, and performs one bcrypt hash; both known and unknown requests return the exact same generic 200 JSON body. Unknown addresses are neither mailed nor persisted, and SMTP/provider latency is excluded from the response by a consumed in-memory dispatcher whose rejection path logs only a controlled code.
+
+Observable timing can still differ because a known account must persist its OTP hash before the response while an unknown account performs no write, and datastore lookup/cache behavior is outside this equalization. The in-memory dispatcher is also non-durable: a process restart can lose queued delivery, which is accepted for Checkoff 3's long-running Render process only.
 
 ## Local Browser Smoke Checks
 
-The backend and client ran under Node 22 on loopback ports `3011` and `5179` with SQLite and console-email settings. Playwright observed zero browser console errors. `/login`, `/signup`, `/verify-email`, and `/contact` rendered; a sanitized local login attempt displayed the missing Firebase client-configuration message; signed-out `/archive` redirected to `/login`. No signup, action-code, reset, ticket, inbox, or provider action was submitted. The browser, servers, snapshots, and raw logs were removed after evidence was summarized.
+No browser smoke was run for commit `a28e6e2`. The earlier loopback smoke at `cd7e836` is historical context only and is not claimed as fresh evidence for this fix wave. No local ports or browser processes were started.
 
 ## Credential-Free Expected Blockers
 
@@ -68,8 +78,8 @@ These preflights intentionally verified fail-closed behavior only. They are not 
 
 | Logical command | Safe configuration | Result | Duration |
 | --- | --- | --- | ---: |
-| `npm.cmd run check:email -w server` | `EMAIL_MODE=smtp` with `SMTP_PASS` absent | EXPECTED BLOCKED (exit 1): missing `SMTP_PASS`; no SMTP connection attempted | 3.391s |
-| `npm.cmd run check:storage -w server` | `FIREBASE_STORAGE_BUCKET` absent | EXPECTED BLOCKED (exit 1): missing bucket before Firebase initialization | 3.957s |
+| `npm.cmd run check:email -w server` | `EMAIL_MODE=smtp` with `SMTP_PASS` absent | EXPECTED BLOCKED (exit 1): missing `SMTP_PASS`; no SMTP connection attempted | 2.268s |
+| `npm.cmd run check:storage -w server` | `FIREBASE_STORAGE_BUCKET` absent | EXPECTED BLOCKED (exit 1): missing bucket before Firebase initialization | 2.488s |
 
 ## Live External Evidence
 
@@ -81,4 +91,4 @@ These preflights intentionally verified fail-closed behavior only. They are not 
 | UC8 Contact Us persistence plus submitter/admin email | BLOCKED / NOT RUN | Requires live SMTP, controlled recipient/admin inboxes, and configured production persistence. |
 | Firebase Storage | BLOCKED / NOT RUN | Requires a configured bucket and backend credentials; Admin SDK bucket access and client rules were not tested. |
 
-No production source, package manifest, or lockfile changed during verification. No secrets, screenshots, raw command logs, email addresses, or temporary shim files are retained in this evidence.
+No package manifest or lockfile changed in this fix wave. No secrets, screenshots, raw command logs, private recipient addresses, or temporary shim files are retained in this evidence.
