@@ -43,6 +43,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       ...input,
       resetOtpHash: null,
       resetOtpExpiresAt: null,
+      resetOtpFailedAttempts: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -92,6 +93,53 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       {
         resetOtpHash,
         resetOtpExpiresAt,
+        resetOtpFailedAttempts: 0,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  },
+
+  async recordResetOtpFailure(id: string): Promise<number> {
+    const db = getDb();
+    const ref = db.collection('users').doc(id);
+    return db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists || !doc.data()?.resetOtpHash) return 0;
+
+      const failedAttempts = Number(doc.data()?.resetOtpFailedAttempts ?? 0) + 1;
+      if (failedAttempts >= 5) {
+        transaction.set(
+          ref,
+          {
+            resetOtpHash: null,
+            resetOtpExpiresAt: null,
+            resetOtpFailedAttempts: 0,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+        return failedAttempts;
+      }
+
+      transaction.set(
+        ref,
+        {
+          resetOtpFailedAttempts: failedAttempts,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      return failedAttempts;
+    });
+  },
+
+  async clearResetOtp(id: string): Promise<void> {
+    await getDb().collection('users').doc(id).set(
+      {
+        resetOtpHash: null,
+        resetOtpExpiresAt: null,
+        resetOtpFailedAttempts: 0,
         updatedAt: new Date().toISOString(),
       },
       { merge: true }
@@ -121,6 +169,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
         passwordHash,
         resetOtpHash: null,
         resetOtpExpiresAt: null,
+        resetOtpFailedAttempts: 0,
         updatedAt: new Date().toISOString(),
       },
       { merge: true }

@@ -19,6 +19,7 @@ function toProfile(row: Record<string, unknown>): AuthUserProfile {
     resetOtpExpiresAt: row.resetOtpExpiresAt
       ? new Date(row.resetOtpExpiresAt as string).toISOString()
       : null,
+    resetOtpFailedAttempts: Number(row.resetOtpFailedAttempts ?? 0),
     lastLogin: (row.lastLogin as string | null | undefined) ?? null,
     lastLogout: (row.lastLogout as string | null | undefined) ?? null,
     createdAt: row.createdAt ? new Date(row.createdAt as string).toISOString() : undefined,
@@ -88,6 +89,43 @@ const sqliteAuthUserRepository: AuthUserRepository = {
     await db('users').where({ id }).update({
       resetOtpHash,
       resetOtpExpiresAt,
+      resetOtpFailedAttempts: 0,
+      updatedAt: new Date().toISOString(),
+    });
+  },
+
+  async recordResetOtpFailure(id: string): Promise<number> {
+    return db.transaction(async (trx) => {
+      const updated = await trx('users')
+        .where({ id })
+        .whereNotNull('resetOtpHash')
+        .update({
+          resetOtpFailedAttempts: trx.raw('COALESCE(??, 0) + 1', [
+            'resetOtpFailedAttempts',
+          ]),
+          updatedAt: new Date().toISOString(),
+        });
+      if (!updated) return 0;
+
+      const row = await trx('users').where({ id }).first();
+      const failedAttempts = Number(row?.resetOtpFailedAttempts ?? 0);
+      if (failedAttempts < 5) return failedAttempts;
+
+      await trx('users').where({ id }).update({
+        resetOtpHash: null,
+        resetOtpExpiresAt: null,
+        resetOtpFailedAttempts: 0,
+        updatedAt: new Date().toISOString(),
+      });
+      return failedAttempts;
+    });
+  },
+
+  async clearResetOtp(id: string): Promise<void> {
+    await db('users').where({ id }).update({
+      resetOtpHash: null,
+      resetOtpExpiresAt: null,
+      resetOtpFailedAttempts: 0,
       updatedAt: new Date().toISOString(),
     });
   },
@@ -110,6 +148,7 @@ const sqliteAuthUserRepository: AuthUserRepository = {
       passwordHash,
       resetOtpHash: null,
       resetOtpExpiresAt: null,
+      resetOtpFailedAttempts: 0,
       updatedAt: new Date().toISOString(),
     });
   },

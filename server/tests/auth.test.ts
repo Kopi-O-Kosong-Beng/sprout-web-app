@@ -10,7 +10,6 @@ import db from '../database/db';
 import { verificationResendStore } from '../routes/auth.routes';
 
 const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
-const TEST_BCRYPT_COST = 4;
 
 interface MockFirebaseUser {
   uid: string;
@@ -109,7 +108,7 @@ async function createLocalUser(input: {
   const id = input.id ?? randomUUID();
   const password = input.password ?? 'Password123!';
   const email = input.email.toLowerCase();
-  const passwordHash = await bcrypt.hash(password, TEST_BCRYPT_COST);
+  const passwordHash = await bcrypt.hash(password, Number(process.env.BCRYPT_COST));
   await db('users').insert({
     id,
     email,
@@ -164,7 +163,7 @@ afterAll(async () => {
 });
 
 describe('POST /api/auth/signup', () => {
-  it('creates a Firebase user, local profile, password history, and email payload', async () => {
+  it('creates a Firebase user, local profile, and email payload without initial password history', async () => {
     const res = await request(app).post('/api/auth/signup').send({
       email: 'Ada@Example.com',
       password: 'Password123!',
@@ -188,7 +187,7 @@ describe('POST /api/auth/signup', () => {
     expect(await bcrypt.compare('Password123!', row.passwordHash)).toBe(true);
 
     const history = await db('password_history').where({ userId: res.body.uid });
-    expect(history).toHaveLength(1);
+    expect(history).toHaveLength(0);
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: 'ada@example.com',
@@ -639,6 +638,7 @@ describe('password reset OTP flow', () => {
       .post('/api/auth/request-reset')
       .send({ email: user.email });
     const otp = latestOtpFromEmailPayload();
+    await db('users').where({ id: user.id }).update({ resetOtpFailedAttempts: 4 });
 
     const res = await request(app).post('/api/auth/verify-reset').send({
       email: user.email,
@@ -654,12 +654,13 @@ describe('password reset OTP flow', () => {
 
     const row = await db('users').where({ id: user.id }).first();
     expect(row.resetOtpHash).toBeNull();
+    expect(row.resetOtpFailedAttempts).toBe(0);
     expect(await bcrypt.compare('Password123!!', row.passwordHash)).toBe(true);
   });
 
   it('rejects invalid OTP, expired OTP, weak password, and recent reuse', async () => {
     const user = await createLocalUser({ email: 'reject@example.com' });
-    const otpHash = await bcrypt.hash('123456', TEST_BCRYPT_COST);
+    const otpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
     await db('users').where({ id: user.id }).update({
       resetOtpHash: otpHash,
       resetOtpExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
@@ -701,5 +702,31 @@ describe('password reset OTP flow', () => {
     });
     expect(expired.status).toBe(400);
     expect(expired.body.error).toBe('OTP has expired. Request a new one.');
+  });
+
+  it('invalidates an OTP after five wrong attempts', async () => {
+    const user = await createLocalUser({ email: 'attempts@example.com' });
+    const otpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
+    await db('users').where({ id: user.id }).update({
+      resetOtpHash: otpHash,
+      resetOtpExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+      resetOtpFailedAttempts: 0,
+    });
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const res = await request(app).post('/api/auth/verify-reset').send({
+        email: user.email,
+        otp: '000000',
+        newPassword: 'Password123!!',
+      });
+      expect(res.status).toBe(400);
+      if (attempt === 5) {
+        expect(res.body.error).toBe('Invalid OTP. Request a new one.');
+      }
+    }
+
+    const row = await db('users').where({ id: user.id }).first();
+    expect(row.resetOtpHash).toBeNull();
+    expect(row.resetOtpFailedAttempts).toBe(0);
   });
 });

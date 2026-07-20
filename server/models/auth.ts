@@ -6,6 +6,7 @@ export interface AuthUserProfile {
   passwordHash?: string | null;
   resetOtpHash?: string | null;
   resetOtpExpiresAt?: string | null;
+  resetOtpFailedAttempts?: number;
   lastLogin?: string | null;
   lastLogout?: string | null;
   createdAt?: string;
@@ -38,6 +39,8 @@ export interface AuthUserRepository {
     resetOtpHash: string | null,
     resetOtpExpiresAt: string | null
   ): Promise<void>;
+  recordResetOtpFailure(id: string): Promise<number>;
+  clearResetOtp(id: string): Promise<void>;
   recordLogin(id: string, signedInAt?: string | null): Promise<AuthUserProfile | null>;
   recordLogout(id: string): Promise<AuthUserProfile | null>;
   updatePasswordAndClearOtp(id: string, passwordHash: string): Promise<void>;

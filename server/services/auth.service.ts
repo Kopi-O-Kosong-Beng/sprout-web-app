@@ -4,12 +4,17 @@ import authUserRepository from '../repositories/auth-users';
 import { send as sendEmail } from './email.service';
 import type { AuthUserProfile } from '../models/auth';
 
-const BCRYPT_COST = process.env.NODE_ENV === 'test' ? 4 : 12;
 const RESET_OTP_TTL_MS = 15 * 60 * 1000;
 const PASSWORD_HISTORY_KEEP = 3;
 const RESET_REQUEST_MESSAGE = 'If an account exists, a reset code has been sent.';
 const SIGNUP_VERIFICATION_FAILURE_MESSAGE =
   'Account created, but the verification email could not be sent. Sign in and request a new link.';
+
+function bcryptCost(): number {
+  const configured = Number(process.env.BCRYPT_COST ?? 12);
+  if (!Number.isInteger(configured) || configured < 4 || configured > 15) return 12;
+  return process.env.NODE_ENV === 'test' ? configured : Math.max(12, configured);
+}
 const RESEND_VERIFICATION_FAILURE_MESSAGE =
   'The verification email could not be sent. Please try again.';
 
@@ -168,7 +173,7 @@ export async function signup(input: SignupInput): Promise<SignupResult> {
       displayName,
       emailVerified: false,
     });
-    const passwordHash = await bcrypt.hash(input.password, BCRYPT_COST);
+    const passwordHash = await bcrypt.hash(input.password, bcryptCost());
     const profile = await authUserRepository.createProfile({
       id: firebaseUser.uid,
       email,
@@ -176,9 +181,6 @@ export async function signup(input: SignupInput): Promise<SignupResult> {
       isVerified: false,
       passwordHash,
     });
-    await authUserRepository.addPasswordHistory(profile.id, passwordHash);
-    await authUserRepository.prunePasswordHistory(profile.id, PASSWORD_HISTORY_KEEP);
-
     const verification = await deliverVerificationEmail(
       email,
       displayName,
@@ -269,7 +271,7 @@ export async function requestPasswordReset(emailInput: string): Promise<{ messag
   }
 
   const otp = String(randomInt(0, 1_000_000)).padStart(6, '0');
-  const resetOtpHash = await bcrypt.hash(otp, BCRYPT_COST);
+  const resetOtpHash = await bcrypt.hash(otp, bcryptCost());
   const resetOtpExpiresAt = new Date(Date.now() + RESET_OTP_TTL_MS).toISOString();
 
   await authUserRepository.setResetOtp(profile.id, resetOtpHash, resetOtpExpiresAt);
@@ -289,10 +291,10 @@ async function assertPasswordNotRecentlyUsed(
     profile.id,
     PASSWORD_HISTORY_KEEP
   );
-  const hashes = [
+  const hashes = [...new Set([
     profile.passwordHash,
     ...history.map((entry) => entry.passwordHash),
-  ].filter((hash): hash is string => Boolean(hash));
+  ].filter((hash): hash is string => Boolean(hash)))];
 
   for (const hash of hashes) {
     if (await bcrypt.compare(newPassword, hash)) {
@@ -313,19 +315,23 @@ export async function verifyPasswordReset(
   }
 
   if (new Date(profile.resetOtpExpiresAt).getTime() <= Date.now()) {
-    await authUserRepository.setResetOtp(profile.id, null, null);
+    await authUserRepository.clearResetOtp(profile.id);
     throw httpError(400, 'OTP has expired. Request a new one.');
   }
 
   const validOtp = await bcrypt.compare(otp, profile.resetOtpHash);
   if (!validOtp) {
+    const failedAttempts = await authUserRepository.recordResetOtpFailure(profile.id);
+    if (failedAttempts >= 5) {
+      throw httpError(400, 'Invalid OTP. Request a new one.');
+    }
     throw httpError(400, 'Invalid OTP.');
   }
 
   assertStrongPassword(newPassword);
   await assertPasswordNotRecentlyUsed(profile, newPassword);
 
-  const newPasswordHash = await bcrypt.hash(newPassword, BCRYPT_COST);
+  const newPasswordHash = await bcrypt.hash(newPassword, bcryptCost());
   const authAdmin = await getFirebaseAuthAdmin();
   await authAdmin.updateUser(profile.id, { password: newPassword });
   if (profile.passwordHash) {

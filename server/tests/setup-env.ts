@@ -4,3 +4,5 @@
 process.env.DATASTORE = 'sqlite';
 process.env.DB_FILENAME = './database/sprout.test.sqlite3';
 process.env.EMAIL_MODE = 'console';
+process.env.NODE_ENV = 'test';
+process.env.BCRYPT_COST = '4';
