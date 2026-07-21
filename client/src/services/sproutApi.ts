@@ -115,6 +115,25 @@ export async function listAvatarsWithToken(
   return data;
 }
 
+export async function listOwnedAvatars(
+  page = 1,
+  pageSize = 20
+): Promise<PaginatedAvatars> {
+  const { data } = await apiClient.get<PaginatedAvatars>('/api/avatar', {
+    params: { page, pageSize },
+  });
+  return data;
+}
+
+export async function setDemoAvatars(
+  enabled: boolean
+): Promise<PaginatedAvatars> {
+  const response = enabled
+    ? await apiClient.post<PaginatedAvatars>('/api/avatar/demo')
+    : await apiClient.delete<PaginatedAvatars>('/api/avatar/demo');
+  return response.data;
+}
+
 export async function submitTicket(input: TicketInput): Promise<TicketResponse> {
   const { data } = await apiClient.post<TicketResponse>('/api/query/submit', input);
   return data;

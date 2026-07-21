@@ -1,7 +1,5 @@
-/** Shared illustrative visuals + sample data from the static design draft.
- *  The plantAvatars list is showcase data for the still-static Archive/Battle
- *  pages — the real archive will read GET /api/avatar in a later slice.
- */
+/** Shared plant visuals and sample data for the remaining static previews. */
+import { useState } from 'react';
 
 export interface PlantAvatarData {
   id: string;
@@ -14,6 +12,8 @@ export interface PlantAvatarData {
   defense: number;
   speed: number;
   color: string;
+  spriteUrl?: string;
+  isDemo?: boolean;
 }
 
 export const plantAvatars: PlantAvatarData[] = [
@@ -86,15 +86,35 @@ export function PlantAvatar({
   avatar: PlantAvatarData;
   large?: boolean;
 }) {
+  const [failedSpriteUrl, setFailedSpriteUrl] = useState<string | null>(null);
+  const spriteUrl = avatar.spriteUrl?.trim();
+  const showSprite = Boolean(spriteUrl && spriteUrl !== failedSpriteUrl);
+
   return (
-    <span className={large ? `plant-avatar ${avatar.color} large` : `plant-avatar ${avatar.color}`}>
-      <span className="leaf left" />
-      <span className="leaf right" />
-      <span className="face">
-        <span />
-        <span />
-      </span>
-      <span className="pot" />
+    <span
+      className={`${large ? `plant-avatar ${avatar.color} large` : `plant-avatar ${avatar.color}`}${showSprite ? ' has-sprite' : ''}`}
+      role="img"
+      aria-label={`${avatar.name} avatar`}
+    >
+      {showSprite ? (
+        <img
+          className="plant-sprite"
+          src={spriteUrl}
+          alt=""
+          draggable={false}
+          onError={() => setFailedSpriteUrl(spriteUrl ?? null)}
+        />
+      ) : (
+        <>
+          <span className="leaf left" />
+          <span className="leaf right" />
+          <span className="face">
+            <span />
+            <span />
+          </span>
+          <span className="pot" />
+        </>
+      )}
     </span>
   );
 }
