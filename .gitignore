@@ -8,6 +8,8 @@ server/serviceAccountKey.json
 *.sqlite3-journal
 coverage/
 dist/
+firebase-debug.log
+firestore-debug.log
 .vercel/
 .DS_Store
 **/*firebase-adminsdk*.json

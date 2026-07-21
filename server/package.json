@@ -22,7 +22,7 @@
     "check:email": "tsx scripts/check-email.ts",
     "check:storage": "tsx scripts/check-storage.ts",
     "inspect": "tsx scripts/inspect-db.ts",
-    "test": "firebase emulators:exec --project sprout-test --only firestore \"jest --runInBand\"",
+    "test": "tsx scripts/run-firestore-emulator-tests.ts",
     "test:jest": "jest --runInBand"
   },
   "dependencies": {
