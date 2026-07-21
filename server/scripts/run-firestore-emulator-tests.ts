@@ -22,23 +22,71 @@ export interface EmulatorProcessController {
 
 export type RunCommand = (command: string, args: string[]) => Promise<number>;
 
+export interface ParsedFirestoreJavaCommand {
+  jarBasename: string | null;
+  projectId: string | null;
+}
+
 function isJavaExecutable(executable: string): boolean {
   const filename = executable.split(/[\\/]/).pop() ?? '';
   return /^java(?:\.exe)?$/i.test(filename);
 }
 
-function projectIdFrom(commandLine: string): string | null {
-  const match = /(?:^|\s)--project_id(?:=|\s+)(?:"([^"]+)"|'([^']+)'|([^\s]+))/.exec(
-    commandLine
+function tokenizeCommandLine(commandLine: string): string[] {
+  const tokens = commandLine.match(/"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s]+/g) ?? [];
+  return tokens.map((token) => {
+    if (
+      (token.startsWith('"') && token.endsWith('"')) ||
+      (token.startsWith("'") && token.endsWith("'"))
+    ) {
+      return token.slice(1, -1);
+    }
+    return token;
+  });
+}
+
+export function parseFirestoreJavaCommand(
+  commandLine: string
+): ParsedFirestoreJavaCommand {
+  const tokens = tokenizeCommandLine(commandLine);
+  const jarIndex = tokens.indexOf('-jar');
+  const jarPath = jarIndex >= 0 ? tokens[jarIndex + 1] : undefined;
+  let projectId: string | null = null;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === '--project_id') {
+      projectId = tokens[index + 1] ?? null;
+      break;
+    }
+    if (token.startsWith('--project_id=')) {
+      projectId = token.slice('--project_id='.length) || null;
+      break;
+    }
+  }
+
+  return {
+    jarBasename: jarPath?.split(/[\\/]/).pop() ?? null,
+    projectId,
+  };
+}
+
+export function isSamePortOwner(left: PortOwner, right: PortOwner): boolean {
+  return (
+    left.processId > 0 &&
+    left.processId === right.processId &&
+    left.executable === right.executable &&
+    left.commandLine === right.commandLine
   );
-  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
 }
 
 function isExpectedFirestoreEmulator(owner: PortOwner): boolean {
+  const command = parseFirestoreJavaCommand(owner.commandLine);
   return (
     isJavaExecutable(owner.executable) &&
-    owner.commandLine.includes('cloud-firestore-emulator') &&
-    projectIdFrom(owner.commandLine) === FIRESTORE_PROJECT
+    command.jarBasename !== null &&
+    /^cloud-firestore-emulator-v\d+\.\d+\.\d+\.jar$/.test(command.jarBasename) &&
+    command.projectId === FIRESTORE_PROJECT
   );
 }
 
@@ -117,6 +165,15 @@ function noPortOwners(error: unknown): boolean {
   return (error as { code?: number | string }).code === 1;
 }
 
+export function buildPosixLsofArgs(): string[] {
+  return [
+    '-nP',
+    `-iTCP@${FIRESTORE_HOST}:${FIRESTORE_PORT}`,
+    '-sTCP:LISTEN',
+    '-t',
+  ];
+}
+
 async function inspectPosixProcess(processId: number): Promise<PortOwner | null> {
   try {
     const [{ stdout: executable }, { stdout: commandLine }] = await Promise.all([
@@ -134,7 +191,7 @@ async function inspectPosixProcess(processId: number): Promise<PortOwner | null>
 async function listPosixPortOwners(): Promise<PortOwner[]> {
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync('lsof', ['-ti', `tcp:${FIRESTORE_PORT}`]));
+    ({ stdout } = await execFileAsync('lsof', buildPosixLsofArgs()));
   } catch (error) {
     if (noPortOwners(error)) return [];
     throw error;

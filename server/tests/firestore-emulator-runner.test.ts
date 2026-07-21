@@ -1,5 +1,8 @@
 import {
+  buildPosixLsofArgs,
   cleanupFirestoreEmulator,
+  isSamePortOwner,
+  parseFirestoreJavaCommand,
   resolveTestExitCode,
   runFirestoreEmulatorTests,
   type EmulatorProcessController,
@@ -10,7 +13,7 @@ const expectedOwner: PortOwner = {
   processId: 4242,
   executable: 'java.exe',
   commandLine:
-    'java -jar cloud-firestore-emulator.jar --project_id sprout-test --port 8080',
+    'java -jar cloud-firestore-emulator-v1.19.8.jar --project_id sprout-test --port 8080',
 };
 
 function createController(
@@ -26,6 +29,40 @@ function createController(
 }
 
 describe('Firestore emulator test runner', () => {
+  it.each([
+    [
+      'Windows',
+      '"C:\\Program Files\\Java\\bin\\java.exe" -jar "C:\\Users\\test\\cloud-firestore-emulator-v1.19.8.jar" --project_id sprout-test',
+    ],
+    [
+      'POSIX',
+      '/usr/bin/java -jar /tmp/cloud-firestore-emulator-v1.21.0.jar --project_id=sprout-test',
+    ],
+  ])('parses a legitimate %s Java emulator command', (_platform, commandLine) => {
+    expect(parseFirestoreJavaCommand(commandLine)).toEqual({
+      jarBasename: expect.stringMatching(/^cloud-firestore-emulator-v\d+\.\d+\.\d+\.jar$/),
+      projectId: 'sprout-test',
+    });
+  });
+
+  it('builds POSIX lsof arguments for the loopback listening endpoint only', () => {
+    expect(buildPosixLsofArgs()).toEqual([
+      '-nP',
+      '-iTCP@127.0.0.1:8080',
+      '-sTCP:LISTEN',
+      '-t',
+    ]);
+  });
+
+  it('compares complete process identity without accepting missing or changed fields', () => {
+    expect(isSamePortOwner(expectedOwner, expectedOwner)).toBe(true);
+    expect(isSamePortOwner(expectedOwner, { ...expectedOwner, processId: 0 })).toBe(false);
+    expect(isSamePortOwner(expectedOwner, { ...expectedOwner, executable: 'java' })).toBe(false);
+    expect(
+      isSamePortOwner(expectedOwner, { ...expectedOwner, commandLine: 'java changed' })
+    ).toBe(false);
+  });
+
   it('uses fully mocked Windows cleanup and guarded termination', async () => {
     const guardedTerminate = jest.fn(async () => undefined);
     const controller = createController({
@@ -62,6 +99,25 @@ describe('Firestore emulator test runner', () => {
           ...expectedOwner,
           commandLine:
             'java -jar cloud-firestore-emulator.jar --project_id sprout-test-prod',
+        },
+      ],
+      guardedTerminate,
+    });
+
+    await expect(cleanupFirestoreEmulator(controller)).rejects.toThrow(
+      'unexpected process'
+    );
+    expect(guardedTerminate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a near-match Firestore emulator JAR before termination', async () => {
+    const guardedTerminate = jest.fn(async () => undefined);
+    const controller = createController({
+      listPortOwners: async () => [
+        {
+          ...expectedOwner,
+          commandLine:
+            'java -jar my-cloud-firestore-emulator-backup.jar --project_id sprout-test',
         },
       ],
       guardedTerminate,
