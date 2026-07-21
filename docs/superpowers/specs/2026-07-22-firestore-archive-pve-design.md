@@ -63,8 +63,11 @@ and Firestore before changing runtime code.
 - Never overwrite an existing Firestore profile.
 - Discard a local profile when its Firebase Authentication identity no longer
   exists.
-- Compare the five local avatar IDs and content with Firestore. Abort instead
-  of deleting local data if any non-demo or non-duplicate avatar is found.
+- Compare legacy local avatars with Firestore using a canonical fingerprint of
+  species, family, source, temporary status, and stats. The legacy seed created
+  random IDs and timestamps independently, so IDs are not expected to match.
+  Abort instead of deleting local data if any local avatar lacks an equivalent
+  Firestore fingerprint or belongs to a non-demo user.
 - Existing Firestore tickets and avatars remain authoritative.
 - Produce a dry-run summary before an explicit apply run.
 
