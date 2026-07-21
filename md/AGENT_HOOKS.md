@@ -65,13 +65,13 @@ After any edit under `client/src/**` (ts/tsx/css), `client/index.html`, or `clie
 
 ## Hook 4 — Post-edit backend validation (`backend-check.mjs`)
 
-After any edit to `server/**/*.ts`, `server/package.json`, or `server/tsconfig.json`: runs `npm run typecheck -w server`. Editing a file under `server/tests/` also runs the Jest suite automatically (an edited test that was never run is a half-done edit). `--full` always runs the suite. Never starts servers; never needs Firebase credentials — the suite runs on SQLite with a mocked Firebase admin.
+After any edit to `server/**/*.ts`, `server/package.json`, or `server/tsconfig.json`: runs `npm run typecheck -w server`. Editing a file under `server/tests/` also runs the Jest suite automatically (an edited test that was never run is a half-done edit). `--full` always runs the suite. Never starts servers; never needs live Firebase credentials — repository integration tests run only against the `sprout-test` Firestore Emulator at `127.0.0.1:8080`, while narrowly scoped unit tests may mock Firebase Admin.
 
 1. **Scoping & Planning** — Backend edits are gated by types per-edit and by the full suite per-feature. Plan which suite proves your change *before* making it (new email behavior → `tests/email.test.ts` exists because of this question).
-2. **Information Retrieval** — Tests must not depend on developer machines having credentials: this repo's pattern is `EMAIL_MODE=console`, `DATASTORE=sqlite`, `jest.mock('../firebase')`. Before writing a test, read an existing suite (`tests/auth.test.ts`) and copy its seams rather than inventing new ones.
+2. **Information Retrieval** — Tests must not depend on developer machines having credentials: this repo's integration pattern is `GCLOUD_PROJECT=sprout-test` plus `FIRESTORE_EMULATOR_HOST=127.0.0.1:8080`; use `jest.mock('../firebase')` only for tests that intentionally isolate a non-repository unit. Before writing a test, read the nearest existing suite and preserve its boundary.
 3. **Adversarial Attack** — For every happy-path test ask "what does the error path return?" This repo tests 400/401/403/404/409/429 *and* the 500-on-SMTP-failure path, plus resilience (ticket persists when email dies). New endpoints inherit that bar.
-4. **Verification** — "Backend works" = `npm run typecheck -w server` exit 0 and `npm test -w server` showing all suites green, run this session. Currently: 3 suites, 31 tests.
-5. **Final Reporting** — Paste the counts ("3 passed, 31 passed"), name any test intentionally not written, and state the untested risk explicitly.
+4. **Verification** — "Backend works" = `npm run typecheck -w server` exit 0 and `npm test -w server` showing all suites green, run this session. Confirm the hardened runner frees port 8080 after both success and failure.
+5. **Final Reporting** — Paste the literal suite/test counts from the current run, name any test intentionally not written, and state the untested risk explicitly.
 
 ## Hook 5 — Secret safety (`secret-scan.mjs`)
 

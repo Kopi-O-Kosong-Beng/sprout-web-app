@@ -1,5 +1,7 @@
 # Checkoff 3 Auth and Email Verification Evidence
 
+> **Historical pre-cutover evidence:** SQLite test/file references below were superseded by the Firestore-only runtime and emulator suite on 2026-07-22.
+
 **Recorded:** 2026-07-21 (Asia/Singapore)
 **Commit under test:** `a28e6e26eecf19e8d0fa2a1fc0d6fd9b1c0d2b97`
 **Required runtime:** Node `22.x`

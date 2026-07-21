@@ -13,8 +13,6 @@ services:
         value: production
       - key: NODE_VERSION
         value: "22.13.1"
-      - key: DATASTORE
-        value: firestore
       - key: STORAGE_MODE
         value: local
       - key: AUTH_DEV_BYPASS

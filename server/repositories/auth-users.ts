@@ -2,6 +2,18 @@
 import { randomUUID } from 'crypto';
 import { getDb } from '../firebase';
 import { buildAuditTimestamp } from '../utils/audit-timestamp';
+import {
+  normalizeNullableTimestamp,
+  normalizeOptionalTimestamp,
+  normalizeRequiredTimestamp,
+  optionalAuditTimestamp,
+  optionalNullableString,
+  requireBoolean,
+  requireDocumentData,
+  requireFiniteNumber,
+  requireString,
+  type FirestoreSnapshotLike,
+} from './firestore-normalization';
 import type {
   AuthUserProfile,
   AuthUserRepository,
@@ -9,12 +21,70 @@ import type {
   PasswordHistoryEntry,
 } from '../models/auth';
 
-function toProfile(data: FirebaseFirestore.DocumentData): AuthUserProfile {
-  return data as AuthUserProfile;
+function toProfile(snapshot: FirestoreSnapshotLike): AuthUserProfile {
+  const data = requireDocumentData(snapshot, 'users');
+  const profile: AuthUserProfile = {
+    id: snapshot.id,
+    email: requireString(data.email, 'email', 'users', snapshot.id),
+    displayName: requireString(data.displayName, 'displayName', 'users', snapshot.id),
+    isVerified: requireBoolean(data.isVerified, 'isVerified', 'users', snapshot.id),
+    passwordHash: optionalNullableString(
+      data.passwordHash,
+      'passwordHash',
+      'users',
+      snapshot.id
+    ),
+    resetOtpHash: optionalNullableString(
+      data.resetOtpHash,
+      'resetOtpHash',
+      'users',
+      snapshot.id
+    ),
+    resetOtpExpiresAt: normalizeNullableTimestamp(
+      data.resetOtpExpiresAt,
+      'resetOtpExpiresAt',
+      'users',
+      snapshot.id
+    ),
+    lastLogin: optionalAuditTimestamp(data.lastLogin, 'lastLogin', 'users', snapshot.id),
+    lastLogout: optionalAuditTimestamp(
+      data.lastLogout,
+      'lastLogout',
+      'users',
+      snapshot.id
+    ),
+    createdAt: normalizeOptionalTimestamp(data.createdAt, 'createdAt', 'users', snapshot.id),
+    updatedAt: normalizeOptionalTimestamp(data.updatedAt, 'updatedAt', 'users', snapshot.id),
+  };
+  if (data.resetOtpFailedAttempts !== undefined) {
+    profile.resetOtpFailedAttempts = requireFiniteNumber(
+      data.resetOtpFailedAttempts,
+      'resetOtpFailedAttempts',
+      'users',
+      snapshot.id
+    );
+  }
+  return profile;
 }
 
-function toHistory(data: FirebaseFirestore.DocumentData): PasswordHistoryEntry {
-  return data as PasswordHistoryEntry;
+function toHistory(snapshot: FirestoreSnapshotLike): PasswordHistoryEntry {
+  const data = requireDocumentData(snapshot, 'password_history');
+  return {
+    id: snapshot.id,
+    userId: requireString(data.userId, 'userId', 'password_history', snapshot.id),
+    passwordHash: requireString(
+      data.passwordHash,
+      'passwordHash',
+      'password_history',
+      snapshot.id
+    ),
+    changedAt: normalizeRequiredTimestamp(
+      data.changedAt,
+      'changedAt',
+      'password_history',
+      snapshot.id
+    ),
+  };
 }
 
 function loginAuditFields(signedInAt?: string | null) {
@@ -73,13 +143,14 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       createdAt: now,
       updatedAt: now,
     };
-    await db.collection('users').doc(input.id).set(record);
-    return record;
+    const reference = db.collection('users').doc(input.id);
+    await reference.set(record);
+    return toProfile(await reference.get());
   },
 
   async getById(id: string): Promise<AuthUserProfile | null> {
     const doc = await getDb().collection('users').doc(id).get();
-    return doc.exists ? toProfile(doc.data()!) : null;
+    return doc.exists ? toProfile(doc) : null;
   },
 
   async getByEmail(email: string): Promise<AuthUserProfile | null> {
@@ -88,7 +159,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       .where('email', '==', email)
       .limit(1)
       .get();
-    return snap.empty ? null : toProfile(snap.docs[0].data());
+    return snap.empty ? null : toProfile(snap.docs[0]);
   },
 
   async getByDisplayName(displayName: string): Promise<AuthUserProfile | null> {
@@ -100,7 +171,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
         ? data.displayName.trim().toLowerCase() === key
         : false;
     });
-    return match ? toProfile(match.data()) : null;
+    return match ? toProfile(match) : null;
   },
 
   async markVerified(id: string): Promise<void> {
@@ -175,17 +246,33 @@ const firestoreAuthUserRepository: AuthUserRepository = {
     id: string,
     signedInAt?: string | null
   ): Promise<AuthUserProfile | null> {
-    const ref = getDb().collection('users').doc(id);
-    await ref.set(loginAuditFields(signedInAt), { merge: true });
-    const doc = await ref.get();
-    return doc.exists ? toProfile(doc.data()!) : null;
+    const db = getDb();
+    const ref = db.collection('users').doc(id);
+    const fields = loginAuditFields(signedInAt);
+    return db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists) return null;
+      transaction.update(ref, fields);
+      return toProfile({
+        id: doc.id,
+        data: () => ({ ...doc.data(), ...fields }),
+      });
+    });
   },
 
   async recordLogout(id: string): Promise<AuthUserProfile | null> {
-    const ref = getDb().collection('users').doc(id);
-    await ref.set(logoutAuditFields(), { merge: true });
-    const doc = await ref.get();
-    return doc.exists ? toProfile(doc.data()!) : null;
+    const db = getDb();
+    const ref = db.collection('users').doc(id);
+    const fields = logoutAuditFields();
+    return db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists) return null;
+      transaction.update(ref, fields);
+      return toProfile({
+        id: doc.id,
+        data: () => ({ ...doc.data(), ...fields }),
+      });
+    });
   },
 
   async updatePassword(id: string, passwordHash: string): Promise<void> {
@@ -217,7 +304,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       .where('userId', '==', userId)
       .get();
     return snap.docs
-      .map((doc) => toHistory(doc.data()))
+      .map((doc) => toHistory(doc))
       .sort((a, b) => b.changedAt.localeCompare(a.changedAt))
       .slice(0, limit);
   },
@@ -228,7 +315,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       .where('userId', '==', userId)
       .get();
     const staleDocs = snap.docs
-      .map((doc) => ({ id: doc.id, data: toHistory(doc.data()) }))
+      .map((doc) => ({ id: doc.id, data: toHistory(doc) }))
       .sort((a, b) => b.data.changedAt.localeCompare(a.data.changedAt))
       .slice(keep);
     if (staleDocs.length === 0) return;

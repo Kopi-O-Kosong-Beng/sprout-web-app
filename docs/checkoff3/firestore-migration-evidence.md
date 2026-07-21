@@ -1,5 +1,7 @@
 # Firestore Profile Reconciliation Evidence
 
+> **Historical migration evidence:** the temporary SQLite reconciliation paths and commands below were superseded and removed after the Firestore-only cutover on 2026-07-22.
+
 **Date:** 2026-07-22
 
 ## Scope

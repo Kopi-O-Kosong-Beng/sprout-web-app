@@ -24,9 +24,9 @@ This folder is the single workspace for the app. Three spec documents drive ever
 
 ## Stack (decided 8 Jul 2026 — authority: Master.docx + team chat; this supersedes older drafts)
 
-React + Vite + TS (client) · Node + Express (server) · **Cloud Firestore** via Firebase Admin SDK — the cross-platform database shared with the mobile app (SQLite repo impl remains as offline fallback + unit-test path) · **Firebase Auth** — frontend signs in with the Firebase JS SDK (email/password + Google), backend verifies ID tokens; **custom 6-digit OTP reset kept for UC3** (implemented on Firebase via Admin SDK) · Cloud Storage for sprite images (PM3) · Jest/Supertest/fast-check · Vercel later, no CI/CD needed.
+React + Vite + TS (client) · Node + Express (server) · **Cloud Firestore** via Firebase Admin SDK — the only runtime and repository-integration-test datastore, shared with the mobile app · **Firebase Auth** — frontend signs in with the Firebase JS SDK (email/password + Google), backend verifies ID tokens; **custom 6-digit OTP reset kept for UC3** (implemented on Firebase via Admin SDK) · Cloud Storage for sprite images (PM3) · Jest/Supertest/fast-check · Vercel later, no CI/CD needed.
 
-**Architecture rule:** all persistence goes through `server/repositories/*` (the datastore seam) — services and controllers never import Knex or Firestore directly. Clients (web AND mobile) never touch the database; everything is a backend API call (Checkoff 1 feedback). Backend setup for Firebase: `server/FIREBASE_SETUP.md`.
+**Architecture rule:** all persistence goes through the direct Firestore implementations in `server/repositories/*`; services and controllers never import Firebase Admin directly. Clients (web AND mobile) never touch the database; everything is a backend API call (Checkoff 1 feedback). Backend setup for Firebase: `server/FIREBASE_SETUP.md`.
 
 > ⚠️ `requirements.md` Req 1–3 and Req 11 still describe the older custom-JWT auth design — they are being rewritten to the Firebase Auth + OTP-on-Firebase design as the auth endpoints land. Where they conflict with this section, this section wins.
 

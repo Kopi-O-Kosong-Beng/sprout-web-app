@@ -1,5 +1,7 @@
 # Sprout — Checkoff Walkthrough
 
+> **Historical Checkoff 2 snapshot:** all SQLite, Knex, repository-selector, and datastore-switch guidance below was superseded by the Firestore-only runtime on 2026-07-22. It is retained only as pre-cutover evidence; use `README.md` and `server/FIREBASE_SETUP.md` for current setup.
+
 This document explains, end to end, how the four demo flows work: **Signup**, **Login**, **Query ticket**, and **frontend rendering** (Home, Archive, PVE Battle, Query). Every step names the exact function and `file:line` so you can open the code and follow along. Line numbers are accurate as of 2026-07-12 — if the file has been edited since, search for the function name instead.
 
 **The one-paragraph mental model:** the frontend is a React app (Vite dev server, `http://localhost:5173`) that renders pages and calls the backend over HTTP using axios. The backend is an Express app (`http://localhost:3001`) that validates requests with Joi, does the work in a *service* function, stores data through a *repository* (SQLite locally, Firestore in production), and sends emails through one shared email service (console-logged in dev, real Gmail SMTP when configured). Login is the one flow with **no backend endpoint** — the browser talks directly to Firebase Auth, and the backend only ever *verifies* the resulting token.

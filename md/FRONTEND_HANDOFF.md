@@ -32,7 +32,6 @@ Backend env:
 
 ```text
 server/.env
-DATASTORE=firestore
 FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json
 AUTH_DEV_BYPASS=true
 EMAIL_MODE=console
