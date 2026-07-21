@@ -32,3 +32,21 @@ export const handleGetAvatar: RequestHandler = async (req, res, next) => {
     next(err);
   }
 };
+
+export const handleEnableDemoAvatars: RequestHandler = async (req, res, next) => {
+  try {
+    const result = await avatarRepository.ensureDemoSet(req.user!.uid);
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const handleDisableDemoAvatars: RequestHandler = async (req, res, next) => {
+  try {
+    const result = await avatarRepository.removeDemoSet(req.user!.uid);
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+};

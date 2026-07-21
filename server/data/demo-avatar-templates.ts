@@ -4,10 +4,19 @@
  *  frontend can act as this user by sending header `x-dev-uid: demo-user-0001`
  *  and immediately see these avatars — no Firebase login needed yet.
  */
+import { createHash } from 'crypto';
 import type { AvatarStats } from '../models/avatar';
 
 export const DEMO_USER_ID = 'demo-user-0001';
 export const DEMO_EMAIL = 'demo@sprout.app';
+export const DEMO_SET_VERSION = 'checkoff3-v1';
+
+export function demoAvatarId(userId: string, templateId: string): string {
+  return createHash('sha256')
+    .update(`${DEMO_SET_VERSION}:${userId}:${templateId}`)
+    .digest('hex')
+    .slice(0, 32);
+}
 
 export interface DemoAvatarTemplate {
   id: string;
