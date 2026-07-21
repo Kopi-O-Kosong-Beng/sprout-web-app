@@ -22,7 +22,8 @@
     "check:email": "tsx scripts/check-email.ts",
     "check:storage": "tsx scripts/check-storage.ts",
     "inspect": "tsx scripts/inspect-db.ts",
-    "test": "jest --runInBand"
+    "test": "firebase emulators:exec --project sprout-test --only firestore \"jest --runInBand\"",
+    "test:jest": "jest --runInBand"
   },
   "dependencies": {
     "axios": "^1.7.9",
@@ -51,6 +52,7 @@
     "@types/nodemailer": "^6.4.17",
     "@types/supertest": "^6.0.2",
     "fast-check": "^3.23.2",
+    "firebase-tools": "^14.27.0",
     "jest": "^29.7.0",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
