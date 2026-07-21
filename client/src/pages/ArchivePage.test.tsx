@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AvatarRecord, PaginatedAvatars } from '../services/sproutApi';
 import ArchivePage from './ArchivePage';
+import BattlePage from './BattlePage';
 
 const apiMocks = vi.hoisted(() => ({
   listOwnedAvatars: vi.fn(),
@@ -89,12 +90,6 @@ const collectedAndDemoPage: PaginatedAvatars = {
   pageSize: 20,
 };
 
-function BattleDestination() {
-  const location = useLocation();
-  const avatarId = (location.state as { avatarId?: string } | null)?.avatarId;
-  return <p>Battle avatar {avatarId}</p>;
-}
-
 function renderArchive({ demoTools = false }: { demoTools?: boolean } = {}) {
   vi.stubEnv('VITE_ENABLE_DEMO_TOOLS', demoTools ? 'true' : 'false');
   const user = userEvent.setup();
@@ -102,7 +97,7 @@ function renderArchive({ demoTools = false }: { demoTools?: boolean } = {}) {
     <MemoryRouter initialEntries={['/archive']}>
       <Routes>
         <Route path="/archive" element={<ArchivePage />} />
-        <Route path="/battle" element={<BattleDestination />} />
+        <Route path="/battle" element={<BattlePage />} />
       </Routes>
     </MemoryRouter>
   );
@@ -149,7 +144,93 @@ describe('ArchivePage', () => {
     expect(screen.queryByRole('switch', { name: /demo plants/i })).not.toBeInTheDocument();
   });
 
-  it('shows selected owned avatar details and battles with that avatar', async () => {
+  it('loads every owned avatar and detects demos beyond the first 100 records', async () => {
+    const firstPageItems = [
+      ...Array.from({ length: 96 }, (_, index) =>
+        avatar({
+          id: `owned-${index + 1}`,
+          spriteUrl: '',
+          metadata: { displayName: `Owned Plant ${index + 1}` },
+        })
+      ),
+      ...demoPage.items.slice(0, 4),
+    ];
+    const laterOwned = avatar({
+      id: 'later-owned',
+      spriteUrl: '',
+      metadata: { displayName: 'Later Owned Plant' },
+    });
+    apiMocks.listOwnedAvatars.mockImplementation((page: number) => {
+      if (page === 1) {
+        return Promise.resolve({
+          items: firstPageItems,
+          total: 102,
+          page: 1,
+          pageSize: 100,
+        });
+      }
+      if (page === 2) {
+        return Promise.resolve({
+          items: [demoPage.items[4], laterOwned],
+          total: 102,
+          page: 2,
+          pageSize: 100,
+        });
+      }
+      throw new Error(`Unexpected archive page ${page}`);
+    });
+
+    renderArchive({ demoTools: true });
+
+    expect(
+      await screen.findByRole('button', { name: /select later owned plant/i })
+    ).toBeVisible();
+    expect(
+      screen.getByRole('switch', { name: /remove demo plants/i })
+    ).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getAllByRole('button', { name: /\(demo\)$/i })).toHaveLength(5);
+    expect(screen.getAllByText('Demo')).toHaveLength(5);
+    expect(apiMocks.listOwnedAvatars.mock.calls).toEqual([
+      [1, 100],
+      [2, 100],
+    ]);
+  });
+
+  it.each([
+    [
+      'an empty page',
+      { items: [], total: 2, page: 2, pageSize: 100 } as PaginatedAvatars,
+    ],
+    [
+      'a non-advancing page',
+      {
+        items: [avatar({ id: 'duplicate-fern' })],
+        total: 2,
+        page: 1,
+        pageSize: 100,
+      } as PaginatedAvatars,
+    ],
+  ])('stops pagination defensively after %s', async (_case, secondPage) => {
+    apiMocks.listOwnedAvatars
+      .mockResolvedValueOnce({
+        items: [avatar()],
+        total: 2,
+        page: 1,
+        pageSize: 100,
+      })
+      .mockResolvedValueOnce(secondPage);
+
+    renderArchive();
+
+    expect(await screen.findByRole('heading', { name: 'Fern Ward' })).toBeVisible();
+    await waitFor(() => expect(apiMocks.listOwnedAvatars).toHaveBeenCalledTimes(2));
+    expect(apiMocks.listOwnedAvatars.mock.calls).toEqual([
+      [1, 100],
+      [2, 100],
+    ]);
+  });
+
+  it('hands the selected owned Fern Ward avatar to the real Battle page', async () => {
     apiMocks.listOwnedAvatars.mockResolvedValue(collectedPage);
     const { user } = renderArchive();
 
@@ -157,9 +238,14 @@ describe('ArchivePage', () => {
     expect(screen.getByText(/discovered on 22 Jul 2026/i)).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: /select orchid flare/i }));
-    await user.click(screen.getByRole('button', { name: /battle with orchid flare/i }));
+    expect(screen.getByRole('heading', { name: 'Orchid Flare' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /select fern ward/i }));
+    await user.click(screen.getByRole('button', { name: /battle with fern ward/i }));
 
-    expect(screen.getByText('Battle avatar orchid-1')).toBeVisible();
+    expect(
+      screen.getByRole('heading', { name: /fern ward is ready/i })
+    ).toBeVisible();
+    expect(screen.queryByText('Monstera Scout')).not.toBeInTheDocument();
   });
 
   it('adds and removes only demo plants through the switch', async () => {
@@ -238,6 +324,34 @@ describe('ArchivePage', () => {
     expect(
       await screen.findByRole('switch', { name: /remove demo plants/i })
     ).toBeEnabled();
+  });
+
+  it('does not refresh the archive after an in-flight mutation is unmounted', async () => {
+    const mutation = deferred<PaginatedAvatars>();
+    apiMocks.listOwnedAvatars.mockResolvedValue(emptyPage);
+    apiMocks.setDemoAvatars.mockReturnValue(mutation.promise);
+    const { unmount, user } = renderArchive({ demoTools: true });
+
+    await user.click(
+      await screen.findByRole('switch', { name: /add five demo plants/i })
+    );
+    unmount();
+    await act(async () => mutation.resolve(demoPage));
+
+    expect(apiMocks.listOwnedAvatars).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refresh after a rejected demo mutation', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue(emptyPage);
+    apiMocks.setDemoAvatars.mockRejectedValue(new Error('mutation rejected'));
+    const { user } = renderArchive({ demoTools: true });
+
+    await user.click(
+      await screen.findByRole('switch', { name: /add five demo plants/i })
+    );
+
+    expect(await screen.findByText('mutation rejected')).toBeVisible();
+    expect(apiMocks.listOwnedAvatars).toHaveBeenCalledTimes(1);
   });
 
   it('shows retry after an archive request fails', async () => {

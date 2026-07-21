@@ -104,7 +104,7 @@ export default function ArchivePage() {
                     : `avatar-card ${avatar.color}`
                 }
                 type="button"
-                aria-label={`Select ${avatar.name}`}
+                aria-label={`Select ${avatar.name}${avatar.isDemo ? ' (Demo)' : ''}`}
                 aria-pressed={avatar.id === selected.id}
                 onClick={() => setSelectedAvatarId(avatar.id)}
               >
@@ -129,7 +129,11 @@ export default function ArchivePage() {
               className="primary-cta detail-action"
               type="button"
               disabled={status === 'mutating'}
-              onClick={() => navigate('/battle', { state: { avatarId: selected.id } })}
+              onClick={() =>
+                navigate('/battle', {
+                  state: { avatarId: selected.id, avatar: selected },
+                })
+              }
             >
               <span aria-hidden="true">-&gt;</span>
               Battle with {selected.name}

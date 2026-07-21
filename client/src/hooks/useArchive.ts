@@ -16,6 +16,7 @@ const DEMO_TEMPLATE_IDS = [
   'demo-avatar-ficus-lyrata',
   'demo-avatar-amanita-muscaria',
 ] as const;
+const ARCHIVE_PAGE_SIZE = 100;
 
 export type ArchiveStatus = 'loading' | 'ready' | 'error' | 'mutating';
 
@@ -40,6 +41,33 @@ function demoTemplateId(record: AvatarRecord): string | null {
   return metadata.templateId;
 }
 
+async function fetchAllOwnedAvatars(
+  shouldContinue: () => boolean
+): Promise<AvatarRecord[]> {
+  const recordsById = new Map<string, AvatarRecord>();
+  let requestedPage = 1;
+
+  while (shouldContinue()) {
+    const result = await listOwnedAvatars(requestedPage, ARCHIVE_PAGE_SIZE);
+    if (!shouldContinue()) break;
+    if (result.page !== requestedPage) break;
+
+    const previousCount = recordsById.size;
+    for (const record of result.items) recordsById.set(record.id, record);
+
+    const total =
+      Number.isFinite(result.total) && result.total >= 0
+        ? result.total
+        : recordsById.size;
+    if (recordsById.size >= total) break;
+    if (result.items.length === 0 || recordsById.size === previousCount) break;
+
+    requestedPage = result.page + 1;
+  }
+
+  return [...recordsById.values()];
+}
+
 export function useArchive(): UseArchiveResult {
   const [records, setRecords] = useState<AvatarRecord[]>([]);
   const [status, setStatus] = useState<ArchiveStatus>('loading');
@@ -51,9 +79,11 @@ export function useArchive(): UseArchiveResult {
     setStatus('loading');
     setError(null);
     try {
-      const page = await listOwnedAvatars();
+      const nextRecords = await fetchAllOwnedAvatars(
+        () => request === requestVersion.current
+      );
       if (request !== requestVersion.current) return;
-      setRecords(page.items);
+      setRecords(nextRecords);
       setStatus('ready');
     } catch (caught) {
       if (request !== requestVersion.current) return;
@@ -75,9 +105,12 @@ export function useArchive(): UseArchiveResult {
     setError(null);
     try {
       await setDemoAvatars(enabled);
-      const page = await listOwnedAvatars();
       if (request !== requestVersion.current) return;
-      setRecords(page.items);
+      const nextRecords = await fetchAllOwnedAvatars(
+        () => request === requestVersion.current
+      );
+      if (request !== requestVersion.current) return;
+      setRecords(nextRecords);
       setStatus('ready');
     } catch (caught) {
       if (request !== requestVersion.current) return;
