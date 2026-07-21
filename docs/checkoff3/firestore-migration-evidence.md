@@ -34,6 +34,29 @@ body, or other secret was printed or committed.
 | Type check | `npm run typecheck -w server` | PASS. |
 | Full server suite | `npm test -w server` | PASS: 10 suites, 83 tests. |
 
+## Follow-up Review Hardening
+
+The implementation commit for the original reconciliation is
+`4f52b0c chore: reconcile active profiles into Firestore`.
+
+Review coverage was added without connecting tests to the production Firebase
+project. The test suite uses an in-memory Firestore-shaped create-only batch
+writer to exercise the command decision and write behavior.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Follow-up RED | `npm test -w server -- --runTestsByPath tests/reconcile-sqlite-to-firestore.test.ts` | Failed as expected: command-path exports did not exist (`TS2305`). |
+| Follow-up GREEN | Same focused command after implementation | PASS: 1 suite, 9 tests. |
+| Follow-up type check | `npm run typecheck -w server` | PASS. |
+| Follow-up full server suite | `npm test -w server` | PASS: 10 suites, 88 tests. |
+
+Each migrated profile and its matching password-history rows are now written
+in one Firestore `WriteBatch.create` commit. This is atomic per profile and
+retains the fail-closed, create-only precondition equivalent to
+`DocumentReference.create`: an existing document causes the batch to fail
+rather than be overwritten. A failed commit leaves both the profile and its
+history absent, allowing the same safe plan to retry them together.
+
 ## Live Reconciliation
 
 The first attempted live dry-run was stopped before any data operation because
@@ -58,13 +81,13 @@ generated document IDs and timestamps.
 
 - A profile is created only when its UID exists in Firebase Authentication and
   its Firestore profile is absent.
-- Existing Firestore profile documents are never overwritten: creation uses
-  Firestore `DocumentReference.create`.
+- Existing Firestore profile documents are never overwritten: each atomic
+  batch uses Firestore `WriteBatch.create`, which has the same create-only
+  precondition as `DocumentReference.create`.
 - The CLI defaults to `--dry-run`; `--apply` refuses an unsafe plan.
 - Local avatar fingerprints are compared as multisets, and a non-demo local
   avatar owner also blocks safe removal.
 - The orphan local profile was intentionally excluded. It remains in SQLite
   until the later removal task, which must retain this evidence.
 
-**Task commit:** the Git commit that adds this evidence and the reconciliation
-script is the authoritative immutable record for this run.
+**Original implementation commit:** `4f52b0c`

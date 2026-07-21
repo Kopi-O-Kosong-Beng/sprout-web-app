@@ -23,6 +23,52 @@ export interface ReconciliationPlan {
   safeToRemoveSqlite: boolean;
 }
 
+export type ReconciliationMode = 'dry-run' | 'apply';
+
+export interface ReconciliationDocumentReference {
+  id: string;
+}
+
+export interface ReconciliationWriteBatch {
+  create(reference: ReconciliationDocumentReference, data: unknown): void;
+  commit(): Promise<void>;
+}
+
+export interface ReconciliationFirestore {
+  collection(name: string): { doc(id: string): ReconciliationDocumentReference };
+  batch(): ReconciliationWriteBatch;
+}
+
+export interface MigrationWriter {
+  createProfileWithHistory(
+    profile: AuthUserProfile,
+    history: PasswordHistoryEntry[]
+  ): Promise<void>;
+}
+
+export interface ReconciliationExecutionInput {
+  mode: ReconciliationMode;
+  plan: ReconciliationPlan;
+  localPasswordHistory: PasswordHistoryEntry[];
+  writer: MigrationWriter;
+  output: (message: string) => void;
+}
+
+export interface ReconciliationExecutionResult {
+  migratedProfileCount: number;
+  migratedPasswordHistoryCount: number;
+}
+
+export interface ReconciliationSummaryInput {
+  mode: ReconciliationMode;
+  localProfileCount: number;
+  firebaseAuthUserCount: number;
+  firestoreProfileCount: number;
+  localAvatarCount: number;
+  firestoreAvatarCount: number;
+  plan: ReconciliationPlan;
+}
+
 export function avatarFingerprint(avatar: AvatarRecord): string {
   return JSON.stringify({
     speciesName: avatar.speciesName,
@@ -216,50 +262,77 @@ async function readLocalPasswordHistory(): Promise<PasswordHistoryEntry[]> {
   }));
 }
 
-function printUids(label: string, uids: string[]): void {
-  console.log(`${label}: ${uids.length}${uids.length > 0 ? ` [${uids.join(', ')}]` : ''}`);
+function formatUids(label: string, uids: string[]): string {
+  return `${label}: ${uids.length}${uids.length > 0 ? ` [${uids.join(', ')}]` : ''}`;
 }
 
-function printSummary(
-  mode: 'dry-run' | 'apply',
-  localProfiles: AuthUserProfile[],
-  firebaseAuthUids: Set<string>,
-  firestoreProfileUids: Set<string>,
-  localAvatars: AvatarRecord[],
-  firestoreAvatars: AvatarRecord[],
-  plan: ReconciliationPlan
-): void {
-  console.log(`Reconciliation ${mode}`);
-  console.log(`Local profile count: ${localProfiles.length}`);
-  console.log(`Firestore profile count: ${firestoreProfileUids.size}`);
-  console.log(`Firebase Auth user count: ${firebaseAuthUids.size}`);
-  console.log(`Local avatar count: ${localAvatars.length}`);
-  console.log(`Firestore avatar count: ${firestoreAvatars.length}`);
-  printUids('Auth-backed profiles to create', plan.profileUidsToCreate);
-  printUids('Existing Firestore profiles skipped', plan.profileUidsToSkip);
-  printUids('Orphan local profiles excluded', plan.orphanProfileUids);
-  console.log(`Unmatched local avatar fingerprints: ${plan.unmatchedLocalAvatarFingerprints.length}`);
-  console.log(`Safe to remove SQLite: ${plan.safeToRemoveSqlite}`);
+export function formatReconciliationSummary(
+  input: ReconciliationSummaryInput
+): string[] {
+  return [
+    `Reconciliation ${input.mode}`,
+    `Local profile count: ${input.localProfileCount}`,
+    `Firestore profile count: ${input.firestoreProfileCount}`,
+    `Firebase Auth user count: ${input.firebaseAuthUserCount}`,
+    `Local avatar count: ${input.localAvatarCount}`,
+    `Firestore avatar count: ${input.firestoreAvatarCount}`,
+    formatUids('Auth-backed profiles to create', input.plan.profileUidsToCreate),
+    formatUids('Existing Firestore profiles skipped', input.plan.profileUidsToSkip),
+    formatUids('Orphan local profiles excluded', input.plan.orphanProfileUids),
+    `Unmatched local avatar fingerprints: ${input.plan.unmatchedLocalAvatarFingerprints.length}`,
+    `Safe to remove SQLite: ${input.plan.safeToRemoveSqlite}`,
+  ];
 }
 
-async function createMigratedRecords(
-  profiles: AuthUserProfile[],
-  localPasswordHistory: PasswordHistoryEntry[]
-): Promise<number> {
-  const firestore = getDb();
-  const profileUids = new Set(profiles.map((profile) => profile.id));
-  const histories = localPasswordHistory.filter((entry) => profileUids.has(entry.userId));
+export function createFirestoreMigrationWriter(
+  firestore: ReconciliationFirestore
+): MigrationWriter {
+  return {
+    async createProfileWithHistory(
+      profile: AuthUserProfile,
+      history: PasswordHistoryEntry[]
+    ): Promise<void> {
+      // Batch create keeps the profile and its history all-or-nothing while
+      // retaining the create-only precondition of DocumentReference.create.
+      const batch = firestore.batch();
+      batch.create(firestore.collection('users').doc(profile.id), profile);
+      history.forEach((entry) => {
+        batch.create(firestore.collection('password_history').doc(entry.id), entry);
+      });
+      await batch.commit();
+    },
+  };
+}
 
-  for (const profile of profiles) {
-    await firestore.collection('users').doc(profile.id).create(profile);
+export async function executeReconciliation(
+  input: ReconciliationExecutionInput
+): Promise<ReconciliationExecutionResult> {
+  if (input.mode === 'dry-run') {
+    return { migratedProfileCount: 0, migratedPasswordHistoryCount: 0 };
   }
-  for (const history of histories) {
-    await firestore.collection('password_history').doc(history.id).create(history);
+  if (!input.plan.safeToRemoveSqlite) {
+    throw new Error('Apply refused because the SQLite removal safety checks failed.');
   }
-  return histories.length;
+
+  let migratedPasswordHistoryCount = 0;
+  for (const profile of input.plan.profilesToCreate) {
+    const profileHistory = input.localPasswordHistory.filter(
+      (entry) => entry.userId === profile.id
+    );
+    await input.writer.createProfileWithHistory(profile, profileHistory);
+    migratedPasswordHistoryCount += profileHistory.length;
+  }
+
+  const result = {
+    migratedProfileCount: input.plan.profilesToCreate.length,
+    migratedPasswordHistoryCount,
+  };
+  input.output(`Migrated profile count: ${result.migratedProfileCount}`);
+  input.output(`Migrated password-history count: ${result.migratedPasswordHistoryCount}`);
+  return result;
 }
 
-function parseMode(args: string[]): 'dry-run' | 'apply' {
+export function parseMode(args: string[]): ReconciliationMode {
   if (args.length === 0 || (args.length === 1 && args[0] === '--dry-run')) {
     return 'dry-run';
   }
@@ -289,29 +362,27 @@ async function run(): Promise<void> {
     firestoreAvatars,
   });
 
-  printSummary(
+  formatReconciliationSummary({
     mode,
-    localProfiles,
-    firebaseAuthUids,
-    firestoreProfileUids,
-    localAvatars,
-    firestoreAvatars,
-    plan
-  );
+    localProfileCount: localProfiles.length,
+    firebaseAuthUserCount: firebaseAuthUids.size,
+    firestoreProfileCount: firestoreProfileUids.size,
+    localAvatarCount: localAvatars.length,
+    firestoreAvatarCount: firestoreAvatars.length,
+    plan,
+  }).forEach((line) => console.log(line));
 
-  if (mode === 'dry-run') return;
-  if (!plan.safeToRemoveSqlite) {
-    throw new Error('Apply refused because the SQLite removal safety checks failed.');
+  const localPasswordHistory = mode === 'apply' ? await readLocalPasswordHistory() : [];
+  await executeReconciliation({
+    mode,
+    plan,
+    localPasswordHistory,
+    writer: createFirestoreMigrationWriter(getDb() as unknown as ReconciliationFirestore),
+    output: console.log,
+  });
+  if (mode === 'apply') {
+    console.log('Apply completed. Run --dry-run again to verify the postcondition.');
   }
-
-  const localPasswordHistory = await readLocalPasswordHistory();
-  const copiedHistoryCount = await createMigratedRecords(
-    plan.profilesToCreate,
-    localPasswordHistory
-  );
-  console.log(`Migrated profile count: ${plan.profilesToCreate.length}`);
-  console.log(`Migrated password-history count: ${copiedHistoryCount}`);
-  console.log('Apply completed. Run --dry-run again to verify the postcondition.');
 }
 
 if (require.main === module) {
