@@ -1,5 +1,7 @@
 # Sprout Checkoff 3 Backend, Cloud, and Testing Design
 
+> Superseded by 2026-07-22 Firestore-only design.
+
 **Date:** 2026-07-20
 **Status:** Approved design
 **Primary owner:** Zhi Feng (backend, cloud infrastructure, and testing)

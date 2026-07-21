@@ -1,6 +1,4 @@
-/** Jest setupFile — runs BEFORE test modules are imported, so env vars are in
- *  place when knexfile/repositories evaluate (imports are hoisted; setting
- *  process.env inside a test file would be too late). */
+/** Jest setupFile: isolates Firebase Admin to the local Firestore Emulator. */
 process.env.NODE_ENV = 'test';
 process.env.GCLOUD_PROJECT = 'sprout-test';
 process.env.GOOGLE_CLOUD_PROJECT = 'sprout-test';

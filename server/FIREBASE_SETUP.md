@@ -4,11 +4,21 @@
 
 > ✅ **Status: DONE.** The Firebase project (`sprout-dev-66f08`) is created, Firestore is connected, and the backend reads/writes it live. This doc is now (a) reference for how it was set up, and (b) the guide for **teammates running the backend locally** and for **the frontend's Firebase config**.
 
-The backend runs on Firebase: **Firestore** (the cross-platform database), **Firebase Auth**, and a provisioned **Cloud Storage** bucket whose application adapter is still pending. A **SQLite fallback** (`DATASTORE=sqlite`) also exists so anyone can run offline without the key.
+The backend runs on Firebase: **Firestore** is the only application datastore,
+Firebase Auth is the identity authority, and Cloud Storage is provisioned while
+its application adapter remains pending.
 
 ## 🔑 For teammates running the backend locally
 
-You need `serviceAccountKey.json` (Zhi Feng sends it privately — it's a secret, never commit/post it). Put it in `sprout-app/server/`, then in `server/.env` set `DATASTORE=firestore` and `FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json`. Run `npm run dev`. If Firestore is empty, `npm run seed:firestore`. Don't want the key? Use `DATASTORE=sqlite` instead — see the main README.
+You need `serviceAccountKey.json` (Zhi Feng sends it privately - it is a secret,
+never commit or post it). Put it in `sprout-app/server/`, then set
+`FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json` in `server/.env`.
+Run `npm run dev`. If Firestore is empty, run `npm run seed`.
+
+Automated backend tests do not use this credential. `npm run test:server` starts
+the Firestore Emulator for project `sprout-test` on `127.0.0.1:8080`, removes
+service-account variables before tests import Firebase Admin, and shuts the
+emulator down after Jest completes.
 
 ## ⚠️ Before creating anything: ask Nathaniel
 
@@ -21,7 +31,6 @@ You need `serviceAccountKey.json` (Zhi Feng sends it privately — it's a secret
 Do **not** commit or upload `serviceAccountKey.json` as a repo file for production. On hosts such as Render, set `FIREBASE_SERVICE_ACCOUNT_JSON` to the full service-account JSON as a secret environment variable, plus:
 
 ```
-DATASTORE=firestore
 NODE_ENV=production
 AUTH_DEV_BYPASS=false
 DEMO_AUTH_BYPASS=false
@@ -66,9 +75,8 @@ This preflight uses the Firebase Admin SDK, so it verifies backend credentials a
    sprout-app/server/serviceAccountKey.json
    ```
    (already gitignored — NEVER commit it, never share it in the group chat; send to teammates privately if they run the backend locally)
-5. In `sprout-app/server/.env`, flip these two lines:
+5. In `sprout-app/server/.env`, configure the credential path:
    ```
-   DATASTORE=firestore
    FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json
    ```
 6. Restart the server (`npm run dev`) → `POST /api/query/submit` now writes to Firestore. Check it in the console: **Firestore Database → query_tickets** collection.
@@ -124,9 +132,9 @@ service cloud.firestore {
 
 | Collection | Purpose | Written by |
 |---|---|---|
-| `query_tickets` | Contact Us tickets | `ticket.repo.firestore.ts` ✅ built |
-| `counters` | Atomic daily ticket sequence | `ticket.repo.firestore.ts` ✅ built |
-| `avatar_records` | Plant avatars (mobile + web, isTemporary flag) | `avatar.repo.firestore.ts` ✅ built (read) |
+| `query_tickets` | Contact Us tickets | `repositories/tickets.ts` built |
+| `counters` | Atomic daily ticket sequence | `repositories/tickets.ts` built |
+| `avatar_records` | Plant avatars (mobile + web, isTemporary flag) | `repositories/avatars.ts` built (read) |
 | `users` | Profile docs keyed by Firebase Auth uid, plus reset OTP hash/TTL fields | seeded ✅; auth flow built |
 | `password_history` | Last-3 reset password hashes per user | auth flow built |
 | `battle_sessions` | PVE battle state | battle repo (later) |

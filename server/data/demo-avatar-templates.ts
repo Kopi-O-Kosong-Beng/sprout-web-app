@@ -1,17 +1,16 @@
-/** Shared demo dataset used by BOTH the SQLite seed and the Firestore seed, so
- *  the two datastores contain identical sample data.
+/** Deterministic demo catalogue used by Firestore seed tooling.
  *
  *  DEMO_USER_ID is a fixed, well-known id. With AUTH_DEV_BYPASS=true the
  *  frontend can act as this user by sending header `x-dev-uid: demo-user-0001`
  *  and immediately see these avatars — no Firebase login needed yet.
  */
-import { randomUUID } from 'crypto';
 import type { AvatarStats } from '../models/avatar';
 
 export const DEMO_USER_ID = 'demo-user-0001';
 export const DEMO_EMAIL = 'demo@sprout.app';
 
-interface SeedAvatar {
+export interface DemoAvatarTemplate {
+  id: string;
   speciesName: string;
   speciesFamily: string;
   source: 'mobile' | 'web';
@@ -20,8 +19,9 @@ interface SeedAvatar {
   metadata: Record<string, unknown>;
 }
 
-const AVATARS: SeedAvatar[] = [
+export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
   {
+    id: 'demo-avatar-helianthus-annuus',
     speciesName: 'Helianthus annuus',
     speciesFamily: 'Asteraceae',
     source: 'mobile',
@@ -34,6 +34,7 @@ const AVATARS: SeedAvatar[] = [
     },
   },
   {
+    id: 'demo-avatar-quercus-robur',
     speciesName: 'Quercus robur',
     speciesFamily: 'Fagaceae',
     source: 'mobile',
@@ -46,6 +47,7 @@ const AVATARS: SeedAvatar[] = [
     },
   },
   {
+    id: 'demo-avatar-monstera-deliciosa',
     speciesName: 'Monstera deliciosa',
     speciesFamily: 'Araceae',
     source: 'mobile',
@@ -54,6 +56,7 @@ const AVATARS: SeedAvatar[] = [
     metadata: { taxonomy: 'plant', confidence: 0.91 },
   },
   {
+    id: 'demo-avatar-ficus-lyrata',
     speciesName: 'Ficus lyrata',
     speciesFamily: 'Moraceae',
     source: 'mobile',
@@ -62,6 +65,7 @@ const AVATARS: SeedAvatar[] = [
     metadata: { taxonomy: 'tree', confidence: 0.89 },
   },
   {
+    id: 'demo-avatar-amanita-muscaria',
     speciesName: 'Amanita muscaria',
     speciesFamily: 'Amanitaceae',
     source: 'web',
@@ -96,19 +100,20 @@ export interface SeedAvatarRow {
   metadata: Record<string, unknown>;
 }
 
-/** Fully-materialised avatar rows for the demo user (stable ids per run). */
-export function buildAvatarRows(): SeedAvatarRow[] {
-  return AVATARS.map((a) => ({
-    id: randomUUID(),
+/** Materialises stable IDs with one seed-time timestamp for the whole set. */
+export function buildAvatarRows(now: Date = new Date()): SeedAvatarRow[] {
+  const discoveredAt = now.toISOString();
+  return DEMO_AVATAR_TEMPLATES.map((a) => ({
+    id: a.id,
     userId: DEMO_USER_ID,
     speciesName: a.speciesName,
     speciesFamily: a.speciesFamily,
     spriteUrl: `/static/sprites/${a.speciesName.toLowerCase().replace(/\s+/g, '-')}.png`,
-    discoveredAt: new Date().toISOString(),
+    discoveredAt,
     source: a.source,
     isTemporary: a.isTemporary,
     expiresAt: a.isTemporary
-      ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
       : null,
     stats: a.stats,
     metadata: a.metadata,

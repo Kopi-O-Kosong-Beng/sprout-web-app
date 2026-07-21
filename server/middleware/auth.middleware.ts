@@ -72,7 +72,7 @@ function createAuthMiddleware(options: AuthMiddlewareOptions = {}): RequestHandl
     }
 
     try {
-      // Lazy import so SQLite/test processes never load firebase-admin.
+      // Lazy import keeps Firebase initialization behind authenticated routes.
       const { getAuthAdmin } = await import('../firebase');
       const decoded: DecodedIdToken = await getAuthAdmin().verifyIdToken(token);
       if (

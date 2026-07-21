@@ -7,7 +7,11 @@
 import '../env';
 import bcrypt from 'bcrypt';
 import { getAuthAdmin, getDb } from '../firebase';
-import { DEMO_EMAIL, DEMO_USER_ID, SEED_USERS } from './sample-data';
+import {
+  DEMO_EMAIL,
+  DEMO_USER_ID,
+  SEED_USERS,
+} from '../data/demo-avatar-templates';
 
 const DEMO_PASSWORD = 'Password123!';
 const BCRYPT_COST = 12;

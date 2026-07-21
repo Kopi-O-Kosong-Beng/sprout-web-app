@@ -1,27 +1,26 @@
-/** T05 — query ticket integration (tasks.md 18.4 head start).
- *  Uses a throwaway SQLite file (set in setup-env.ts) so dev data is never touched. */
-import fs from 'fs';
-import path from 'path';
+/** T05 query ticket integration against the local Firestore Emulator. */
 import request from 'supertest';
 jest.mock('../services/email.service', () => ({ send: jest.fn() }));
 import { send as sendEmail } from '../services/email.service';
 import app from '../app';
-import db from '../database/db';
+import { getDb } from '../firebase';
 import ticketRepository from '../repositories/tickets';
+import { clearFirestore } from './firestore-test-utils';
 
 const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
 
-beforeAll(async () => {
-  await db.migrate.latest();
-});
+async function readTicketByReference(
+  refNumber: string
+): Promise<FirebaseFirestore.DocumentData | undefined> {
+  const snapshot = await getDb()
+    .collection('query_tickets')
+    .where('refNumber', '==', refNumber)
+    .limit(1)
+    .get();
+  return snapshot.empty ? undefined : snapshot.docs[0].data();
+}
 
-afterAll(async () => {
-  await db.destroy();
-  const f = path.join(__dirname, '..', 'database', 'sprout.test.sqlite3');
-  [f, `${f}-shm`, `${f}-wal`].forEach((p) => {
-    if (fs.existsSync(p)) fs.unlinkSync(p);
-  });
-});
+beforeEach(clearFirestore);
 
 describe('GET /api/health', () => {
   it('returns ok with a timestamp', async () => {
@@ -49,9 +48,7 @@ describe('POST /api/query/submit (T05)', () => {
     expect(res.status).toBe(201);
     expect(res.body.refNumber).toMatch(/^SPR-\d{8}-\d{4}$/);
 
-    const row = await db('query_tickets')
-      .where({ refNumber: res.body.refNumber })
-      .first();
+    const row = (await readTicketByReference(res.body.refNumber))!;
     expect(row).toBeDefined();
     expect(row.status).toBe('open');
     expect(row.email).toBe(valid.email);
@@ -99,9 +96,7 @@ describe('POST /api/query/submit (T05)', () => {
       expect(res.status).toBe(201);
       expect(res.body.refNumber).toMatch(/^SPR-\d{8}-\d{4}$/);
 
-      const row = await db('query_tickets')
-        .where({ refNumber: res.body.refNumber })
-        .first();
+      const row = (await readTicketByReference(res.body.refNumber))!;
       expect(row).toBeDefined();
       expect(
         errSpy.mock.calls.flat().join('\n')
@@ -130,7 +125,7 @@ describe('POST /api/query/submit (T05)', () => {
       expect(res.status).toBe(201);
       expect(mockSendEmail).toHaveBeenCalledTimes(2);
       expect(mockSendEmail.mock.calls[1][0].to).toBe('hello.sprout.team@gmail.com');
-      const row = await db('query_tickets').where({ refNumber: res.body.refNumber }).first();
+      const row = (await readTicketByReference(res.body.refNumber))!;
       expect(row).toMatchObject({
         submitterEmailStatus: outcomes[0] instanceof Error ? 'failed' : 'sent',
         adminEmailStatus: outcomes[1] instanceof Error ? 'failed' : 'sent',
@@ -163,7 +158,7 @@ describe('POST /api/query/submit (T05)', () => {
     try {
       const res = await request(app).post('/api/query/submit').send(valid);
       expect(res.status).toBe(201);
-      const row = await db('query_tickets').where({ refNumber: res.body.refNumber }).first();
+      const row = (await readTicketByReference(res.body.refNumber))!;
       expect(row.lastEmailError).toBe(
         'submitter_email_delivery_failed;admin_email_delivery_failed'
       );

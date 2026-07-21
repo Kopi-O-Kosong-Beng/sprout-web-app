@@ -38,8 +38,7 @@ export interface TicketNotificationPatch {
   notificationUpdatedAt: string;
 }
 
-/** The seam every datastore implementation must satisfy — services depend on
- *  this interface, never on Knex or Firestore directly. */
+/** Services depend on this interface rather than Firebase Admin directly. */
 export interface TicketRepository {
   create(input: TicketInput): Promise<Ticket>;
   updateNotificationState(id: string, patch: TicketNotificationPatch): Promise<void>;

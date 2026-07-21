@@ -1,6 +1,4 @@
-/** Query ticket creation - Req 9, tasks.md 8.1.
- *  Persistence goes through the repository seam (repositories/tickets.ts), so
- *  this service is identical on SQLite and Firestore. */
+/** Query ticket creation - Req 9, tasks.md 8.1. */
 import ticketRepository from '../repositories/tickets';
 import { send as sendEmail } from './email.service';
 import type { Ticket, TicketInput } from '../models/ticket';

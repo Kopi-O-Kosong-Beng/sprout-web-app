@@ -1,4 +1,4 @@
-/** Firebase Admin SDK init — lazy, so SQLite-mode runs never require a key.
+/** Firebase Admin SDK initialization for Firestore, Auth, and Storage.
  *  Final architecture per Master.docx: Firestore (cross-platform DB shared with
  *  the mobile app), Firebase Auth (ID-token verification), Cloud Storage (PM3).
  *

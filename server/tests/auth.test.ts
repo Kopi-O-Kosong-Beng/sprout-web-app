@@ -1,13 +1,12 @@
 import { randomUUID } from 'crypto';
-import fs from 'fs';
-import path from 'path';
 import bcrypt from 'bcrypt';
 import request from 'supertest';
 jest.mock('../services/email.service', () => ({ send: jest.fn() }));
 import { send as sendEmail } from '../services/email.service';
 import app from '../app';
-import db from '../database/db';
+import { getDb } from '../firebase';
 import authUserRepository from '../repositories/auth-users';
+import { clearFirestore } from './firestore-test-utils';
 import {
   verificationResendAccountStore,
   verificationResendIpStore,
@@ -90,16 +89,52 @@ const mockAuthAdmin = {
   verifyIdToken: jest.fn(),
 };
 
-jest.mock('../firebase', () => ({
-  getAuthAdmin: () => mockAuthAdmin,
-}));
+jest.mock('../firebase', () => {
+  const actual = jest.requireActual('../firebase');
+  return { ...actual, getAuthAdmin: () => mockAuthAdmin };
+});
 
-async function resetTables(): Promise<void> {
-  await db('query_tickets').del();
-  await db('battle_sessions').del();
-  await db('avatar_records').del();
-  await db('password_history').del();
-  await db('users').del();
+async function readUserById(id: string): Promise<FirebaseFirestore.DocumentData | undefined> {
+  const document = await getDb().collection('users').doc(id).get();
+  return document.exists ? document.data() : undefined;
+}
+
+async function readUserByEmail(
+  email: string
+): Promise<FirebaseFirestore.DocumentData | undefined> {
+  const snapshot = await getDb()
+    .collection('users')
+    .where('email', '==', email)
+    .limit(1)
+    .get();
+  return snapshot.empty ? undefined : snapshot.docs[0].data();
+}
+
+async function readPasswordHistory(
+  userId: string
+): Promise<FirebaseFirestore.DocumentData[]> {
+  const snapshot = await getDb()
+    .collection('password_history')
+    .where('userId', '==', userId)
+    .get();
+  return snapshot.docs.map((document) => document.data());
+}
+
+async function updateUser(
+  id: string,
+  patch: FirebaseFirestore.DocumentData
+): Promise<void> {
+  await getDb().collection('users').doc(id).set(patch, { merge: true });
+}
+
+async function deletePasswordHistory(userId: string): Promise<void> {
+  const snapshot = await getDb()
+    .collection('password_history')
+    .where('userId', '==', userId)
+    .get();
+  const batch = getDb().batch();
+  snapshot.docs.forEach((document) => batch.delete(document.ref));
+  await batch.commit();
 }
 
 async function createLocalUser(input: {
@@ -113,19 +148,14 @@ async function createLocalUser(input: {
   const password = input.password ?? 'Password123!';
   const email = input.email.toLowerCase();
   const passwordHash = await bcrypt.hash(password, Number(process.env.BCRYPT_COST));
-  await db('users').insert({
+  await authUserRepository.createProfile({
     id,
     email,
     passwordHash,
     displayName: input.displayName ?? 'Test User',
     isVerified: input.isVerified ?? true,
   });
-  await db('password_history').insert({
-    id: randomUUID(),
-    userId: id,
-    passwordHash,
-    changedAt: new Date().toISOString(),
-  });
+  await authUserRepository.addPasswordHistory(id, passwordHash);
   const firebaseUser: MockFirebaseUser = {
     uid: id,
     email,
@@ -153,10 +183,6 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-beforeAll(async () => {
-  await db.migrate.latest();
-});
-
 beforeEach(async () => {
   mockUsersByEmail.clear();
   mockUsersByUid.clear();
@@ -164,15 +190,7 @@ beforeEach(async () => {
   mockSendEmail.mockResolvedValue({ delivered: true, mode: 'console' });
   await verificationResendAccountStore.resetAll();
   await verificationResendIpStore.resetAll();
-  await resetTables();
-});
-
-afterAll(async () => {
-  await db.destroy();
-  const f = path.join(__dirname, '..', 'database', 'sprout.test.sqlite3');
-  [f, `${f}-shm`, `${f}-wal`, `${f}-journal`].forEach((p) => {
-    if (fs.existsSync(p)) fs.unlinkSync(p);
-  });
+  await clearFirestore();
 });
 
 describe('POST /api/auth/signup', () => {
@@ -194,12 +212,12 @@ describe('POST /api/auth/signup', () => {
       }
     );
 
-    const row = await db('users').where({ id: res.body.uid }).first();
+    const row = (await readUserById(res.body.uid))!;
     expect(row).toBeDefined();
     expect(row.passwordHash).not.toBe('Password123!');
     expect(await bcrypt.compare('Password123!', row.passwordHash)).toBe(true);
 
-    const history = await db('password_history').where({ userId: res.body.uid });
+    const history = await readPasswordHistory(res.body.uid);
     expect(history).toHaveLength(0);
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -225,7 +243,7 @@ describe('POST /api/auth/signup', () => {
         'Account created, but the verification email could not be sent. Sign in and request a new link.'
       );
       expect(
-        await db('users').where({ email: 'smtp-failure@example.com' }).first()
+        await readUserByEmail('smtp-failure@example.com')
       ).toBeDefined();
     } finally {
       errSpy.mockRestore();
@@ -583,7 +601,7 @@ describe('GET /api/auth/me', () => {
     expect(res.status).toBe(200);
     expect(res.body.uid).toBe(user.id);
     expect(res.body.emailVerified).toBe(true);
-    const row = await db('users').where({ id: user.id }).first();
+    const row = (await readUserById(user.id))!;
     expect(Boolean(row.isVerified)).toBe(true);
   });
 
@@ -618,7 +636,7 @@ describe('GET /api/auth/me', () => {
     expect(res.body.lastLoginAt).toBeUndefined();
     expect(res.body.lastLoginAtReadable).toBeUndefined();
 
-    const row = await db('users').where({ id: user.id }).first();
+    const row = (await readUserById(user.id))!;
     expect(row.lastLogin).toContain('SGT');
     expect(row.LastLogin).toBeUndefined();
     expect(row.lastLoginAt).toBeUndefined();
@@ -680,7 +698,7 @@ describe('POST /api/auth/session/login and /logout', () => {
     expect(login.body.lastLoginAt).toBeUndefined();
     expect(login.body.lastLoginAtReadable).toBeUndefined();
 
-    const afterLogin = await db('users').where({ id: user.id }).first();
+    const afterLogin = (await readUserById(user.id))!;
     expect(afterLogin.lastLogin).toContain('SGT');
     expect(afterLogin.LastLogin).toBeUndefined();
     expect(afterLogin.lastLoginAt).toBeUndefined();
@@ -696,7 +714,7 @@ describe('POST /api/auth/session/login and /logout', () => {
     expect(logout.body.lastLogoutAt).toBeUndefined();
     expect(logout.body.lastLogoutAtReadable).toBeUndefined();
 
-    const afterLogout = await db('users').where({ id: user.id }).first();
+    const afterLogout = (await readUserById(user.id))!;
     expect(afterLogout.lastLogout).toContain('SGT');
     expect(afterLogout.LastLogout).toBeUndefined();
     expect(afterLogout.lastLogoutAt).toBeUndefined();
@@ -722,7 +740,7 @@ describe('POST /api/auth/session/login and /logout', () => {
     expect(login.status).toBe(200);
     expect(login.body.lastLogin).toContain('SGT');
 
-    const afterLogin = await db('users').where({ id: user.id }).first();
+    const afterLogin = (await readUserById(user.id))!;
     expect(afterLogin.lastLogin).toContain('SGT');
   });
 });
@@ -745,7 +763,7 @@ describe('password reset OTP flow', () => {
     });
     expect(unknown.body).toEqual(known.body);
 
-    const row = await db('users').where({ email: 'reset@example.com' }).first();
+    const row = (await readUserByEmail('reset@example.com'))!;
     expect(row.resetOtpHash).toBeTruthy();
     expect(row.resetOtpHash).not.toBe(latestOtpFromEmailPayload());
   });
@@ -772,7 +790,7 @@ describe('password reset OTP flow', () => {
     expect(knownHashCalls).toBe(1);
     expect(unknownHashCalls).toBe(1);
     expect(mockSendEmail).toHaveBeenCalledTimes(1);
-    expect(await db('users').where({ email: 'never-stored@example.com' }).first()).toBeUndefined();
+    expect(await readUserByEmail('never-stored@example.com')).toBeUndefined();
   });
 
   it('keeps the generic 200 response and controlled logs when reset delivery rejects', async () => {
@@ -869,7 +887,7 @@ describe('password reset OTP flow', () => {
       .post('/api/auth/request-reset')
       .send({ email: user.email });
     const otp = latestOtpFromEmailPayload();
-    await db('users').where({ id: user.id }).update({ resetOtpFailedAttempts: 4 });
+    await updateUser(user.id, { resetOtpFailedAttempts: 4 });
 
     const res = await request(app).post('/api/auth/verify-reset').send({
       email: user.email,
@@ -883,18 +901,18 @@ describe('password reset OTP flow', () => {
       password: 'Password123!!',
     });
 
-    const row = await db('users').where({ id: user.id }).first();
+    const row = (await readUserById(user.id))!;
     expect(row.resetOtpHash).toBeNull();
     expect(row.resetOtpFailedAttempts).toBe(0);
     expect(await bcrypt.compare('Password123!!', row.passwordHash)).toBe(true);
-    const history = await db('password_history').where({ userId: user.id });
+    const history = await readPasswordHistory(user.id);
     expect(history).toHaveLength(1);
     expect(await bcrypt.compare(user.password, history[0].passwordHash)).toBe(true);
   });
 
   it('allows only one parallel request to consume a valid OTP', async () => {
     const user = await createLocalUser({ email: 'parallel-valid@example.com' });
-    await db('password_history').where({ userId: user.id }).del();
+    await deletePasswordHistory(user.id);
     await request(app).post('/api/auth/request-reset').send({ email: user.email });
     const otp = latestOtpFromEmailPayload();
     const payload = {
@@ -913,7 +931,7 @@ describe('password reset OTP flow', () => {
       'Invalid OTP. Request a new one.'
     );
     expect(mockAuthAdmin.updateUser).toHaveBeenCalledTimes(1);
-    const history = await db('password_history').where({ userId: user.id });
+    const history = await readPasswordHistory(user.id);
     expect(history).toHaveLength(1);
     expect(await bcrypt.compare(user.password, history[0].passwordHash)).toBe(true);
   });
@@ -921,7 +939,7 @@ describe('password reset OTP flow', () => {
   it('does not let a stale invalid request increment a freshly resent OTP', async () => {
     const user = await createLocalUser({ email: 'stale-invalid@example.com' });
     const oldOtpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
-    await db('users').where({ id: user.id }).update({
+    await updateUser(user.id, {
       resetOtpHash: oldOtpHash,
       resetOtpExpiresAt: new Date(Date.now() + 900_000).toISOString(),
       resetOtpFailedAttempts: 4,
@@ -954,14 +972,14 @@ describe('password reset OTP flow', () => {
         .post('/api/auth/request-reset')
         .send({ email: user.email });
       expect(resend.status).toBe(200);
-      const freshRow = await db('users').where({ id: user.id }).first();
+      const freshRow = (await readUserById(user.id))!;
       expect(freshRow.resetOtpHash).not.toBe(oldOtpHash);
 
       releaseProfile.resolve();
       const staleResponse = await staleResponsePromise;
       expect(staleResponse.status).toBe(400);
 
-      const finalRow = await db('users').where({ id: user.id }).first();
+      const finalRow = (await readUserById(user.id))!;
       expect(finalRow.resetOtpHash).toBe(freshRow.resetOtpHash);
       expect(finalRow.resetOtpFailedAttempts).toBe(0);
     } finally {
@@ -973,7 +991,7 @@ describe('password reset OTP flow', () => {
   it('does not let a stale expired request clear a freshly resent OTP', async () => {
     const user = await createLocalUser({ email: 'stale-expired@example.com' });
     const oldOtpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
-    await db('users').where({ id: user.id }).update({
+    await updateUser(user.id, {
       resetOtpHash: oldOtpHash,
       resetOtpExpiresAt: new Date(Date.now() - 1000).toISOString(),
       resetOtpFailedAttempts: 4,
@@ -1006,7 +1024,7 @@ describe('password reset OTP flow', () => {
         .post('/api/auth/request-reset')
         .send({ email: user.email });
       expect(resend.status).toBe(200);
-      const freshRow = await db('users').where({ id: user.id }).first();
+      const freshRow = (await readUserById(user.id))!;
       expect(freshRow.resetOtpHash).not.toBe(oldOtpHash);
 
       releaseProfile.resolve();
@@ -1014,7 +1032,7 @@ describe('password reset OTP flow', () => {
       expect(staleResponse.status).toBe(400);
       expect(staleResponse.body.error).toBe('OTP has expired. Request a new one.');
 
-      const finalRow = await db('users').where({ id: user.id }).first();
+      const finalRow = (await readUserById(user.id))!;
       expect(finalRow.resetOtpHash).toBe(freshRow.resetOtpHash);
       expect(finalRow.resetOtpFailedAttempts).toBe(0);
     } finally {
@@ -1039,7 +1057,7 @@ describe('password reset OTP flow', () => {
       expect(failed.status).toBe(500);
       expect(failed.body.error).toBe('Internal server error.');
 
-      const row = await db('users').where({ id: user.id }).first();
+      const row = (await readUserById(user.id))!;
       expect(row.resetOtpHash).toBeNull();
       expect(row.resetOtpExpiresAt).toBeNull();
       expect(row.resetOtpFailedAttempts).toBe(0);
@@ -1059,7 +1077,7 @@ describe('password reset OTP flow', () => {
   it('rejects invalid OTP, expired OTP, weak password, and recent reuse', async () => {
     const user = await createLocalUser({ email: 'reject@example.com' });
     const otpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
-    await db('users').where({ id: user.id }).update({
+    await updateUser(user.id, {
       resetOtpHash: otpHash,
       resetOtpExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
     });
@@ -1089,7 +1107,7 @@ describe('password reset OTP flow', () => {
       'This password was used recently. Choose a different password.'
     );
 
-    await db('users').where({ id: user.id }).update({
+    await updateUser(user.id, {
       resetOtpHash: otpHash,
       resetOtpExpiresAt: new Date(Date.now() - 1000).toISOString(),
     });
@@ -1105,7 +1123,7 @@ describe('password reset OTP flow', () => {
   it('invalidates an OTP after five wrong attempts', async () => {
     const user = await createLocalUser({ email: 'attempts@example.com' });
     const otpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
-    await db('users').where({ id: user.id }).update({
+    await updateUser(user.id, {
       resetOtpHash: otpHash,
       resetOtpExpiresAt: new Date(Date.now() + 900_000).toISOString(),
       resetOtpFailedAttempts: 0,
@@ -1123,7 +1141,7 @@ describe('password reset OTP flow', () => {
       }
     }
 
-    const row = await db('users').where({ id: user.id }).first();
+    const row = (await readUserById(user.id))!;
     expect(row.resetOtpHash).toBeNull();
     expect(row.resetOtpFailedAttempts).toBe(0);
   });
@@ -1131,7 +1149,7 @@ describe('password reset OTP flow', () => {
   it('atomically invalidates one issuance under five concurrent wrong OTPs', async () => {
     const user = await createLocalUser({ email: 'concurrent-attempts@example.com' });
     const otpHash = await bcrypt.hash('123456', Number(process.env.BCRYPT_COST));
-    await db('users').where({ id: user.id }).update({
+    await updateUser(user.id, {
       resetOtpHash: otpHash,
       resetOtpExpiresAt: new Date(Date.now() + 900_000).toISOString(),
       resetOtpFailedAttempts: 0,
@@ -1155,7 +1173,7 @@ describe('password reset OTP flow', () => {
       'Invalid OTP.',
       'Invalid OTP. Request a new one.',
     ]);
-    const row = await db('users').where({ id: user.id }).first();
+    const row = (await readUserById(user.id))!;
     expect(row.resetOtpHash).toBeNull();
     expect(row.resetOtpExpiresAt).toBeNull();
     expect(row.resetOtpFailedAttempts).toBe(0);

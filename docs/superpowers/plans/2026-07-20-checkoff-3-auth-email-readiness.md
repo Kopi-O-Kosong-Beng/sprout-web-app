@@ -1,5 +1,7 @@
 # Checkoff 3 Auth and Email Readiness Implementation Plan
 
+> Superseded by 2026-07-22 Firestore-only design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make UC1, UC2, UC3, and UC8 production-ready enough for Checkoff 3 by enabling real SMTP delivery, completing Firebase email verification/resend, enforcing verified routes and OTP attempt limits, stabilizing auth tests, and making ticket notifications independent.

@@ -1,104 +1,73 @@
-const mockTransactionGet = jest.fn(async () => ({
-  exists: true,
-  data: () => ({ resetOtpHash: 'hashed-otp', resetOtpFailedAttempts: 4 }),
-}));
-const mockTransactionSet = jest.fn();
-const mockDocumentSet = jest.fn();
-const mockTransaction = {
-  get: mockTransactionGet,
-  set: mockTransactionSet,
-};
-const mockRunTransaction = jest.fn(async (callback: (tx: typeof mockTransaction) => unknown) => {
-  return callback(mockTransaction);
-});
-const mockDocument = { id: 'user-1', set: mockDocumentSet };
-const mockDb = {
-  collection: jest.fn(() => ({
-    doc: jest.fn(() => mockDocument),
-  })),
-  runTransaction: mockRunTransaction,
+import { getDb } from '../firebase';
+import authUserRepository from '../repositories/auth-users';
+import { clearFirestore, seedFirestoreUser } from './firestore-test-utils';
+
+const baseProfile = {
+  id: 'user-1',
+  email: 'user-1@example.com',
+  displayName: 'User One',
+  isVerified: true,
+  passwordHash: 'password-hash',
+  resetOtpHash: 'hashed-otp',
+  resetOtpExpiresAt: '2026-07-22T01:00:00.000Z',
+  resetOtpFailedAttempts: 4,
+  createdAt: '2026-07-22T00:00:00.000Z',
+  updatedAt: '2026-07-22T00:00:00.000Z',
 };
 
-jest.mock('../firebase', () => ({
-  getDb: () => mockDb,
-}));
-
-import firestoreAuthUserRepository from '../repositories/auth-user.repo.firestore';
+async function readProfile() {
+  return (await getDb().collection('users').doc(baseProfile.id).get()).data();
+}
 
 describe('Firestore auth user repository', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
+  beforeEach(async () => {
+    await clearFirestore();
+    await seedFirestoreUser(baseProfile);
   });
 
   it('clears the OTP atomically when the fifth failure is recorded', async () => {
-    const repository = firestoreAuthUserRepository as unknown as {
-      recordResetOtpFailure(id: string, expectedResetOtpHash: string): Promise<number>;
-    };
-
     await expect(
-      repository.recordResetOtpFailure('user-1', 'hashed-otp')
+      authUserRepository.recordResetOtpFailure(baseProfile.id, 'hashed-otp')
     ).resolves.toBe(5);
 
-    expect(mockRunTransaction).toHaveBeenCalledTimes(1);
-    expect(mockTransactionSet).toHaveBeenCalledWith(
-      mockDocument,
-      expect.objectContaining({
-        resetOtpHash: null,
-        resetOtpExpiresAt: null,
-        resetOtpFailedAttempts: 0,
-      }),
-      { merge: true }
-    );
+    await expect(readProfile()).resolves.toMatchObject({
+      resetOtpHash: null,
+      resetOtpExpiresAt: null,
+      resetOtpFailedAttempts: 0,
+    });
   });
 
   it('does not record a failure against a newer OTP', async () => {
-    mockTransactionGet.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({ resetOtpHash: 'fresh-hash', resetOtpFailedAttempts: 0 }),
-    });
-    const repository = firestoreAuthUserRepository as unknown as {
-      recordResetOtpFailure(id: string, expectedResetOtpHash: string): Promise<number>;
-    };
-
     await expect(
-      repository.recordResetOtpFailure('user-1', 'stale-hash')
+      authUserRepository.recordResetOtpFailure(baseProfile.id, 'stale-hash')
     ).resolves.toBe(0);
-    expect(mockTransactionSet).not.toHaveBeenCalled();
+
+    await expect(readProfile()).resolves.toMatchObject({
+      resetOtpHash: 'hashed-otp',
+      resetOtpFailedAttempts: 4,
+    });
   });
 
   it('does not clear a newer OTP for a stale expiry request', async () => {
-    mockTransactionGet.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({ resetOtpHash: 'fresh-hash', resetOtpFailedAttempts: 0 }),
-    });
-    const repository = firestoreAuthUserRepository as unknown as {
-      clearResetOtp(id: string, expectedResetOtpHash: string): Promise<boolean>;
-    };
+    await expect(
+      authUserRepository.clearResetOtp(baseProfile.id, 'stale-hash')
+    ).resolves.toBe(false);
 
-    await expect(repository.clearResetOtp('user-1', 'stale-hash')).resolves.toBe(false);
-    expect(mockTransactionSet).not.toHaveBeenCalled();
-    expect(mockDocumentSet).not.toHaveBeenCalled();
+    await expect(readProfile()).resolves.toMatchObject({
+      resetOtpHash: 'hashed-otp',
+      resetOtpFailedAttempts: 4,
+    });
   });
 
   it('claims and clears only the matching OTP in a transaction', async () => {
-    mockTransactionGet.mockResolvedValueOnce({
-      exists: true,
-      data: () => ({ resetOtpHash: 'claim-hash', resetOtpFailedAttempts: 2 }),
-    });
-    const repository = firestoreAuthUserRepository as unknown as {
-      claimResetOtp(id: string, expectedResetOtpHash: string): Promise<boolean>;
-    };
+    await expect(
+      authUserRepository.claimResetOtp(baseProfile.id, 'hashed-otp')
+    ).resolves.toBe(true);
 
-    await expect(repository.claimResetOtp('user-1', 'claim-hash')).resolves.toBe(true);
-    expect(mockRunTransaction).toHaveBeenCalledTimes(1);
-    expect(mockTransactionSet).toHaveBeenCalledWith(
-      mockDocument,
-      expect.objectContaining({
-        resetOtpHash: null,
-        resetOtpExpiresAt: null,
-        resetOtpFailedAttempts: 0,
-      }),
-      { merge: true }
-    );
+    await expect(readProfile()).resolves.toMatchObject({
+      resetOtpHash: null,
+      resetOtpExpiresAt: null,
+      resetOtpFailedAttempts: 0,
+    });
   });
 });

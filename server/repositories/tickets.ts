@@ -1,26 +1,51 @@
-/** Ticket repository selector — the ONLY seam between business logic and the
- *  datastore. Services depend on this module (via the TicketRepository
- *  interface), never on Knex or Firestore directly, so the datastore swaps
- *  without touching controllers/services.
- *
- *  DATASTORE=firestore → Firebase (final architecture per Master.docx)
- *  DATASTORE=sqlite    → local fallback until the Firebase project exists,
- *                        and the zero-setup path for unit tests.
- *
- *  Impls are require()d lazily so SQLite-mode processes (dev without a key,
- *  Jest) never load firebase-admin and its ESM-only dependencies.
+/** Firebase Admin implementation of the ticket repository.
+ *  RefNumber sequence uses a per-day counter document inside a Firestore
+ *  transaction — atomic under concurrency (Req 9.10), no duplicate numbers.
  */
-import type { TicketRepository } from '../models/ticket';
+import { randomUUID } from 'crypto';
+import type { Transaction } from 'firebase-admin/firestore';
+import { getDb } from '../firebase';
+import type {
+  Ticket,
+  TicketInput,
+  TicketNotificationPatch,
+  TicketRepository,
+} from '../models/ticket';
 
-function loadRepository(): TicketRepository {
-  if ((process.env.DATASTORE ?? 'sqlite') === 'firestore') {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return (require('./ticket.repo.firestore') as { default: TicketRepository }).default;
-  }
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  return (require('./ticket.repo.sqlite') as { default: TicketRepository }).default;
-}
+const firestoreTicketRepository: TicketRepository = {
+  async create({ name, email, category, message }: TicketInput): Promise<Ticket> {
+    const db = getDb();
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const counterRef = db.collection('counters').doc(`tickets-${datePart}`);
 
-const ticketRepository: TicketRepository = loadRepository();
+    return db.runTransaction(async (tx: Transaction) => {
+      const counter = await tx.get(counterRef);
+      const seq = ((counter.data()?.seq as number | undefined) ?? 0) + 1;
+      const now = new Date().toISOString();
+      const record: Ticket = {
+        id: randomUUID(),
+        refNumber: `SPR-${datePart}-${String(seq).padStart(4, '0')}`,
+        name,
+        email,
+        category,
+        message,
+        status: 'open',
+        submitterEmailStatus: 'pending',
+        adminEmailStatus: 'pending',
+        lastEmailError: null,
+        notificationUpdatedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      tx.set(counterRef, { seq }, { merge: true });
+      tx.set(db.collection('query_tickets').doc(record.id), record);
+      return record;
+    });
+  },
 
-export default ticketRepository;
+  async updateNotificationState(id: string, patch: TicketNotificationPatch): Promise<void> {
+    await getDb().collection('query_tickets').doc(id).set(patch, { merge: true });
+  },
+};
+
+export default firestoreTicketRepository;
