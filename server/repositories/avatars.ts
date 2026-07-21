@@ -174,13 +174,41 @@ function isVerifiedDemoRecord(
   );
 }
 
-function isAlreadyExistsError(error: unknown): boolean {
+function hasMatchingValue(actual: unknown, expected: unknown): boolean {
+  return JSON.stringify(actual) === JSON.stringify(expected);
+}
+
+function isExactDemoRecord(
+  data: FirebaseFirestore.DocumentData | undefined,
+  userId: string,
+  template: DemoAvatarTemplate
+): boolean {
+  if (!isVerifiedDemoRecord(data, userId, template)) return false;
+  const metadata = data!.metadata as Record<string, unknown>;
+
   return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 6
+    data!.speciesName === template.speciesName &&
+    data!.speciesFamily === template.speciesFamily &&
+    data!.spriteUrl === demoSpriteUrl(template) &&
+    data!.source === template.source &&
+    data!.isTemporary === template.isTemporary &&
+    hasMatchingValue(data!.stats, template.stats) &&
+    metadata.displayName === template.speciesName &&
+    metadata.presentationKey === `demo:${template.id}` &&
+    Object.entries(template.metadata).every(([key, value]) =>
+      hasMatchingValue(metadata[key], value)
+    )
   );
+}
+
+interface DemoAvatarConflictError extends Error {
+  status: 409;
+}
+
+function demoAvatarConflictError(): DemoAvatarConflictError {
+  const error = new Error('Demo avatar set conflicts with an existing record.') as DemoAvatarConflictError;
+  error.status = 409;
+  return error;
 }
 
 const firestoreAvatarRepository: AvatarRepository = {
@@ -221,29 +249,21 @@ const firestoreAvatarRepository: AvatarRepository = {
     const refs = DEMO_AVATAR_TEMPLATES.map((template) =>
       db.collection('avatar_records').doc(demoAvatarId(userId, template.id))
     );
-    const existing = await db.getAll(...refs);
-    const now = new Date();
-    const batch = db.batch();
-    let hasCreates = false;
+    await db.runTransaction(async (transaction) => {
+      const existing = await Promise.all(refs.map((ref) => transaction.get(ref)));
+      const now = new Date();
 
-    existing.forEach((document, index) => {
-      if (document.exists) return;
-      batch.create(
-        document.ref,
-        buildDemoAvatarRecord(userId, DEMO_AVATAR_TEMPLATES[index], now)
-      );
-      hasCreates = true;
+      existing.forEach((document, index) => {
+        const template = DEMO_AVATAR_TEMPLATES[index];
+        if (!document.exists) {
+          transaction.create(document.ref, buildDemoAvatarRecord(userId, template, now));
+          return;
+        }
+        if (!isExactDemoRecord(document.data(), userId, template)) {
+          throw demoAvatarConflictError();
+        }
+      });
     });
-
-    if (hasCreates) {
-      try {
-        await batch.commit();
-      } catch (error) {
-        // A concurrent caller may have created the same deterministic records.
-        if (isAlreadyExistsError(error)) return this.ensureDemoSet(userId);
-        throw error;
-      }
-    }
     return this.listByUser(userId, DEFAULT_ARCHIVE_PAGE, DEFAULT_ARCHIVE_PAGE_SIZE);
   },
 
@@ -252,20 +272,17 @@ const firestoreAvatarRepository: AvatarRepository = {
     const refs = DEMO_AVATAR_TEMPLATES.map((template) =>
       db.collection('avatar_records').doc(demoAvatarId(userId, template.id))
     );
-    const existing = await db.getAll(...refs);
-    const batch = db.batch();
-    let hasDeletes = false;
+    await db.runTransaction(async (transaction) => {
+      const existing = await Promise.all(refs.map((ref) => transaction.get(ref)));
 
-    existing.forEach((document, index) => {
-      if (!document.exists) return;
-      if (!isVerifiedDemoRecord(document.data(), userId, DEMO_AVATAR_TEMPLATES[index])) {
-        return;
-      }
-      batch.delete(document.ref);
-      hasDeletes = true;
+      existing.forEach((document, index) => {
+        if (!document.exists) return;
+        if (!isVerifiedDemoRecord(document.data(), userId, DEMO_AVATAR_TEMPLATES[index])) {
+          return;
+        }
+        transaction.delete(document.ref);
+      });
     });
-
-    if (hasDeletes) await batch.commit();
     return this.listByUser(userId, DEFAULT_ARCHIVE_PAGE, DEFAULT_ARCHIVE_PAGE_SIZE);
   },
 };

@@ -19,9 +19,9 @@ const requireDemoTools: RequestHandler = (_req, res, next) => {
   next();
 };
 
+router.post('/demo', requireDemoTools, authMiddleware, handleEnableDemoAvatars);
+router.delete('/demo', requireDemoTools, authMiddleware, handleDisableDemoAvatars);
 router.use(authMiddleware);
-router.post('/demo', requireDemoTools, handleEnableDemoAvatars);
-router.delete('/demo', requireDemoTools, handleDisableDemoAvatars);
 router.get('/', handleListAvatars);
 router.get('/:avatarId', handleGetAvatar);
 
