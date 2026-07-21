@@ -101,6 +101,79 @@ describe('per-user demo avatar set', () => {
     await expectExactDemoSet(completed);
   });
 
+  it('accepts an equivalent demo record when Firestore map keys are reordered', async () => {
+    await avatarRepository.ensureDemoSet(USER_ID);
+    const ref = demoRef();
+    const db = getDb();
+    const original = (await ref.get()).data()!;
+    const originalStats = original.stats as Record<string, number>;
+    const originalMetadata = original.metadata as Record<string, unknown>;
+    const locality = originalMetadata.locality as Record<string, string>;
+    await ref.set(
+      {
+        stats: {
+          speed: originalStats.speed,
+          defense: originalStats.defense,
+          attack: originalStats.attack,
+          hp: originalStats.hp,
+        },
+        metadata: {
+          ...originalMetadata,
+          locality: { venue: locality.venue, city: locality.city },
+        },
+      },
+      { merge: true }
+    );
+
+    const originalRunTransaction = db.runTransaction.bind(db);
+    const runTransactionSpy = jest.spyOn(db, 'runTransaction') as jest.SpyInstance;
+    runTransactionSpy.mockImplementation(
+      (updateFunction: (transaction: FirebaseFirestore.Transaction) => Promise<unknown>) =>
+        originalRunTransaction(async (transaction) => {
+          const originalGet = transaction.get.bind(transaction);
+          const getSpy = jest.spyOn(transaction, 'get').mockImplementation(async (documentRef) => {
+            const snapshot = await originalGet(documentRef);
+            if (documentRef.path !== ref.path) return snapshot;
+            const originalData = snapshot.data.bind(snapshot);
+            jest.spyOn(snapshot, 'data').mockImplementation(() => {
+              const data = originalData()! as FirebaseFirestore.DocumentData;
+              const stats = data.stats as Record<string, number>;
+              const metadata = data.metadata as Record<string, unknown>;
+              const nestedLocality = metadata.locality as Record<string, string>;
+              return {
+                ...data,
+                stats: {
+                  speed: stats.speed,
+                  defense: stats.defense,
+                  attack: stats.attack,
+                  hp: stats.hp,
+                },
+                metadata: {
+                  ...metadata,
+                  locality: { venue: nestedLocality.venue, city: nestedLocality.city },
+                },
+              };
+            });
+            return snapshot;
+          });
+
+          try {
+            return await updateFunction(transaction);
+          } finally {
+            getSpy.mockRestore();
+          }
+        })
+    );
+
+    try {
+      const result = await avatarRepository.ensureDemoSet(USER_ID);
+
+      await expectExactDemoSet(result);
+    } finally {
+      runTransactionSpy.mockRestore();
+    }
+  });
+
   it.each([
     'foreign owner',
     'collected record',

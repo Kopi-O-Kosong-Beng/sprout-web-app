@@ -175,7 +175,36 @@ function isVerifiedDemoRecord(
 }
 
 function hasMatchingValue(actual: unknown, expected: unknown): boolean {
-  return JSON.stringify(actual) === JSON.stringify(expected);
+  if (Object.is(actual, expected)) return true;
+  if (
+    typeof actual !== 'object' ||
+    actual === null ||
+    typeof expected !== 'object' ||
+    expected === null
+  ) {
+    return false;
+  }
+  if (Array.isArray(actual) || Array.isArray(expected)) {
+    return (
+      Array.isArray(actual) &&
+      Array.isArray(expected) &&
+      actual.length === expected.length &&
+      actual.every((value, index) => hasMatchingValue(value, expected[index]))
+    );
+  }
+
+  const actualRecord = actual as Record<string, unknown>;
+  const expectedRecord = expected as Record<string, unknown>;
+  const actualKeys = Object.keys(actualRecord);
+  const expectedKeys = Object.keys(expectedRecord);
+  return (
+    actualKeys.length === expectedKeys.length &&
+    expectedKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(actualRecord, key) &&
+        hasMatchingValue(actualRecord[key], expectedRecord[key])
+    )
+  );
 }
 
 function isExactDemoRecord(
