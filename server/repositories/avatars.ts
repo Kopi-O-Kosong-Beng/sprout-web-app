@@ -269,8 +269,9 @@ const firestoreAvatarRepository: AvatarRepository = {
     const db = getDb();
     const doc = await db.collection('avatar_records').doc(avatarId).get();
     if (!doc.exists) return null;
-    const record = toRecord(doc);
-    return record.userId === userId ? record : null;
+    const rawUserId = doc.data()?.userId;
+    if (typeof rawUserId !== 'string' || rawUserId !== userId) return null;
+    return toRecord(doc);
   },
 
   async ensureDemoSet(userId: string): Promise<PaginatedAvatars> {

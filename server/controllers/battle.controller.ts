@@ -2,6 +2,7 @@ import type { RequestHandler } from 'express';
 import type {
   AvatarStats,
   BattleEvent,
+  BattleEventType,
   BattleIntent,
   BattleMove,
   BattlePhase,
@@ -38,6 +39,32 @@ export interface PublicBattleBot {
   healUsed: boolean;
 }
 
+interface PublicBattleEventBase {
+  turnNumber: number;
+  type: BattleEventType;
+  message: string;
+  amount?: number;
+}
+
+export interface PublicBotBattleEvent extends PublicBattleEventBase {
+  actor: 'bot';
+  intent?: BattleIntent;
+}
+
+export interface PublicPlayerBattleEvent extends PublicBattleEventBase {
+  actor: 'player';
+  moveId?: string;
+}
+
+export interface PublicSystemBattleEvent extends PublicBattleEventBase {
+  actor: 'system';
+}
+
+export type PublicBattleEvent =
+  | PublicBotBattleEvent
+  | PublicPlayerBattleEvent
+  | PublicSystemBattleEvent;
+
 export interface PublicBattleSession {
   id: string;
   avatarId: string;
@@ -47,10 +74,7 @@ export interface PublicBattleSession {
   player: PublicBattlePlayer;
   bot: PublicBattleBot;
   botIntent: BattleIntent | null;
-  moveCatalogVersion: 'v1';
-  npcPresetVersion: 'thornback-v1';
-  log: BattleEvent[];
-  rewardApplied: boolean;
+  log: PublicBattleEvent[];
   xpAwarded: number;
   createdAt: string;
   updatedAt: string;
@@ -69,17 +93,48 @@ function serializeMove(move: BattleMove): BattleMove {
   };
 }
 
-function serializeEvent(event: BattleEvent): BattleEvent {
-  const serialized: BattleEvent = {
+function botEventMessage(event: BattleEvent): string {
+  switch (event.type) {
+    case 'bot_intent_prepared':
+      return 'Opponent intent prepared.';
+    case 'move_missed':
+      return 'Opponent attack missed.';
+    case 'damage_dealt':
+      return `Opponent dealt ${event.amount ?? 0} damage.`;
+    case 'healed':
+      return `Opponent recovered ${event.amount ?? 0} HP.`;
+    case 'bot_action_skipped':
+      return 'Opponent fainted before acting.';
+    default:
+      return 'Opponent acted.';
+  }
+}
+
+function serializeEvent(event: BattleEvent): PublicBattleEvent {
+  const base = {
     turnNumber: event.turnNumber,
     type: event.type,
-    actor: event.actor,
-    message: event.message,
+    ...(event.amount !== undefined ? { amount: event.amount } : {}),
   };
-  if (event.moveId !== undefined) serialized.moveId = event.moveId;
-  if (event.amount !== undefined) serialized.amount = event.amount;
-  if (event.intent !== undefined) serialized.intent = event.intent;
-  return serialized;
+  if (event.actor === 'bot') {
+    return {
+      ...base,
+      actor: 'bot',
+      message: botEventMessage(event),
+      ...(event.type === 'bot_intent_prepared' && event.intent !== undefined
+        ? { intent: event.intent }
+        : {}),
+    };
+  }
+  if (event.actor === 'player') {
+    return {
+      ...base,
+      actor: 'player',
+      message: event.message,
+      ...(event.moveId !== undefined ? { moveId: event.moveId } : {}),
+    };
+  }
+  return { ...base, actor: 'system', message: event.message };
 }
 
 export function serializeBattleSession(
@@ -115,10 +170,7 @@ export function serializeBattleSession(
       healUsed: bot.healUsed,
     },
     botIntent: session.botIntent,
-    moveCatalogVersion: session.moveCatalogVersion,
-    npcPresetVersion: session.npcPresetVersion,
     log: session.log.map(serializeEvent),
-    rewardApplied: session.rewardApplied,
     xpAwarded: session.xpAwarded,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,

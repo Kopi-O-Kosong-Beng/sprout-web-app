@@ -27,8 +27,55 @@ let testSequence = 0;
 let userId: string;
 let otherUserId: string;
 
+const INTERNAL_BATTLE_KEYS = new Set([
+  'userId',
+  'pendingBotMoveId',
+  'rngSeed',
+  'rngState',
+  'rngStep',
+  'moveCatalogVersion',
+  'npcPresetVersion',
+  'rewardApplied',
+]);
+const BOT_MOVE_NAMES = [
+  'Thorn Jab',
+  'Bramble Bastion',
+  'Briar Barrage',
+  'Photosynthesis',
+];
+
 function authorization(uid: string, verified = true): string {
   return `Bearer ${verified ? 'verified' : 'unverified'}:${uid}`;
+}
+
+function findForbiddenKeys(value: unknown, path = '$'): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      findForbiddenKeys(item, `${path}[${index}]`)
+    );
+  }
+  if (typeof value !== 'object' || value === null) return [];
+  return Object.entries(value).flatMap(([key, child]) => [
+    ...(INTERNAL_BATTLE_KEYS.has(key) ? [`${path}.${key}`] : []),
+    ...findForbiddenKeys(child, `${path}.${key}`),
+  ]);
+}
+
+function expectedBotEventMessage(event: Record<string, unknown>): string {
+  switch (event.type) {
+    case 'bot_intent_prepared':
+      return 'Opponent intent prepared.';
+    case 'move_missed':
+      return 'Opponent attack missed.';
+    case 'damage_dealt':
+      return `Opponent dealt ${event.amount} damage.`;
+    case 'healed':
+      return `Opponent recovered ${event.amount} HP.`;
+    case 'bot_action_skipped':
+      return 'Opponent fainted before acting.';
+    default:
+      return 'Opponent acted.';
+  }
 }
 
 function expectPublicSession(session: Record<string, unknown>): void {
@@ -43,12 +90,28 @@ function expectPublicSession(session: Record<string, unknown>): void {
   expect(['building', 'committed', 'uncertain', null]).toContain(
     session.botIntent
   );
-  expect(session).not.toHaveProperty('userId');
-  expect(session).not.toHaveProperty('pendingBotMoveId');
-  expect(session).not.toHaveProperty('rngSeed');
-  expect(session).not.toHaveProperty('rngState');
-  expect(session).not.toHaveProperty('rngStep');
+  expect(findForbiddenKeys(session)).toEqual([]);
   expect(session).not.toHaveProperty('bot.moves');
+
+  const serialized = JSON.stringify(session);
+  for (const botMoveName of BOT_MOVE_NAMES.slice(0, 3)) {
+    expect(serialized).not.toContain(botMoveName);
+  }
+
+  const log = session.log as Array<Record<string, unknown>>;
+  for (const event of log) {
+    if (event.actor !== 'bot') continue;
+    expect(event).not.toHaveProperty('moveId');
+    expect(event.message).toBe(expectedBotEventMessage(event));
+    for (const botMoveName of BOT_MOVE_NAMES) {
+      expect(event.message).not.toContain(botMoveName);
+    }
+    if (event.type === 'bot_intent_prepared') {
+      expect(['building', 'committed', 'uncertain']).toContain(event.intent);
+    } else {
+      expect(event).not.toHaveProperty('intent');
+    }
+  }
 }
 
 async function seedProfile(uid: string): Promise<void> {
@@ -216,6 +279,11 @@ describe('verified PVE battle API', () => {
 
   it('hides missing, foreign, and expired temporary avatars behind the same 404', async () => {
     const foreignId = await seedAvatar({ id: 'foreign-avatar', ownerId: otherUserId });
+    const malformedForeignId = 'malformed-foreign-avatar';
+    await getDb().collection('avatar_records').doc(malformedForeignId).set({
+      userId: otherUserId,
+      privateMalformedDetail: 'must-not-reach-the-caller',
+    });
     const expiredId = await seedAvatar({
       id: 'expired-avatar',
       isTemporary: true,
@@ -225,11 +293,18 @@ describe('verified PVE battle API', () => {
     const responses = await Promise.all([
       startBattle(userId, 'missing-avatar'),
       startBattle(userId, foreignId),
+      startBattle(userId, malformedForeignId),
       startBattle(userId, expiredId),
     ]);
 
-    expect(responses.map((response) => response.status)).toEqual([404, 404, 404]);
+    expect(responses.map((response) => response.status)).toEqual([
+      404,
+      404,
+      404,
+      404,
+    ]);
     expect(responses.map((response) => response.body)).toEqual([
+      { error: 'Avatar not found.' },
       { error: 'Avatar not found.' },
       { error: 'Avatar not found.' },
       { error: 'Avatar not found.' },
@@ -378,6 +453,15 @@ describe('verified PVE battle API', () => {
     for (const response of responses) expectPublicSession(response.body.session);
     expect(responses[0].body.session).toEqual(responses[1].body.session);
 
+    const playerMoveEvent = responses[0].body.session.log.find(
+      (event: Record<string, unknown>) =>
+        event.actor === 'player' && event.type === 'move_used'
+    );
+    expect(playerMoveEvent).toMatchObject({
+      moveId: 'quick',
+      message: 'Sunny used Sunseed Strike.',
+    });
+
     const persisted = await request(app)
       .get(`/api/battle/pve/${started.body.id}`)
       .set('Authorization', authorization(userId));
@@ -410,7 +494,6 @@ describe('verified PVE battle API', () => {
     expect(abandoned.body).toMatchObject({
       status: 'abandoned',
       xpAwarded: 0,
-      rewardApplied: false,
     });
     expectPublicSession(abandoned.body);
     expect(profile).toMatchObject({
@@ -468,8 +551,8 @@ describe('verified PVE battle API', () => {
     expect(session).toMatchObject({
       status: 'won',
       xpAwarded: 20,
-      rewardApplied: true,
     });
+    expect((await readRawSession(session.id))!.rewardApplied).toBe(true);
     const profile = (
       await getDb().collection('users').doc(userId).get()
     ).data()!;

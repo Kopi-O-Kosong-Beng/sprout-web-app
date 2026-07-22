@@ -85,6 +85,54 @@ describe('per-user demo avatar set', () => {
     else process.env.ENABLE_DEMO_TOOLS = previousDemoTools;
   });
 
+  it.each([
+    ['missing', {}],
+    ['non-string', { userId: 42 }],
+    ['foreign', { userId: 'another-user' }],
+  ])(
+    'returns null for a malformed avatar with a %s raw owner marker',
+    async (_kind, rawOwner) => {
+      const id = `malformed-owner-${_kind}`;
+      await getDb().collection('avatar_records').doc(id).set({
+        ...rawOwner,
+        privateMalformedDetail: 'must-not-be-decoded',
+      });
+
+      await expect(avatarRepository.getOwned(USER_ID, id)).resolves.toBeNull();
+    }
+  );
+
+  it('still decodes caller-owned documents and rejects malformed owned data', async () => {
+    const id = 'malformed-owned-avatar';
+    await getDb().collection('avatar_records').doc(id).set({
+      userId: USER_ID,
+      privateMalformedDetail: 'owned-document-must-be-decoded',
+    });
+
+    await expect(avatarRepository.getOwned(USER_ID, id)).rejects.toThrow(
+      /avatar_records/
+    );
+  });
+
+  it('keeps listByUser query filtering before decoding returned documents', async () => {
+    const reference = getDb()
+      .collection('avatar_records')
+      .doc('malformed-list-avatar');
+    await reference.set({ userId: 'another-user', malformed: true });
+
+    await expect(avatarRepository.listByUser(USER_ID, 1, 20)).resolves.toEqual({
+      items: [],
+      page: 1,
+      pageSize: 20,
+      total: 0,
+    });
+
+    await reference.set({ userId: USER_ID, malformed: true });
+    await expect(avatarRepository.listByUser(USER_ID, 1, 20)).rejects.toThrow(
+      /avatar_records/
+    );
+  });
+
   it('idempotently creates and persists five exact caller-owned demo records', async () => {
     await avatarRepository.ensureDemoSet(USER_ID);
     const second = await avatarRepository.ensureDemoSet(USER_ID);
