@@ -14,7 +14,10 @@ Original implementation commit:
 Original report commit:
 `aa48c58eb0663c8e0f42ce6271d70626536dfda7`
 
-Independent-review fix: this report's commit.
+First independent-review fix:
+`58eda309f5554bf677426bc8eee36e48e9f6b4ad`
+
+Current-legal-set intent fix: this report's commit.
 
 Author: `Zhi Feng <zhifeng_chia@mymail.sutd.edu.sg>`
 
@@ -43,6 +46,11 @@ changes:
 - Intent privacy: the deterministic all-actions test failed because the
   serialized public event contained the exact `guard` ID in both `guarding` and
   `guarded stance`. The old four categories also mapped one-to-one to moves.
+- Current legal-set ambiguity: five deterministic state tests calculated legal
+  candidates before sampling emitted intents. The static `offensive | defensive`
+  mapping failed all five expected dynamic partitions; its cardinality was one
+  in the initial, full-energy/full-HP, damaged/0-Sun, and heal-used/full-energy
+  states.
 - Transition API: active, win, loss, and abandonment timestamp tests failed to
   compile with `TS2554` because `resolvePlayerAction` and `abandonBattle` did not
   accept the required `{ transitionAt }` input.
@@ -54,14 +62,20 @@ rerun before moving to the next behavior.
 
 ## Review Fixes
 
-- Replaced the identifying four-value intent union with the public
-  `offensive | defensive` contract. `BOT_INTENT_BY_MOVE_KIND` maps Quick and
-  Signature to `offensive`, and Guard and Heal to `defensive` with compile-time
-  exhaustiveness over every `MoveKind`.
-- Intent events use neutral category text and carry no move ID. Tests enable all
-  four legal actions across deterministic seeds, prove every emitted category
-  corresponds to at least two observed move IDs, and reject every exact bot move
-  ID or name in the serialized intent event.
+- Replaced the catalog-wide static mapping with the dynamic public
+  `building | committed | uncertain` contract. Intent grouping is computed from
+  the unique legal candidates for the current bot state without consuming an
+  additional RNG value.
+- Quick and Guard emit `building` when they are the only legal pair. Signature
+  and Heal emit `committed` only when both are currently legal alongside the two
+  setup moves. If exactly one high-commitment move is legal, every current
+  candidate emits `uncertain`, preventing that move or either setup action from
+  becoming identifiable.
+- Intent events use neutral category text and carry no move ID. Five state tests
+  cover initial 0-Sun/full-HP, full-energy/full-HP, damaged/0-Sun,
+  damaged/full-energy, and heal-used/full-energy candidates. They observe every
+  legal move across deterministic seeds, require at least two moves per emitted
+  category, and reject every exact bot move ID or name in the serialized event.
 - Added the required `BattleTransitionInput { transitionAt: string }` argument to
   `resolvePlayerAction` and `abandonBattle`. The engine accepts only canonical ISO
   instants strictly later than the session's current `updatedAt`.
@@ -83,7 +97,7 @@ Focused tests through the requested Firestore emulator command:
 & $node $npm exec -w server -- firebase emulators:exec --project sprout-test --only firestore 'jest --runInBand --runTestsByPath tests/battle-engine.test.ts tests/battle-engine.property.test.ts'
 ```
 
-Result: 2 suites passed, 23 tests passed. The property suite executes 1,000
+Result: 2 suites passed, 27 tests passed. The property suite executes 1,000
 generated runs and forces all three meaningful terminal outcomes in every run.
 
 Full server tests through the guarded emulator wrapper:
@@ -92,14 +106,15 @@ Full server tests through the guarded emulator wrapper:
 & $node $npm test -w server
 ```
 
-Result: 17 suites passed, 148 tests passed. The wrapper exited 0, performed its
+Result: 17 suites passed, 152 tests passed. The wrapper exited 0, performed its
 identity-checked cleanup, and left port 8080 free. Firebase emitted only the
 expected local unauthenticated warning.
 
 The first full-suite attempt had two unrelated five-second timeouts in
 `auth.test.ts` while Task 6 and the other 16 suites passed. The auth suite then
-passed all 37 tests in isolation, including those two cases, and the fresh full
-guarded rerun produced the 148/148 result above. No auth code or timeout was
+passed all 37 tests in isolation, including those two cases, and the prior full
+guarded rerun produced 148/148. No auth code or timeout was changed. The latest
+current-legal-set review run produced the fresh 152/152 result above.
 changed.
 
 Static and build checks under Node 22.23.1:
@@ -120,12 +135,12 @@ Final inspection under Node 22.23.1 returned `PORT_8080_FREE`.
 
 ## Changed Files
 
-- `server/models/battle.ts`: broad typed intent mapping and named transition-time
-  input contract.
-- `server/services/battle-engine.ts`: neutral intent emission plus explicit,
-  validated transition timestamp application.
-- `server/tests/battle-engine.test.ts`: intent privacy/cardinality tests and
-  active, win, loss, abandonment, invalid, and idempotent timestamp coverage.
+- `server/models/battle.ts`: dynamic player-facing intent union and named
+  transition-time input contract.
+- `server/services/battle-engine.ts`: current-legal-set intent partitioning,
+  neutral intent emission, and explicit validated transition timestamps.
+- `server/tests/battle-engine.test.ts`: five-state legal-candidate intent
+  privacy/cardinality tests plus retained timestamp and mechanics coverage.
 - `server/tests/battle-engine.property.test.ts`: 1,000-run bounded random rounds
   plus outcome-specific terminal invariants.
 - `.superpowers/sdd/archive-pve-task-6-report.md`: independent-review evidence and

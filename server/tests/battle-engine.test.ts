@@ -50,7 +50,7 @@ function makeSession(
 function forceBotMove(
   session: BattleSession,
   moveId: BattleMove['id'],
-  intent: BattleIntent = 'offensive'
+  intent: BattleIntent = 'building'
 ): BattleSession {
   return {
     ...session,
@@ -186,51 +186,114 @@ describe('battle creation and catalogue', () => {
     );
   });
 
-  it('groups each public intent across multiple moves without logging exact actions', () => {
-    const movesByIntent = new Map<string, Set<string>>();
-    const observedMoveIds = new Set<string>();
+  it.each([
+    {
+      state: 'initial 0-Sun/full-HP state',
+      energy: 0,
+      damaged: false,
+      healUsed: false,
+      expectedLegalMoveIds: ['quick', 'guard'],
+      expectedMovesByIntent: { building: ['quick', 'guard'] },
+    },
+    {
+      state: 'full-energy/full-HP state',
+      energy: 2,
+      damaged: false,
+      healUsed: false,
+      expectedLegalMoveIds: ['quick', 'guard', 'signature'],
+      expectedMovesByIntent: { uncertain: ['quick', 'guard', 'signature'] },
+    },
+    {
+      state: 'damaged/0-Sun state',
+      energy: 0,
+      damaged: true,
+      healUsed: false,
+      expectedLegalMoveIds: ['quick', 'guard', 'photosynthesis'],
+      expectedMovesByIntent: { uncertain: ['quick', 'guard', 'photosynthesis'] },
+    },
+    {
+      state: 'damaged/full-energy state',
+      energy: 2,
+      damaged: true,
+      healUsed: false,
+      expectedLegalMoveIds: ['quick', 'guard', 'signature', 'photosynthesis'],
+      expectedMovesByIntent: {
+        building: ['quick', 'guard'],
+        committed: ['signature', 'photosynthesis'],
+      },
+    },
+    {
+      state: 'heal-used/full-energy state',
+      energy: 2,
+      damaged: true,
+      healUsed: true,
+      expectedLegalMoveIds: ['quick', 'guard', 'signature'],
+      expectedMovesByIntent: { uncertain: ['quick', 'guard', 'signature'] },
+    },
+  ])(
+    'keeps every emitted intent ambiguous in the $state',
+    ({ energy, damaged, healUsed, expectedLegalMoveIds, expectedMovesByIntent }) => {
+      const movesByIntent = new Map<string, Set<string>>();
+      const observedMoveIds = new Set<string>();
 
-    for (let index = 0; index < 512; index += 1) {
-      const seed = Math.imul(index, 0x9e37_79b1) >>> 0;
-      const base = makeSession({}, seed);
-      const prepared = prepareBotIntent({
-        ...base,
-        phase: 'PREPARE_BOT_INTENT',
-        pendingBotMoveId: null,
-        botIntent: null,
-        rngState: seed,
-        rngStep: 0,
-        log: [],
-        bot: {
+      for (let index = 0; index < 512; index += 1) {
+        const seed = Math.imul(index, 0x9e37_79b1) >>> 0;
+        const base = makeSession({}, seed);
+        const bot = {
           ...base.bot,
-          currentHp: Math.floor(base.bot.maxHp / 2),
-          energy: 2,
-        },
-      });
-      const intent = prepared.botIntent!;
-      const moveId = prepared.pendingBotMoveId!;
-      const publicEvent = prepared.log.at(-1)!;
-      const serializedEvent = JSON.stringify(publicEvent).toLowerCase();
+          currentHp: damaged ? Math.floor(base.bot.maxHp / 2) : base.bot.maxHp,
+          energy,
+          healUsed,
+        };
+        const legalMoveIds = bot.moves
+          .filter((move) => {
+            if (move.kind === 'signature') return bot.energy >= move.energyCost;
+            if (move.kind === 'heal') {
+              return !bot.healUsed && bot.currentHp < bot.maxHp;
+            }
+            return true;
+          })
+          .map((move) => move.id);
+        const prepared = prepareBotIntent({
+          ...base,
+          phase: 'PREPARE_BOT_INTENT',
+          pendingBotMoveId: null,
+          botIntent: null,
+          rngState: seed,
+          rngStep: 0,
+          log: [],
+          bot,
+        });
+        const intent = prepared.botIntent!;
+        const moveId = prepared.pendingBotMoveId!;
+        const publicEvent = prepared.log.at(-1)!;
+        const serializedEvent = JSON.stringify(publicEvent).toLowerCase();
 
-      observedMoveIds.add(moveId);
-      const moves = movesByIntent.get(intent) ?? new Set<string>();
-      moves.add(moveId);
-      movesByIntent.set(intent, moves);
+        expect(legalMoveIds).toEqual(expectedLegalMoveIds);
+        observedMoveIds.add(moveId);
+        const moves = movesByIntent.get(intent) ?? new Set<string>();
+        moves.add(moveId);
+        movesByIntent.set(intent, moves);
 
-      expect(publicEvent).not.toHaveProperty('moveId');
-      for (const move of prepared.bot.moves) {
-        expect(serializedEvent).not.toContain(move.id.toLowerCase());
-        expect(serializedEvent).not.toContain(move.name.toLowerCase());
+        expect(publicEvent).not.toHaveProperty('moveId');
+        for (const move of prepared.bot.moves) {
+          expect(serializedEvent).not.toContain(move.id.toLowerCase());
+          expect(serializedEvent).not.toContain(move.name.toLowerCase());
+        }
+      }
+
+      expect(observedMoveIds).toEqual(new Set(expectedLegalMoveIds));
+      expect(new Set(movesByIntent.keys())).toEqual(
+        new Set(Object.keys(expectedMovesByIntent))
+      );
+      for (const [intent, expectedMoveIds] of Object.entries(expectedMovesByIntent)) {
+        expect(movesByIntent.get(intent)).toEqual(new Set(expectedMoveIds));
+      }
+      for (const moves of movesByIntent.values()) {
+        expect(moves.size).toBeGreaterThanOrEqual(2);
       }
     }
-
-    expect(observedMoveIds).toEqual(
-      new Set(['quick', 'guard', 'signature', 'photosynthesis'])
-    );
-    for (const moves of movesByIntent.values()) {
-      expect(moves.size).toBeGreaterThanOrEqual(2);
-    }
-  });
+  );
 
   it('never prepares an invalid heal or unaffordable signature', () => {
     for (let seed = 0; seed < 200; seed += 1) {
@@ -310,11 +373,11 @@ describe('battle mechanics', () => {
     const quickSession = forceBotMove({
       ...makeSession(),
       player: { ...makeSession().player, energy: 2 },
-    }, 'guard', 'defensive');
+    }, 'guard', 'building');
     const guardedSession = forceBotMove({
       ...makeSession(),
       player: { ...makeSession().player, energy: 1 },
-    }, 'quick', 'offensive');
+    }, 'quick', 'building');
 
     expect(resolvePlayerAction(quickSession, 'quick', ACTIVE_TRANSITION).player.energy).toBe(
       2
@@ -329,11 +392,11 @@ describe('battle mechanics', () => {
     const twoSunSession = forceBotMove({
       ...base,
       player: { ...base.player, energy: 2 },
-    }, 'guard', 'defensive');
+    }, 'guard', 'building');
     const zeroSunSession = forceBotMove({
       ...base,
       player: { ...base.player, energy: 0 },
-    }, 'guard', 'defensive');
+    }, 'guard', 'building');
 
     expect(
       resolvePlayerAction(twoSunSession, 'signature', ACTIVE_TRANSITION).player.energy
@@ -350,15 +413,15 @@ describe('battle mechanics', () => {
     const damagedSession = forceBotMove({
       ...base,
       player: { ...base.player, currentHp: 50, maxHp: 100 },
-    }, 'guard', 'defensive');
+    }, 'guard', 'building');
     const almostFullSession = forceBotMove({
       ...base,
       player: { ...base.player, currentHp: 90, maxHp: 100 },
-    }, 'guard', 'defensive');
+    }, 'guard', 'building');
     const healUsedSession = forceBotMove({
       ...damagedSession,
       player: { ...damagedSession.player, healUsed: true },
-    }, 'guard', 'defensive');
+    }, 'guard', 'building');
 
     expect(
       resolvePlayerAction(damagedSession, 'photosynthesis', ACTIVE_TRANSITION).player
@@ -379,7 +442,7 @@ describe('battle mechanics', () => {
     const base = makeSession({
       stats: { hp: 100, attack: 60, defense: 40, speed: 1 },
     });
-    const session = forceBotMove(base, 'quick', 'offensive');
+    const session = forceBotMove(base, 'quick', 'building');
     const botQuick = session.bot.moves.find((move) => move.id === 'quick')!;
     const unguardedDamage = calculateDamage(session.bot, session.player, botQuick, false);
 
@@ -403,7 +466,7 @@ describe('battle mechanics', () => {
         currentHp: 5,
         stats: { ...base.bot.stats, speed: 50 },
       },
-    }, 'quick', 'offensive');
+    }, 'quick', 'uncertain');
 
     const fastWinningRound = resolvePlayerAction(fastWinningSession, 'signature', {
       transitionAt: WIN_AT,
@@ -432,7 +495,7 @@ describe('battle mechanics', () => {
       ...base,
       player: { ...base.player, currentHp: 1 },
       bot: { ...base.bot, energy: 2 },
-    }, 'signature', 'offensive');
+    }, 'signature', 'uncertain');
 
     const result = resolvePlayerAction(losingSession, 'quick', {
       transitionAt: LOSS_AT,
@@ -450,7 +513,7 @@ describe('battle mechanics', () => {
 
   it('returns active rounds only after preparing the next intent', () => {
     const base = makeSession();
-    const session = forceBotMove(base, 'guard', 'defensive');
+    const session = forceBotMove(base, 'guard', 'building');
 
     const resolved = resolvePlayerAction(session, 'quick', {
       transitionAt: ACTIVE_ROUND_AT,
@@ -470,7 +533,7 @@ describe('battle mechanics', () => {
 
   it('consumes an accuracy roll for every damaging action, including quick', () => {
     const base = makeSession();
-    const session = forceBotMove(base, 'guard', 'defensive');
+    const session = forceBotMove(base, 'guard', 'building');
 
     const resolved = resolvePlayerAction(session, 'quick', ACTIVE_TRANSITION);
 
@@ -479,7 +542,7 @@ describe('battle mechanics', () => {
   });
 
   it('does not mutate the supplied session or its nested snapshots', () => {
-    const mutable = forceBotMove(makeSession(), 'guard', 'defensive');
+    const mutable = forceBotMove(makeSession(), 'guard', 'building');
     const snapshot = JSON.parse(JSON.stringify(mutable)) as BattleSession;
     const frozen = deepFreeze(mutable);
 

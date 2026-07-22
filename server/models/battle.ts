@@ -10,13 +10,7 @@ export type BattlePhase =
   | 'CHECK_RESULT'
   | 'TERMINAL';
 export type MoveKind = 'quick' | 'guard' | 'signature' | 'heal';
-export type BattleIntent = 'offensive' | 'defensive';
-export const BOT_INTENT_BY_MOVE_KIND = {
-  quick: 'offensive',
-  signature: 'offensive',
-  guard: 'defensive',
-  heal: 'defensive',
-} as const satisfies Record<MoveKind, BattleIntent>;
+export type BattleIntent = 'building' | 'committed' | 'uncertain';
 export type BattleActor = 'player' | 'bot' | 'system';
 export type BattleEventType =
   | 'battle_started'

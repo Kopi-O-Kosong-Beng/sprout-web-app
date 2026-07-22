@@ -100,7 +100,7 @@ function forceTerminalOutcome(
           ...session,
           bot: { ...session.bot, currentHp: 1 },
           pendingBotMoveId: 'guard',
-          botIntent: 'defensive',
+          botIntent: 'uncertain',
         },
         'quick',
         transition
@@ -111,7 +111,7 @@ function forceTerminalOutcome(
           ...session,
           player: { ...session.player, currentHp: 1 },
           pendingBotMoveId: 'quick',
-          botIntent: 'offensive',
+          botIntent: 'building',
         },
         'guard',
         transition

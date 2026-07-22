@@ -16,7 +16,6 @@ import type {
   ProgressionDelta,
   TerminalBattleStatus,
 } from '../models/battle';
-import { BOT_INTENT_BY_MOVE_KIND } from '../models/battle';
 import { nextRandom } from './seeded-rng';
 
 const MAX_ENERGY = 2;
@@ -81,16 +80,47 @@ function validateTransitionTimestamp(
   return transitionAt;
 }
 
-function intentForMove(move: BattleMove): BattleIntent {
-  return BOT_INTENT_BY_MOVE_KIND[move.kind];
+function intentForMove(move: BattleMove, candidates: BattleMove[]): BattleIntent {
+  const uniqueCandidates = [
+    ...new Map(candidates.map((candidate) => [candidate.id, candidate] as const)).values(),
+  ];
+  if (uniqueCandidates.length < 2) throw new Error('no_ambiguous_bot_intent');
+
+  const buildingCandidates = uniqueCandidates.filter(
+    (candidate) => candidate.kind === 'quick' || candidate.kind === 'guard'
+  );
+  const committedCandidates = uniqueCandidates.filter(
+    (candidate) => candidate.kind === 'signature' || candidate.kind === 'heal'
+  );
+  const hasSignature = committedCandidates.some(
+    (candidate) => candidate.kind === 'signature'
+  );
+  const hasHeal = committedCandidates.some((candidate) => candidate.kind === 'heal');
+
+  if (committedCandidates.length === 0 && buildingCandidates.length >= 2) {
+    return 'building';
+  }
+  if (
+    hasSignature &&
+    hasHeal &&
+    buildingCandidates.length >= 2 &&
+    committedCandidates.length >= 2
+  ) {
+    return committedCandidates.some((candidate) => candidate.id === move.id)
+      ? 'committed'
+      : 'building';
+  }
+  return 'uncertain';
 }
 
 function intentMessage(intent: BattleIntent): string {
   switch (intent) {
-    case 'offensive':
-      return 'Thornback is preparing an offensive action.';
-    case 'defensive':
-      return 'Thornback is preparing a defensive action.';
+    case 'building':
+      return 'Thornback is building momentum.';
+    case 'committed':
+      return 'Thornback is committing to a decisive action.';
+    case 'uncertain':
+      return "Thornback's next action remains uncertain.";
   }
 }
 
@@ -127,7 +157,7 @@ export function prepareBotIntent(session: BattleSession): BattleSession {
 
   const random = nextRandom(next.rngState);
   const selected = candidates[Math.floor(random.value * candidates.length)];
-  const intent = intentForMove(selected);
+  const intent = intentForMove(selected, candidates);
   next.rngState = random.state;
   next.rngStep += 1;
   next.pendingBotMoveId = selected.id;
