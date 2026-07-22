@@ -8,6 +8,7 @@ import errorMiddleware from './middleware/error.middleware';
 import authRoutes from './routes/auth.routes';
 import queryRoutes from './routes/query.routes';
 import avatarRoutes from './routes/avatar.routes';
+import battleRoutes from './routes/battle.routes';
 
 const app = express();
 
@@ -62,6 +63,7 @@ app.get('/api/health', (_req, res) =>
 app.use('/api/auth', authRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/avatar', avatarRoutes);
+app.use('/api/battle/pve', battleRoutes);
 
 // 404 for unknown API paths
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
