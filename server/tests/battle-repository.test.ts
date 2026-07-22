@@ -2,12 +2,20 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { getDb } from '../firebase';
 import type { AuthUserProfile } from '../models/auth';
 import type { BattleSession } from '../models/battle';
-import authUserRepository from '../repositories/auth-users';
+import authUserRepository, {
+  decodeAuthUserProfile,
+} from '../repositories/auth-users';
 import {
+  type BattleActionResult,
   createBattleRepository,
   decodeBattleSession,
 } from '../repositories/battles';
-import { createBattle } from '../services/battle-engine';
+import {
+  abandonBattle,
+  createBattle,
+  resolvePlayerAction,
+} from '../services/battle-engine';
+import { nextRandom } from '../services/seeded-rng';
 import { clearFirestore } from './firestore-test-utils';
 
 const USER_ID = 'user-1';
@@ -17,6 +25,7 @@ const AVATAR_ID = 'avatar-1';
 const CREATED_AT = '2026-07-22T08:00:00.000Z';
 const ACTION_AT = '2026-07-22T08:01:00.000Z';
 const LATER_ACTION_AT = '2026-07-22T08:02:00.000Z';
+const LATER_PROFILE_AT = '2026-07-22T09:00:00.000Z';
 
 function makeProfile(
   overrides: Partial<AuthUserProfile> = {}
@@ -38,8 +47,11 @@ function makeProfile(
   };
 }
 
-function makeSession(overrides: Partial<BattleSession> = {}): BattleSession {
-  const session = createBattle({
+function createTestSession(
+  stats = { hp: 100, attack: 60, defense: 40, speed: 70 },
+  rngSeed = 12345
+): BattleSession {
+  return createBattle({
     id: SESSION_ID,
     userId: USER_ID,
     avatarId: AVATAR_ID,
@@ -48,47 +60,88 @@ function makeSession(overrides: Partial<BattleSession> = {}): BattleSession {
       name: 'Helianthus annuus',
       speciesFamily: 'Asteraceae',
       spriteUrl: '/static/sprites/helianthus-annuus.png',
-      stats: { hp: 100, attack: 60, defense: 40, speed: 70 },
+      stats,
     },
-    rngSeed: 12345,
+    rngSeed,
     now: CREATED_AT,
   });
+}
+
+function makeSession(overrides: Partial<BattleSession> = {}): BattleSession {
+  const session = createTestSession();
   return { ...session, ...overrides };
 }
 
 function makeRoundSession(): BattleSession {
-  const session = makeSession();
-  return {
-    ...session,
-    pendingBotMoveId: 'guard',
-    botIntent: 'building',
-  };
+  return makeSession();
+}
+
+function terminalPredecessor(
+  outcome: 'won' | 'lost',
+  stats: { hp: number; attack: number; defense: number; speed: number },
+  rngSeed: number
+): BattleSession {
+  let session = createTestSession(stats, rngSeed);
+  for (let step = 1; step <= 20; step += 1) {
+    const resolved = resolvePlayerAction(session, 'quick', {
+      transitionAt: new Date(Date.parse(CREATED_AT) + step).toISOString(),
+    });
+    if (resolved.status === outcome) return session;
+    if (resolved.status !== 'active') {
+      throw new Error(`Expected ${outcome}, received ${resolved.status}.`);
+    }
+    session = resolved;
+  }
+  throw new Error(`Did not reach ${outcome}.`);
 }
 
 function makeWinningSession(): BattleSession {
-  const session = makeRoundSession();
-  return {
-    ...session,
-    bot: { ...session.bot, currentHp: 1 },
-    botIntent: 'uncertain',
-    log: session.log.map((event) =>
-      event.type === 'bot_intent_prepared'
-        ? { ...event, intent: 'uncertain' as const }
-        : event
-    ),
-  };
+  return terminalPredecessor(
+    'won',
+    { hp: 200, attack: 200, defense: 100, speed: 100 },
+    12345
+  );
 }
 
 function makeLosingSession(): BattleSession {
-  const session = makeRoundSession();
+  return terminalPredecessor(
+    'lost',
+    { hp: 30, attack: 1, defense: 0, speed: 1 },
+    9
+  );
+}
+
+function makePlayedSession(): BattleSession {
+  return resolvePlayerAction(makeSession(), 'quick', {
+    transitionAt: new Date(Date.parse(CREATED_AT) + 1).toISOString(),
+  });
+}
+
+function makeHealedSession(): BattleSession {
+  const played = makePlayedSession();
+  if (played.status !== 'active' || played.player.currentHp >= played.player.maxHp) {
+    throw new Error('Expected a damaged active session.');
+  }
+  return resolvePlayerAction(played, 'photosynthesis', {
+    transitionAt: new Date(Date.parse(CREATED_AT) + 2).toISOString(),
+  });
+}
+
+function makeCompletedWinningSession(): BattleSession {
   return {
-    ...session,
-    player: {
-      ...session.player,
-      currentHp: 1,
-      stats: { ...session.player.stats, speed: 1 },
-    },
-    pendingBotMoveId: 'quick',
+    ...resolvePlayerAction(makeWinningSession(), 'quick', {
+      transitionAt: ACTION_AT,
+    }),
+    rewardApplied: true,
+  };
+}
+
+function makeCompletedLosingSession(): BattleSession {
+  return {
+    ...resolvePlayerAction(makeLosingSession(), 'quick', {
+      transitionAt: ACTION_AT,
+    }),
+    rewardApplied: true,
   };
 }
 
@@ -113,6 +166,50 @@ async function storedProfile(): Promise<FirebaseFirestore.DocumentData | undefin
   return (await getDb().collection('users').doc(USER_ID).get()).data();
 }
 
+async function rawStoredSession(): Promise<FirebaseFirestore.DocumentData | undefined> {
+  return (await getDb().collection('battle_sessions').doc(SESSION_ID).get()).data();
+}
+
+interface DiscardedAttempt<T> {
+  result: T;
+  sets: Array<{ path: string; data: unknown }>;
+  updates: Array<{ path: string; data: unknown }>;
+}
+
+function repositoryWithDiscardedFirstAttempt<T>(
+  timestamp: string,
+  inspect: (attempt: DiscardedAttempt<T>) => void
+) {
+  const clock = jest.fn(() => new Date(timestamp));
+  const repository = createBattleRepository({
+    clock,
+    runTransaction: async <Result,>(
+      db: FirebaseFirestore.Firestore,
+      updateFunction: (
+        transaction: FirebaseFirestore.Transaction
+      ) => Promise<Result>
+    ) => {
+      const sets: DiscardedAttempt<Result>['sets'] = [];
+      const updates: DiscardedAttempt<Result>['updates'] = [];
+      const transaction = {
+        get: jest.fn((reference: FirebaseFirestore.DocumentReference) => reference.get()),
+        set: jest.fn((reference: FirebaseFirestore.DocumentReference, data: unknown) => {
+          sets.push({ path: reference.path, data });
+        }),
+        update: jest.fn((reference: FirebaseFirestore.DocumentReference, data: unknown) => {
+          updates.push({ path: reference.path, data });
+        }),
+      };
+      const result = await updateFunction(
+        transaction as unknown as FirebaseFirestore.Transaction
+      );
+      inspect({ result, sets, updates } as unknown as DiscardedAttempt<T>);
+      return db.runTransaction(updateFunction);
+    },
+  });
+  return { repository, clock };
+}
+
 describe('Firestore battle repository', () => {
   beforeEach(clearFirestore);
 
@@ -124,6 +221,68 @@ describe('Firestore battle repository', () => {
     await expect(repository.getOwned(USER_ID, SESSION_ID)).resolves.toEqual(session);
     await expect(repository.getOwned(OTHER_USER_ID, SESSION_ID)).resolves.toBeNull();
     await expect(repository.getOwned(USER_ID, 'missing-session')).resolves.toBeNull();
+  });
+
+  it('does not decode a malformed foreign session in getOwned', async () => {
+    const { repository } = repositoryAt(ACTION_AT);
+    const reference = getDb().collection('battle_sessions').doc(SESSION_ID);
+    await reference.set({ userId: OTHER_USER_ID, status: 'corrupt' });
+
+    await expect(repository.getOwned(USER_ID, SESSION_ID)).resolves.toBeNull();
+
+    await reference.set({ userId: USER_ID, status: 'corrupt' });
+    await expect(repository.getOwned(USER_ID, SESSION_ID)).rejects.toMatchObject({
+      code: 'invalid_battle_document',
+      status: 500,
+    });
+  });
+
+  it('does not decode a malformed foreign session in applyAction', async () => {
+    const { repository, clock } = repositoryAt(ACTION_AT);
+    const reference = getDb().collection('battle_sessions').doc(SESSION_ID);
+    await reference.set({ userId: OTHER_USER_ID, status: 'corrupt' });
+
+    await expect(
+      repository.applyAction(USER_ID, SESSION_ID, 'quick', 1)
+    ).rejects.toMatchObject({ code: 'battle_not_found', status: 404 });
+
+    await reference.set({ userId: USER_ID, status: 'corrupt' });
+    await expect(
+      repository.applyAction(USER_ID, SESSION_ID, 'quick', 1)
+    ).rejects.toMatchObject({ code: 'invalid_battle_document', status: 500 });
+    expect(clock).not.toHaveBeenCalled();
+  });
+
+  it('does not decode a malformed foreign session in abandon', async () => {
+    const { repository, clock } = repositoryAt(ACTION_AT);
+    const reference = getDb().collection('battle_sessions').doc(SESSION_ID);
+    await reference.set({ userId: OTHER_USER_ID, status: 'corrupt' });
+
+    await expect(repository.abandon(USER_ID, SESSION_ID)).rejects.toMatchObject({
+      code: 'battle_not_found',
+      status: 404,
+    });
+
+    await reference.set({ userId: USER_ID, status: 'corrupt' });
+    await expect(repository.abandon(USER_ID, SESSION_ID)).rejects.toMatchObject({
+      code: 'invalid_battle_document',
+      status: 500,
+    });
+    expect(clock).not.toHaveBeenCalled();
+  });
+
+  it('maps create collisions without overwriting the stored session', async () => {
+    const { repository } = repositoryAt(ACTION_AT);
+    const original = makeSession();
+    const collision = createTestSession(undefined, 98765);
+    await repository.create(original);
+
+    await expect(repository.create(collision)).rejects.toMatchObject({
+      name: 'BattleRepositoryError',
+      code: 'battle_already_exists',
+      status: 409,
+    });
+    await expect(storedSession()).resolves.toEqual(original);
   });
 
   it('rejects a foreign session without mutation', async () => {
@@ -173,6 +332,30 @@ describe('Firestore battle repository', () => {
     expect(stale.session).toEqual(authoritative.session);
     expect(authoritative.session.turnNumber).toBe(2);
     await expect(storedSession()).resolves.toEqual(authoritative.session);
+  });
+
+  it('does not double damage when Firestore retries the transaction callback', async () => {
+    let discarded: DiscardedAttempt<Awaited<ReturnType<ReturnType<typeof repositoryAt>['repository']['applyAction']>>> | undefined;
+    const { repository, clock } = repositoryWithDiscardedFirstAttempt<BattleActionResult>(
+      ACTION_AT,
+      (attempt) => {
+        discarded = attempt;
+      }
+    );
+    await seedSession(makeRoundSession());
+
+    const authoritative = await repository.applyAction(
+      USER_ID,
+      SESSION_ID,
+      'quick',
+      1
+    );
+
+    expect(discarded?.result).toEqual(authoritative);
+    expect(discarded?.sets).toHaveLength(1);
+    expect(authoritative.session.turnNumber).toBe(2);
+    await expect(storedSession()).resolves.toEqual(authoritative.session);
+    expect(clock).toHaveBeenCalledTimes(2);
   });
 
   it('rejects a future expected turn without mutation', async () => {
@@ -244,11 +427,12 @@ describe('Firestore battle repository', () => {
         bestPveWinStreak: 2,
       })
     );
-    await seedSession(makeWinningSession());
+    const before = makeWinningSession();
+    await seedSession(before);
 
     const attempts = await Promise.allSettled([
-      repository.applyAction(USER_ID, SESSION_ID, 'quick', 1),
-      repository.applyAction(USER_ID, SESSION_ID, 'quick', 1),
+      repository.applyAction(USER_ID, SESSION_ID, 'quick', before.turnNumber),
+      repository.applyAction(USER_ID, SESSION_ID, 'quick', before.turnNumber),
     ]);
 
     expect(attempts.filter((attempt) => attempt.status === 'fulfilled')).toHaveLength(1);
@@ -272,6 +456,53 @@ describe('Firestore battle repository', () => {
     });
   });
 
+  it('applies win XP and streak once when the transaction callback retries', async () => {
+    let discarded: DiscardedAttempt<unknown> | undefined;
+    const { repository, clock } = repositoryWithDiscardedFirstAttempt<BattleActionResult>(
+      ACTION_AT,
+      (attempt) => {
+        discarded = attempt;
+      }
+    );
+    await seedProfile(
+      makeProfile({
+        pveXp: 10,
+        pveWins: 2,
+        pveLosses: 1,
+        currentPveWinStreak: 2,
+        bestPveWinStreak: 2,
+      })
+    );
+    const before = makeWinningSession();
+    await seedSession(before);
+
+    const result = await repository.applyAction(
+      USER_ID,
+      SESSION_ID,
+      'quick',
+      before.turnNumber
+    );
+
+    expect(result.session.status).toBe('won');
+    expect(discarded?.sets).toHaveLength(1);
+    expect(discarded?.updates).toHaveLength(1);
+    await expect(storedSession()).resolves.toMatchObject({
+      status: 'won',
+      rewardApplied: true,
+      xpAwarded: 20,
+      updatedAt: ACTION_AT,
+      completedAt: ACTION_AT,
+    });
+    await expect(storedProfile()).resolves.toMatchObject({
+      pveXp: 30,
+      pveWins: 3,
+      pveLosses: 1,
+      currentPveWinStreak: 3,
+      bestPveWinStreak: 3,
+    });
+    expect(clock).toHaveBeenCalledTimes(2);
+  });
+
   it('applies loss XP and resets current streak exactly once under concurrency', async () => {
     const { repository } = repositoryAt(ACTION_AT);
     await seedProfile(
@@ -283,11 +514,12 @@ describe('Firestore battle repository', () => {
         bestPveWinStreak: 7,
       })
     );
-    await seedSession(makeLosingSession());
+    const before = makeLosingSession();
+    await seedSession(before);
 
     const attempts = await Promise.allSettled([
-      repository.applyAction(USER_ID, SESSION_ID, 'quick', 1),
-      repository.applyAction(USER_ID, SESSION_ID, 'quick', 1),
+      repository.applyAction(USER_ID, SESSION_ID, 'quick', before.turnNumber),
+      repository.applyAction(USER_ID, SESSION_ID, 'quick', before.turnNumber),
     ]);
 
     expect(attempts.filter((attempt) => attempt.status === 'fulfilled')).toHaveLength(1);
@@ -312,7 +544,7 @@ describe('Firestore battle repository', () => {
     await seedSession(before);
 
     await expect(
-      repository.applyAction(USER_ID, SESSION_ID, 'quick', 1)
+      repository.applyAction(USER_ID, SESSION_ID, 'quick', before.turnNumber)
     ).rejects.toMatchObject({
       name: 'BattleRepositoryError',
       code: 'battle_profile_missing',
@@ -354,8 +586,9 @@ describe('Firestore battle repository', () => {
   it('rejects actions and abandon requests after win or loss', async () => {
     const { repository, clock } = repositoryAt(LATER_ACTION_AT);
     await seedProfile();
-    await seedSession(makeWinningSession());
-    await repository.applyAction(USER_ID, SESSION_ID, 'quick', 1);
+    const before = makeWinningSession();
+    await seedSession(before);
+    await repository.applyAction(USER_ID, SESSION_ID, 'quick', before.turnNumber);
 
     await expect(
       repository.applyAction(USER_ID, SESSION_ID, 'quick', 1)
@@ -366,10 +599,61 @@ describe('Firestore battle repository', () => {
     });
     expect(clock).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ['missing email', (profile: Record<string, unknown>) => delete profile.email],
+    ['bad present progression', (profile: Record<string, unknown>) => {
+      profile.pveXp = 'ten';
+    }],
+  ])('does not reward a malformed profile with %s', async (_name, corrupt) => {
+    const { repository } = repositoryAt(ACTION_AT);
+    const before = makeWinningSession();
+    const profile = { ...makeProfile() } as unknown as Record<string, unknown>;
+    corrupt(profile);
+    await seedProfile(profile);
+    await seedSession(before);
+    const beforeProfile = await storedProfile();
+    const beforeSession = await rawStoredSession();
+
+    await expect(
+      repository.applyAction(USER_ID, SESSION_ID, 'quick', before.turnNumber)
+    ).rejects.toMatchObject({ code: 'battle_profile_invalid', status: 500 });
+    await expect(storedProfile()).resolves.toEqual(beforeProfile);
+    await expect(rawStoredSession()).resolves.toEqual(beforeSession);
+  });
+
+  it('does not move profile updatedAt backwards when applying a reward', async () => {
+    const { repository } = repositoryAt(ACTION_AT);
+    const before = makeWinningSession();
+    await seedProfile(makeProfile({ updatedAt: LATER_PROFILE_AT }));
+    await seedSession(before);
+
+    await repository.applyAction(
+      USER_ID,
+      SESSION_ID,
+      'quick',
+      before.turnNumber
+    );
+
+    await expect(storedProfile()).resolves.toMatchObject({
+      updatedAt: LATER_PROFILE_AT,
+      pveXp: 20,
+      pveWins: 1,
+    });
+  });
 });
 
 describe('PVE profile defaults', () => {
   beforeEach(clearFirestore);
+
+  it('uses the exported canonical auth profile decoder', async () => {
+    await seedProfile();
+    const snapshot = await getDb().collection('users').doc(USER_ID).get();
+
+    expect(decodeAuthUserProfile(snapshot)).toEqual(
+      await authUserRepository.getById(USER_ID)
+    );
+  });
 
   it('normalizes all missing legacy progression fields to zero', async () => {
     const legacy = makeProfile();
@@ -422,13 +706,14 @@ describe('PVE profile defaults', () => {
     delete (legacy as Partial<AuthUserProfile>).currentPveWinStreak;
     delete (legacy as Partial<AuthUserProfile>).bestPveWinStreak;
     await seedProfile(legacy);
-    await seedSession(makeWinningSession());
+    const before = makeWinningSession();
+    await seedSession(before);
 
     await repositoryAt(ACTION_AT).repository.applyAction(
       USER_ID,
       SESSION_ID,
       'quick',
-      1
+      before.turnNumber
     );
 
     await expect(storedProfile()).resolves.toMatchObject({
@@ -462,7 +747,6 @@ const malformedBattleCases: Array<{
     mutate: (document) => (document.npcPresetVersion = 'thornback-v2'),
   },
   { name: 'document ID', mutate: (document) => (document.id = 'other-battle') },
-  { name: 'owner ID', mutate: (document) => (document.userId = '') },
   { name: 'avatar relationship', mutate: (document) => (document.avatarId = 'other') },
   { name: 'bot identity', mutate: (document) => (document.bot.id = 'other-bot') },
   {
@@ -672,8 +956,147 @@ const malformedBattleCases: Array<{
   },
 ];
 
+const replayCorruptionCases: Array<{
+  name: string;
+  build(): BattleSession;
+  mutate(document: MutableBattleDocument): void;
+}> = [
+  {
+    name: 'deterministic bot selection',
+    build: makeSession,
+    mutate: (document) => {
+      document.pendingBotMoveId =
+        document.pendingBotMoveId === 'quick' ? 'guard' : 'quick';
+    },
+  },
+  {
+    name: 'damage and HP history',
+    build: makePlayedSession,
+    mutate: (document) => {
+      document.bot.currentHp += 1;
+    },
+  },
+  {
+    name: 'energy history',
+    build: makePlayedSession,
+    mutate: (document) => {
+      document.player.energy = Math.min(2, document.player.energy + 1);
+    },
+  },
+  {
+    name: 'heal history',
+    build: makeHealedSession,
+    mutate: (document) => {
+      document.player.healUsed = false;
+    },
+  },
+  {
+    name: 'coherent RNG fields with a false seed',
+    build: makeSession,
+    mutate: (document) => {
+      const currentMove = document.pendingBotMoveId;
+      let seed = 0;
+      while (seed <= 0xffff_ffff) {
+        const selected = nextRandom(seed).value < 0.5 ? 'quick' : 'guard';
+        if (selected !== currentMove) break;
+        seed += 1;
+      }
+      document.rngSeed = seed;
+      let state = seed;
+      for (let step = 0; step < document.rngStep; step += 1) {
+        state = nextRandom(state).state;
+      }
+      document.rngState = state;
+    },
+  },
+  {
+    name: 'action order in the structured log',
+    build: makePlayedSession,
+    mutate: (document) => {
+      const playerStart = document.log.findIndex(
+        (event: MutableBattleDocument) =>
+          event.turnNumber === 1 && event.type === 'move_used' && event.actor === 'player'
+      );
+      const botStart = document.log.findIndex(
+        (event: MutableBattleDocument) =>
+          event.turnNumber === 1 && event.type === 'move_used' && event.actor === 'bot'
+      );
+      const group = (start: number) => {
+        const first = document.log[start];
+        const next = document.log[start + 1];
+        return next?.actor === first.actor && next?.moveId === first.moveId
+          ? document.log.slice(start, start + 2)
+          : document.log.slice(start, start + 1);
+      };
+      const playerEvents = group(playerStart);
+      const botEvents = group(botStart);
+      const end = botStart + botEvents.length;
+      document.log.splice(
+        playerStart,
+        end - playerStart,
+        ...botEvents,
+        ...playerEvents
+      );
+    },
+  },
+  {
+    name: 'forged active-to-terminal state',
+    build: makePlayedSession,
+    mutate: (document) => {
+      const completedAt = new Date(Date.parse(CREATED_AT) + 2).toISOString();
+      document.status = 'won';
+      document.phase = 'TERMINAL';
+      document.pendingBotMoveId = null;
+      document.botIntent = null;
+      document.bot.currentHp = 0;
+      document.rewardApplied = true;
+      document.xpAwarded = 20;
+      document.updatedAt = completedAt;
+      document.completedAt = completedAt;
+      document.log.push({
+        turnNumber: 2,
+        type: 'battle_won',
+        actor: 'system',
+        message: 'Victory over Thornback.',
+      });
+    },
+  },
+  {
+    name: 'impossible terminal reward',
+    build: makeCompletedWinningSession,
+    mutate: (document) => {
+      document.xpAwarded = 5;
+    },
+  },
+  {
+    name: 'non-replayable timestamp span',
+    build: makePlayedSession,
+    mutate: (document) => {
+      document.updatedAt = document.createdAt;
+    },
+  },
+];
+
 describe('battle document decoder invariants', () => {
   beforeEach(clearFirestore);
+
+  it('rejects a malformed owner ID when decoding an observed document', () => {
+    const document = cloneDocument();
+    document.userId = '';
+
+    expect(() =>
+      decodeBattleSession({
+        id: SESSION_ID,
+        data: () => document,
+      })
+    ).toThrow(
+      expect.objectContaining({
+        name: 'BattleRepositoryError',
+        code: 'invalid_battle_document',
+        status: 500,
+      })
+    );
+  });
 
   it('normalizes Firestore timestamp values before engine resolution', async () => {
     const document = cloneDocument();
@@ -704,5 +1127,40 @@ describe('battle document decoder invariants', () => {
         `Invalid Firestore battle_sessions document ${SESSION_ID}`
       ),
     });
+  });
+
+  it.each(replayCorruptionCases)(
+    'rejects replay corruption in $name',
+    async ({ build, mutate }) => {
+      const document = cloneDocument(build());
+      mutate(document);
+      await getDb().collection('battle_sessions').doc(SESSION_ID).set(document);
+
+      await expect(
+        repositoryAt(ACTION_AT).repository.getOwned(USER_ID, SESSION_ID)
+      ).rejects.toMatchObject({
+        code: 'invalid_battle_document',
+        status: 500,
+      });
+    }
+  );
+
+  it.each([
+    ['won', makeCompletedWinningSession],
+    ['lost', makeCompletedLosingSession],
+    [
+      'abandoned',
+      () =>
+        abandonBattle(makePlayedSession(), {
+          transitionAt: new Date(Date.parse(CREATED_AT) + 2).toISOString(),
+        }),
+    ],
+  ])('accepts a real engine-generated %s session', async (_status, build) => {
+    const session = build();
+    await seedSession(session);
+
+    await expect(
+      repositoryAt(LATER_ACTION_AT).repository.getOwned(USER_ID, SESSION_ID)
+    ).resolves.toEqual(session);
   });
 });

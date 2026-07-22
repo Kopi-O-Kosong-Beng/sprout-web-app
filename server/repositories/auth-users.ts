@@ -39,7 +39,9 @@ function progressionValue(
   return number;
 }
 
-function toProfile(snapshot: FirestoreSnapshotLike): AuthUserProfile {
+export function decodeAuthUserProfile(
+  snapshot: FirestoreSnapshotLike
+): AuthUserProfile {
   const data = requireDocumentData(snapshot, 'users');
   const profile: AuthUserProfile = {
     id: snapshot.id,
@@ -181,12 +183,12 @@ const firestoreAuthUserRepository: AuthUserRepository = {
     };
     const reference = db.collection('users').doc(input.id);
     await reference.set(record);
-    return toProfile(await reference.get());
+    return decodeAuthUserProfile(await reference.get());
   },
 
   async getById(id: string): Promise<AuthUserProfile | null> {
     const doc = await getDb().collection('users').doc(id).get();
-    return doc.exists ? toProfile(doc) : null;
+    return doc.exists ? decodeAuthUserProfile(doc) : null;
   },
 
   async getByEmail(email: string): Promise<AuthUserProfile | null> {
@@ -195,7 +197,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       .where('email', '==', email)
       .limit(1)
       .get();
-    return snap.empty ? null : toProfile(snap.docs[0]);
+    return snap.empty ? null : decodeAuthUserProfile(snap.docs[0]);
   },
 
   async getByDisplayName(displayName: string): Promise<AuthUserProfile | null> {
@@ -207,7 +209,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
         ? data.displayName.trim().toLowerCase() === key
         : false;
     });
-    return match ? toProfile(match) : null;
+    return match ? decodeAuthUserProfile(match) : null;
   },
 
   async markVerified(id: string): Promise<void> {
@@ -289,7 +291,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       const doc = await transaction.get(ref);
       if (!doc.exists) return null;
       transaction.update(ref, fields);
-      return toProfile({
+      return decodeAuthUserProfile({
         id: doc.id,
         data: () => ({ ...doc.data(), ...fields }),
       });
@@ -304,7 +306,7 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       const doc = await transaction.get(ref);
       if (!doc.exists) return null;
       transaction.update(ref, fields);
-      return toProfile({
+      return decodeAuthUserProfile({
         id: doc.id,
         data: () => ({ ...doc.data(), ...fields }),
       });

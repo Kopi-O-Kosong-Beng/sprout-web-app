@@ -1,3 +1,4 @@
+import type { Firestore, Transaction } from 'firebase-admin/firestore';
 import { createThornback } from '../data/battle-catalog';
 import { getDb } from '../firebase';
 import type {
@@ -18,6 +19,8 @@ import {
   resolvePlayerAction,
 } from '../services/battle-engine';
 import { nextRandom } from '../services/seeded-rng';
+import { decodeAuthUserProfile } from './auth-users';
+import { assertBattleReplayIntegrity } from './battle-replay';
 import {
   invalidFirestoreDocument,
   normalizeNullableTimestamp,
@@ -89,7 +92,13 @@ export class BattleRepositoryError extends Error {
 
 export interface BattleRepositoryOptions {
   clock?: () => Date;
+  runTransaction?: BattleTransactionRunner;
 }
+
+export type BattleTransactionRunner = <Result>(
+  db: Firestore,
+  updateFunction: (transaction: Transaction) => Promise<Result>
+) => Promise<Result>;
 
 interface ProfileProgression {
   pveXp: number;
@@ -819,6 +828,14 @@ function decodeBattleSessionUnsafe(snapshot: FirestoreSnapshotLike): BattleSessi
     completedAt,
   };
   validateSessionInvariants(session, snapshot.id);
+  try {
+    assertBattleReplayIntegrity(session);
+  } catch (error) {
+    invalid(
+      snapshot.id,
+      error instanceof Error ? error.message : 'deterministic replay failed'
+    );
+  }
   return session;
 }
 
@@ -857,48 +874,18 @@ function transitionTimestamp(previous: string, clock: () => Date): string {
   return new Date(Math.max(candidateMilliseconds, Date.parse(previous) + 1)).toISOString();
 }
 
-function profileProgressionValue(
-  value: unknown,
-  fieldName: keyof ProfileProgression,
-  documentId: string
-): number {
-  if (value === undefined) return 0;
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+function decodeRewardProfile(snapshot: FirestoreSnapshotLike) {
+  try {
+    return decodeAuthUserProfile(snapshot);
+  } catch (error) {
     throw repositoryError(
       'battle_profile_invalid',
       500,
-      `Invalid Firestore users document ${documentId}: ${fieldName} must be a non-negative safe integer.`
+      error instanceof Error
+        ? error.message
+        : 'Stored battle reward profile is invalid.'
     );
   }
-  return value;
-}
-
-function decodeProfileProgression(
-  snapshot: FirestoreSnapshotLike
-): ProfileProgression {
-  const data = snapshot.data();
-  if (!data) {
-    throw repositoryError(
-      'battle_profile_missing',
-      409,
-      'Battle reward profile is missing.'
-    );
-  }
-  return {
-    pveXp: profileProgressionValue(data.pveXp, 'pveXp', snapshot.id),
-    pveWins: profileProgressionValue(data.pveWins, 'pveWins', snapshot.id),
-    pveLosses: profileProgressionValue(data.pveLosses, 'pveLosses', snapshot.id),
-    currentPveWinStreak: profileProgressionValue(
-      data.currentPveWinStreak,
-      'currentPveWinStreak',
-      snapshot.id
-    ),
-    bestPveWinStreak: profileProgressionValue(
-      data.bestPveWinStreak,
-      'bestPveWinStreak',
-      snapshot.id
-    ),
-  };
 }
 
 function safeProgressionSum(left: number, right: number): number {
@@ -928,10 +915,22 @@ function mapEngineError(error: unknown): never {
   throw repositoryError('battle_resolution_failed', 500, 'Battle resolution failed.');
 }
 
+function hasOwnedMarker(snapshot: FirestoreSnapshotLike, userId: string): boolean {
+  return snapshot.data()?.userId === userId;
+}
+
+function isCreateCollision(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === 6 || code === 'already-exists' || code === 'ALREADY_EXISTS';
+}
+
 export function createBattleRepository(
   options: BattleRepositoryOptions = {}
 ): BattleRepository {
   const clock = options.clock ?? (() => new Date());
+  const runTransaction: BattleTransactionRunner =
+    options.runTransaction ?? ((db, updateFunction) => db.runTransaction(updateFunction));
 
   return {
     async create(session): Promise<BattleSession> {
@@ -940,15 +939,27 @@ export function createBattleRepository(
         data: () => session,
       });
       const reference = getDb().collection(COLLECTION).doc(decoded.id);
-      await reference.create(decoded);
+      try {
+        await reference.create(decoded);
+      } catch (error) {
+        if (isCreateCollision(error)) {
+          throw repositoryError(
+            'battle_already_exists',
+            409,
+            'Battle session already exists.'
+          );
+        }
+        throw error;
+      }
       return decoded;
     },
 
     async getOwned(userId, sessionId): Promise<BattleSession | null> {
       const snapshot = await getDb().collection(COLLECTION).doc(sessionId).get();
       if (!snapshot.exists) return null;
+      if (!hasOwnedMarker(snapshot, userId)) return null;
       const session = decodeBattleSession(snapshot);
-      return session.userId === userId ? session : null;
+      return session;
     },
 
     async applyAction(userId, sessionId, moveId, expectedTurn) {
@@ -963,11 +974,11 @@ export function createBattleRepository(
       const battleReference = db.collection(COLLECTION).doc(sessionId);
       const profileReference = db.collection('users').doc(userId);
 
-      return db.runTransaction(async (transaction): Promise<BattleActionResult> => {
+      return runTransaction(db, async (transaction): Promise<BattleActionResult> => {
         const battleSnapshot = await transaction.get(battleReference);
         if (!battleSnapshot.exists) throw battleNotFound();
+        if (!hasOwnedMarker(battleSnapshot, userId)) throw battleNotFound();
         const session = decodeBattleSession(battleSnapshot);
-        if (session.userId !== userId) throw battleNotFound();
         if (session.status !== 'active') throw battleNotActive();
         if (expectedTurn < session.turnNumber) return { session, stale: true };
         if (expectedTurn > session.turnNumber) {
@@ -995,7 +1006,7 @@ export function createBattleRepository(
               'Battle reward profile is missing.'
             );
           }
-          const profile = decodeProfileProgression(profileSnapshot);
+          const profile = decodeRewardProfile(profileSnapshot);
           const delta = calculateProgression(resolved.status);
           const currentPveWinStreak =
             delta.streak === 'increment'
@@ -1018,7 +1029,10 @@ export function createBattleRepository(
           };
           transaction.update(profileReference, {
             ...progression,
-            updatedAt: transitionAt,
+            updatedAt:
+              profile.updatedAt && profile.updatedAt > transitionAt
+                ? profile.updatedAt
+                : transitionAt,
           });
         }
 
@@ -1030,11 +1044,11 @@ export function createBattleRepository(
     async abandon(userId, sessionId): Promise<BattleSession> {
       const db = getDb();
       const battleReference = db.collection(COLLECTION).doc(sessionId);
-      return db.runTransaction(async (transaction) => {
+      return runTransaction(db, async (transaction) => {
         const snapshot = await transaction.get(battleReference);
         if (!snapshot.exists) throw battleNotFound();
+        if (!hasOwnedMarker(snapshot, userId)) throw battleNotFound();
         const session = decodeBattleSession(snapshot);
-        if (session.userId !== userId) throw battleNotFound();
         if (session.status === 'abandoned') return session;
         if (session.status !== 'active') throw battleNotActive();
 
