@@ -7,6 +7,8 @@ export async function clearFirestore(): Promise<void> {
   await Promise.all(collections.map((collection) => db.recursiveDelete(collection)));
 }
 
-export async function seedFirestoreUser(profile: AuthUserProfile): Promise<void> {
+export async function seedFirestoreUser(
+  profile: Pick<AuthUserProfile, 'id'> & Partial<Omit<AuthUserProfile, 'id'>>
+): Promise<void> {
   await getDb().collection('users').doc(profile.id).set(profile);
 }

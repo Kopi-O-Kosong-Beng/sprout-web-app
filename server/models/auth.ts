@@ -3,6 +3,11 @@ export interface AuthUserProfile {
   email: string;
   displayName: string;
   isVerified: boolean;
+  pveXp: number;
+  pveWins: number;
+  pveLosses: number;
+  currentPveWinStreak: number;
+  bestPveWinStreak: number;
   passwordHash?: string | null;
   resetOtpHash?: string | null;
   resetOtpExpiresAt?: string | null;

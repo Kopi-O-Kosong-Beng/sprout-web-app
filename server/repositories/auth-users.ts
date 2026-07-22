@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { getDb } from '../firebase';
 import { buildAuditTimestamp } from '../utils/audit-timestamp';
 import {
+  invalidFirestoreDocument,
   normalizeNullableTimestamp,
   normalizeOptionalTimestamp,
   normalizeRequiredTimestamp,
@@ -21,6 +22,23 @@ import type {
   PasswordHistoryEntry,
 } from '../models/auth';
 
+function progressionValue(
+  value: unknown,
+  fieldName: string,
+  documentId: string
+): number {
+  if (value === undefined) return 0;
+  const number = requireFiniteNumber(value, fieldName, 'users', documentId);
+  if (!Number.isSafeInteger(number) || number < 0) {
+    throw invalidFirestoreDocument(
+      'users',
+      documentId,
+      `${fieldName} must be a non-negative safe integer`
+    );
+  }
+  return number;
+}
+
 function toProfile(snapshot: FirestoreSnapshotLike): AuthUserProfile {
   const data = requireDocumentData(snapshot, 'users');
   const profile: AuthUserProfile = {
@@ -28,6 +46,19 @@ function toProfile(snapshot: FirestoreSnapshotLike): AuthUserProfile {
     email: requireString(data.email, 'email', 'users', snapshot.id),
     displayName: requireString(data.displayName, 'displayName', 'users', snapshot.id),
     isVerified: requireBoolean(data.isVerified, 'isVerified', 'users', snapshot.id),
+    pveXp: progressionValue(data.pveXp, 'pveXp', snapshot.id),
+    pveWins: progressionValue(data.pveWins, 'pveWins', snapshot.id),
+    pveLosses: progressionValue(data.pveLosses, 'pveLosses', snapshot.id),
+    currentPveWinStreak: progressionValue(
+      data.currentPveWinStreak,
+      'currentPveWinStreak',
+      snapshot.id
+    ),
+    bestPveWinStreak: progressionValue(
+      data.bestPveWinStreak,
+      'bestPveWinStreak',
+      snapshot.id
+    ),
     passwordHash: optionalNullableString(
       data.passwordHash,
       'passwordHash',
@@ -140,6 +171,11 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       resetOtpHash: null,
       resetOtpExpiresAt: null,
       resetOtpFailedAttempts: 0,
+      pveXp: 0,
+      pveWins: 0,
+      pveLosses: 0,
+      currentPveWinStreak: 0,
+      bestPveWinStreak: 0,
       createdAt: now,
       updatedAt: now,
     };
