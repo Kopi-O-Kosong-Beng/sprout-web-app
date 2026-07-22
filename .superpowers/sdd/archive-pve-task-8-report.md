@@ -11,6 +11,9 @@ stale turns and exactly-once progression.
 Implementation commit:
 `22e4dad53b1f4f8d30e913b9eea3d1980672da1e`
 
+Review-fix commit:
+`64c27e32532f9e6d55775893835d165df54b8642`
+
 Author and committer:
 `Zhi Feng <zhifeng_chia@mymail.sutd.edu.sg>`
 
@@ -38,6 +41,18 @@ Quick moves always reached the reward transaction, but Thornback can Guard. The
 fixture was corrected to advance valid rounds until it reached the intended
 missing-profile boundary; no production behavior was changed for that failure.
 
+The response-privacy review RED expanded the shared recursive API assertion
+before changing the serializer. Six response-path tests failed because
+`moveCatalogVersion`, `npcPresetVersion`, and `rewardApplied` were public. The
+same assertion also inspects every bot log event for exact move IDs, bot move
+names, and unsafe messages across start, action, stale, GET, terminal, and
+abandon responses.
+
+The avatar-ownership review RED added repository and API tests before changing
+`getOwned`. The combined avatar/API run reported 4 failures out of 38 tests:
+missing, non-string, and foreign raw owner markers all reached full decoding,
+and malformed foreign battle start returned 500 instead of the shared 404.
+
 ### GREEN
 
 Focused API command under Node 22.23.1:
@@ -53,13 +68,23 @@ same-turn concurrency and stale serialization, abandonment, missing profiles,
 terminal progression, repository-error redaction, injected ID collision, rate
 limit ordering, standard headers, and per-user quota isolation.
 
+Review-fix focused command under Node 22.23.1:
+
+```powershell
+& $node $npm exec -w server -- firebase emulators:exec --project sprout-test --only firestore "jest --runInBand --runTestsByPath tests/avatar-demo.test.ts tests/battle-api.test.ts"
+```
+
+Final result: 2 suites passed, 38 tests passed. The API suite retained 17 tests;
+the avatar suite increased to 21 tests with raw-owner gating and `listByUser`
+query-boundary coverage.
+
 Full guarded server command under Node 22.23.1:
 
 ```powershell
 & $node $npm test -w server
 ```
 
-Final result: 20 suites passed, 266 tests passed. The guarded runner shut down
+Final review-fix result: 20 suites passed, 271 tests passed. The guarded runner shut down
 the Firestore Emulator and the final port inspection returned
 `PORT_8080_FREE`.
 
@@ -72,8 +97,7 @@ git diff --cached --check
 ```
 
 Typecheck and build exited 0. The staged diff had no whitespace errors, and the
-staged metadata scan found no co-author or prohibited assistant-product
-attribution.
+staged metadata scan found no co-author or prohibited attribution metadata.
 
 ## Decisions
 
@@ -92,9 +116,18 @@ attribution.
   sends its prepared snapshot directly to one repository `create` call. The
   stored initial session has one intent event and `rngStep=1`.
 - `PublicBattleSession` is an explicit allow-list contract. Its serializer omits
-  `userId`, `pendingBotMoveId`, all RNG state, and the bot move catalog. Start,
-  GET, action, stale action, and abandon responses all use this serializer and
-  expose only the broad current `botIntent`.
+  `userId`, `pendingBotMoveId`, all RNG state, the bot move catalog,
+  `moveCatalogVersion`, `npcPresetVersion`, and `rewardApplied`. Start, GET,
+  action, stale action, terminal action, and abandon responses all use this
+  serializer and expose only the broad current `botIntent`.
+- `PublicBattleEvent` is an actor-discriminated union. Player events preserve
+  their move IDs and name-bearing messages for the UI. Bot events cannot carry
+  `moveId`; their messages are generated only from event type and amount, and
+  only `bot_intent_prepared` can carry the broad intent category.
+- `avatarRepository.getOwned` reads only the raw `userId` marker before full
+  decoding. Missing, non-string, or foreign markers return null. Caller-owned
+  documents still pass through strict decoding, and `listByUser` retains its
+  Firestore owner query before decoding the returned caller-owned documents.
 - `BattleServiceError` translates known repository codes into stable statuses
   and messages. Missing and foreign sessions share one 404. Unknown Firestore,
   avatar-decoder, and battle-decoder failures become a generic internal response
@@ -113,11 +146,16 @@ attribution.
 - `server/services/battle.service.ts`: ownership orchestration, entropy seams,
   expiry handling, avatar mapping, and controlled repository-error translation.
 - `server/controllers/battle.controller.ts`: explicit public response types,
-  allow-list serialization, and four request handlers.
+  actor-safe event serialization, and four request handlers.
+- `server/repositories/avatars.ts`: pre-decode raw ownership gate for single
+  avatar reads.
 - `server/routes/battle.routes.ts`: verified routes, strict Joi validation, and
   per-user production/test rate-limit configuration.
 - `server/tests/battle-api.test.ts`: emulator-backed API, service-boundary,
-  concurrency, progression, redaction, and limiter coverage.
+  concurrency, progression, recursive redaction, malformed-foreign ownership,
+  and limiter coverage.
+- `server/tests/avatar-demo.test.ts`: raw-owner marker, malformed-owned, and
+  `listByUser` query-boundary coverage.
 - `server/app.ts`: `/api/battle/pve` mount before the API 404 boundary.
 
 ## Uncertainties
