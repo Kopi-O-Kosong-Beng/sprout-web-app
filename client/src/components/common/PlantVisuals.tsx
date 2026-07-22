@@ -119,13 +119,41 @@ export function PlantAvatar({
   );
 }
 
-export function BotAvatar() {
+export function BotAvatar({
+  name,
+  spriteUrl,
+}: {
+  name: string;
+  spriteUrl?: string;
+}) {
+  const [failedSpriteUrl, setFailedSpriteUrl] = useState<string | null>(null);
+  const normalizedSpriteUrl = spriteUrl?.trim();
+  const showSprite = Boolean(
+    normalizedSpriteUrl && normalizedSpriteUrl !== failedSpriteUrl
+  );
+
   return (
-    <span className="bot-avatar">
-      <span className="thorn left" />
-      <span className="thorn right" />
-      <span className="bot-eyes" />
-      <span className="pot" />
+    <span
+      className={showSprite ? 'bot-avatar has-sprite' : 'bot-avatar'}
+      role="img"
+      aria-label={`${name} avatar`}
+    >
+      {showSprite ? (
+        <img
+          className="bot-sprite"
+          src={normalizedSpriteUrl}
+          alt=""
+          draggable={false}
+          onError={() => setFailedSpriteUrl(normalizedSpriteUrl ?? null)}
+        />
+      ) : (
+        <>
+          <span className="thorn left" />
+          <span className="thorn right" />
+          <span className="bot-eyes" />
+          <span className="pot" />
+        </>
+      )}
     </span>
   );
 }
@@ -194,14 +222,37 @@ export function StatGrid({
   );
 }
 
-export function HealthBar({ label, value }: { label: string; value: number }) {
+export function HealthBar({
+  label,
+  current,
+  max,
+}: {
+  label: string;
+  current: number;
+  max: number;
+}) {
+  const boundedMax = Number.isFinite(max) ? Math.max(0, max) : 0;
+  const boundedCurrent = Number.isFinite(current)
+    ? Math.min(Math.max(0, current), boundedMax)
+    : 0;
+  const percentage = boundedMax > 0 ? (boundedCurrent / boundedMax) * 100 : 0;
+
   return (
-    <div className="health-meter" aria-label={`${label} ${value} percent`}>
-      <span>{label}</span>
+    <div
+      className="health-meter"
+      role="progressbar"
+      aria-label={`${label} ${boundedCurrent} of ${boundedMax}`}
+      aria-valuemin={0}
+      aria-valuemax={boundedMax}
+      aria-valuenow={boundedCurrent}
+    >
+      <span>HP</span>
       <div>
-        <i style={{ width: `${value}%` }} />
+        <i style={{ width: `${percentage}%` }} />
       </div>
-      <strong>{value}%</strong>
+      <strong>
+        {boundedCurrent} / {boundedMax}
+      </strong>
     </div>
   );
 }

@@ -33,6 +33,109 @@ export interface PaginatedAvatars {
   total: number;
 }
 
+export type BattleStatus = 'active' | 'won' | 'lost' | 'abandoned';
+export type BattlePhase =
+  | 'PREPARE_BOT_INTENT'
+  | 'PLAYER_ACTION'
+  | 'RESOLVE_ROUND'
+  | 'CHECK_RESULT'
+  | 'TERMINAL';
+export type BattleMoveKind = 'quick' | 'guard' | 'signature' | 'heal';
+export type BattleIntent = 'building' | 'committed' | 'uncertain';
+export type BattleActor = 'player' | 'bot' | 'system';
+export type BattleEventType =
+  | 'battle_started'
+  | 'bot_intent_prepared'
+  | 'move_used'
+  | 'move_missed'
+  | 'damage_dealt'
+  | 'healed'
+  | 'player_action_skipped'
+  | 'bot_action_skipped'
+  | 'battle_won'
+  | 'battle_lost'
+  | 'battle_abandoned';
+
+export interface BattleMove {
+  id: string;
+  name: string;
+  kind: BattleMoveKind;
+  power: number;
+  accuracy: number;
+  energyGain: number;
+  energyCost: number;
+}
+
+export interface BattlePlayer {
+  id: string;
+  name: string;
+  spriteUrl: string;
+  stats: AvatarStats;
+  currentHp: number;
+  maxHp: number;
+  energy: number;
+  healUsed: boolean;
+  moves: BattleMove[];
+}
+
+export interface BattleBot {
+  id: string;
+  name: string;
+  spriteUrl: string;
+  stats: AvatarStats;
+  currentHp: number;
+  maxHp: number;
+  energy: number;
+  healUsed: boolean;
+}
+
+interface BattleEventBase {
+  turnNumber: number;
+  type: BattleEventType;
+  message: string;
+  amount?: number;
+}
+
+export interface BotBattleEvent extends BattleEventBase {
+  actor: 'bot';
+  intent?: BattleIntent;
+}
+
+export interface PlayerBattleEvent extends BattleEventBase {
+  actor: 'player';
+  moveId?: string;
+}
+
+export interface SystemBattleEvent extends BattleEventBase {
+  actor: 'system';
+}
+
+export type BattleEvent =
+  | BotBattleEvent
+  | PlayerBattleEvent
+  | SystemBattleEvent;
+
+export interface BattleSession {
+  id: string;
+  avatarId: string;
+  status: BattleStatus;
+  phase: BattlePhase;
+  turnNumber: number;
+  player: BattlePlayer;
+  bot: BattleBot;
+  botIntent: BattleIntent | null;
+  log: BattleEvent[];
+  xpAwarded: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+export interface BattleActionResult {
+  session: BattleSession;
+  stale: boolean;
+}
+
 export const TICKET_CATEGORIES = [
   'general',
   'bug',
@@ -132,6 +235,41 @@ export async function setDemoAvatars(
     ? await apiClient.post<PaginatedAvatars>('/api/avatar/demo')
     : await apiClient.delete<PaginatedAvatars>('/api/avatar/demo');
   return response.data;
+}
+
+export async function startPveBattle(avatarId: string): Promise<BattleSession> {
+  const { data } = await apiClient.post<BattleSession>('/api/battle/pve/start', {
+    avatarId,
+  });
+  return data;
+}
+
+export async function getPveBattle(sessionId: string): Promise<BattleSession> {
+  const { data } = await apiClient.get<BattleSession>(
+    `/api/battle/pve/${sessionId}`
+  );
+  return data;
+}
+
+export async function submitPveAction(
+  sessionId: string,
+  moveId: string,
+  expectedTurn: number
+): Promise<BattleActionResult> {
+  const { data } = await apiClient.post<BattleActionResult>(
+    `/api/battle/pve/${sessionId}/action`,
+    { moveId, expectedTurn }
+  );
+  return data;
+}
+
+export async function abandonPveBattle(
+  sessionId: string
+): Promise<BattleSession> {
+  const { data } = await apiClient.post<BattleSession>(
+    `/api/battle/pve/${sessionId}/abandon`
+  );
+  return data;
 }
 
 export async function submitTicket(input: TicketInput): Promise<TicketResponse> {
