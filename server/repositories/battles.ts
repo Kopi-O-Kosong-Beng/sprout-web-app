@@ -1,5 +1,8 @@
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
-import { createThornback } from '../data/battle-catalog';
+import {
+  createThornback,
+  isAllowedPlayerMoveSet,
+} from '../data/battle-catalog';
 import { getDb } from '../firebase';
 import type {
   BattleActor,
@@ -543,6 +546,11 @@ function validateSessionInvariants(session: BattleSession, documentId: string): 
     invalid(documentId, 'player and bot IDs must differ');
   }
   assertFixedBot(session.bot, documentId);
+  if (
+    !isAllowedPlayerMoveSet(session.moveCatalogVersion, session.player.moves)
+  ) {
+    invalid(documentId, 'player.moves must match one complete catalog v1 set');
+  }
 
   if (Date.parse(session.updatedAt) < Date.parse(session.createdAt)) {
     invalid(documentId, 'updatedAt must not precede createdAt');

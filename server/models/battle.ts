@@ -84,6 +84,7 @@ export interface BattleSession {
 export interface AvatarBattleInput {
   id: string;
   name: string;
+  speciesName: string;
   speciesFamily: string | null;
   spriteUrl: string;
   stats: AvatarStats;

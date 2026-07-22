@@ -108,6 +108,43 @@ function movesFromTheme(theme: MoveTheme): BattleMove[] {
   ];
 }
 
+const V1_PLAYER_MOVE_SETS = [
+  ...Object.values(SPECIES_THEMES),
+  ...Object.values(FAMILY_THEMES),
+  FALLBACK_THEME,
+].map(movesFromTheme);
+
+function moveSetsEqual(
+  actual: readonly BattleMove[],
+  expected: readonly BattleMove[]
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((move, index) => {
+      const candidate = expected[index];
+      return (
+        move.id === candidate.id &&
+        move.name === candidate.name &&
+        move.kind === candidate.kind &&
+        move.power === candidate.power &&
+        move.accuracy === candidate.accuracy &&
+        move.energyGain === candidate.energyGain &&
+        move.energyCost === candidate.energyCost
+      );
+    })
+  );
+}
+
+export function isAllowedPlayerMoveSet(
+  version: string,
+  moves: readonly BattleMove[]
+): boolean {
+  return (
+    version === MOVE_CATALOG_VERSION &&
+    V1_PLAYER_MOVE_SETS.some((expected) => moveSetsEqual(moves, expected))
+  );
+}
+
 export function resolveBattleMoves(
   speciesName: string,
   speciesFamily: string | null
@@ -129,7 +166,7 @@ export function createPlayerParticipant(input: AvatarBattleInput): BattlePartici
     maxHp: input.stats.hp,
     energy: 0,
     healUsed: false,
-    moves: resolveBattleMoves(input.name, input.speciesFamily),
+    moves: resolveBattleMoves(input.speciesName, input.speciesFamily),
   };
 }
 

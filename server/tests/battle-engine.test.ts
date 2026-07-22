@@ -23,7 +23,8 @@ const ACTIVE_TRANSITION = { transitionAt: ACTIVE_ROUND_AT };
 
 const basePlayer: AvatarBattleInput = {
   id: 'avatar-1',
-  name: 'Helianthus annuus',
+  name: 'Sunny',
+  speciesName: 'Helianthus annuus',
   speciesFamily: 'Asteraceae',
   spriteUrl: '/static/sprites/helianthus-annuus.png',
   stats: { hp: 100, attack: 60, defense: 40, speed: 70 },
@@ -109,6 +110,7 @@ describe('battle creation and catalogue', () => {
       completedAt: null,
     });
     expect(session.bot.name).toBe('Thornback');
+    expect(session.player.name).toBe('Sunny');
     expect(session.player.moves.map((move) => move.id)).toEqual([
       'quick',
       'guard',
@@ -140,11 +142,13 @@ describe('battle creation and catalogue', () => {
     const sunflower = makeSession();
     const sameFamily = makeSession({
       id: 'avatar-2',
-      name: 'Bellis perennis',
+      name: 'Daisy',
+      speciesName: 'Bellis perennis',
     });
     const fallback = makeSession({
       id: 'avatar-3',
-      name: 'Unknown specimen',
+      name: 'Mystery',
+      speciesName: 'Unknown specimen',
       speciesFamily: null,
     });
 

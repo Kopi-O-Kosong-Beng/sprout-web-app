@@ -38,6 +38,7 @@ function createGeneratedBattle(stats: AvatarStats, rngSeed: number): BattleSessi
     player: {
       id: 'property-avatar',
       name: 'Generated plant',
+      speciesName: 'Generated plant species',
       speciesFamily: null,
       spriteUrl: '/generated.png',
       stats,

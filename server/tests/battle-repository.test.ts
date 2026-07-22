@@ -58,6 +58,7 @@ function createTestSession(
     player: {
       id: AVATAR_ID,
       name: 'Helianthus annuus',
+      speciesName: 'Helianthus annuus',
       speciesFamily: 'Asteraceae',
       spriteUrl: '/static/sprites/helianthus-annuus.png',
       stats,
@@ -782,6 +783,18 @@ const malformedBattleCases: Array<{
   {
     name: 'versioned signature accuracy',
     mutate: (document) => (document.player.moves[2].accuracy = 100),
+  },
+  {
+    name: 'forged in-range signature power',
+    mutate: (document) => (document.player.moves[2].power = 51),
+  },
+  {
+    name: 'forged signature name',
+    mutate: (document) => (document.player.moves[2].name = 'Solar Bloom Prime'),
+  },
+  {
+    name: 'forged signature cost',
+    mutate: (document) => (document.player.moves[2].energyCost = 1),
   },
   {
     name: 'pending move existence',
