@@ -14,6 +14,9 @@ Implementation commit:
 Independent-review hardening commit:
 `e7381bf48d8235f1a64d64d3ce0bd828cb006d97`
 
+Final catalog-integrity commit:
+`8bcb45886ab1c8301ebc4349bc5e4ca7db23f1fd`
+
 Author and committer:
 `Zhi Feng <zhifeng_chia@mymail.sutd.edu.sg>`
 
@@ -187,6 +190,47 @@ diff check reported no whitespace errors, the metadata scan found no prohibited
 attribution, `server/package.json` still specifies exactly 15,000 ms, and port
 8080 was free after the guarded runs.
 
+## Final Catalog Integrity Follow-Up
+
+### RED
+
+The catalog and taxonomy tests were written before production changes. The
+first focused run failed all three suites at compilation with the expected
+missing contracts: `isAllowedPlayerMoveSet` was not exported and
+`AvatarBattleInput` had no `speciesName` field. No tests ran in that first RED.
+
+After adding only the catalog helper and taxonomy mapping, a second focused run
+made the persistence defect observable. Catalog and engine suites passed, but
+the battle repository accepted a Helianthus signature power changed from 50 to
+51 and the forged name `Solar Bloom Prime`. The run reported 2 failed and 121
+passed tests. The forged signature cost case already failed through the older
+partial checks.
+
+### GREEN
+
+`isAllowedPlayerMoveSet(version, moves)` now owns exact player catalog
+validation. For v1 it compares all four moves, in canonical order, across ID,
+name, kind, power, accuracy, energy gain, and energy cost against every defined
+species theme, family theme, and the fallback. Unknown versions and incomplete
+or altered sets return false. The repository requires this check after
+structural decoding and retains its independent exact `thornback-v1` snapshot
+validation.
+
+`AvatarBattleInput` now carries `speciesName` separately. Player move selection
+uses `resolveBattleMoves(speciesName, speciesFamily)`, while the participant's
+`name` remains the avatar display name. Task 6 engine/property fixtures and
+Task 7 repository fixtures were updated to exercise that distinction.
+
+Verification under Node 22.23.1:
+
+- Core GREEN: 3 suites passed, 123 tests passed in 24.095 s.
+- Final focused engine/catalog/repository/auth run: 6 suites passed, 171 tests
+  passed in 46.999 s.
+- Full guarded server run: 19 suites passed, 249 tests passed in 58.484 s.
+- Server typecheck and build both exited 0.
+- Diff and metadata checks were clean, the bounded timeout remained 15,000 ms,
+  and port 8080 was free.
+
 ## Decisions
 
 - `createBattleRepository({ clock })` accepts a `() => Date` clock. Exact-turn
@@ -218,6 +262,9 @@ attribution, `server/package.json` still specifies exactly 15,000 ms, and port
 
 - `server/package.json`: bounded 15,000 ms Jest timeout for emulator and
   concurrency tests.
+- `server/data/battle-catalog.ts`: version-aware exact player move-set
+  validation and species-based theme resolution.
+- `server/models/battle.ts`: explicit `speciesName` on `AvatarBattleInput`.
 - `server/models/auth.ts`: non-optional PVE progression fields.
 - `server/repositories/auth-users.ts`: legacy zero normalization, strict
   progression validation, new-profile defaults, and the exported canonical
@@ -228,7 +275,13 @@ attribution, `server/package.json` still specifies exactly 15,000 ms, and port
   complete decoder/invariants and replay, pre-decode ownership gating,
   injectable clock/transaction seams, collision mapping, monotonic profile
   timestamps, stale handling, abandonment, and exactly-once rewards.
-- `server/tests/battle-repository.test.ts`: 83 focused emulator tests.
+- `server/tests/battle-catalog.test.ts`: all v1 species/family/fallback themes,
+  unsupported/incomplete sets, and forged signature fields.
+- `server/tests/battle-engine.test.ts`: display-name/species-name taxonomy
+  coverage.
+- `server/tests/battle-engine.property.test.ts`: updated generated battle input
+  contract.
+- `server/tests/battle-repository.test.ts`: 86 focused emulator tests.
 - `server/tests/firestore-test-utils.ts`: partial-profile seeding for intentional
   legacy fixtures while production profile typing remains strict.
 
