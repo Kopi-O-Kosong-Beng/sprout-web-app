@@ -36,6 +36,14 @@ The active-round concurrent duplicate test added in the same cycle already
 passed, confirming that one transaction advanced the round and the retry
 returned the stored stale snapshot.
 
+Controller verification later reproduced a bounded test-infrastructure RED at
+Jest's exact default timeout of 5,000 ms. The concurrent win repository test
+timed out while its Firestore transaction was still running; that unfinished
+transaction then contaminated the following concurrent loss test. The existing
+five-concurrent-wrong-OTP test also crossed 5,000 ms in the same sequential
+emulator suite. The repeated ordering and durations established the timeout,
+not battle behavior or weakened assertions, as the root cause.
+
 ### GREEN
 
 Focused emulator command under Node 22.23.1:
@@ -63,7 +71,33 @@ its emulator shutdown and left port 8080 free.
 The first broadened run had one unrelated five-second timeout in the existing
 concurrent wrong-OTP auth test while Task 7 passed. The exact auth case passed
 unchanged in isolation, and both subsequent full guarded runs passed. No auth
-code or timeout was changed.
+code or timeout was changed during that original Task 7 run.
+
+### Bounded Emulator Timeout Follow-Up
+
+Controller verification established that the same 5,000 ms boundary could
+reliably stop the concurrent win test before its Firestore transaction settled,
+allowing that unfinished work to affect the next loss test. The minimal
+infrastructure correction sets Jest `testTimeout` to 15,000 ms in
+`server/package.json`. The limit remains finite, applies uniformly to the
+server's emulator-backed Jest tests, and changes no assertion, fixture, or
+production battle behavior.
+
+Fresh focused results under Node 22.23.1 after the correction:
+
+- Battle repository: 1 suite passed, 61 tests passed. Concurrent win completed
+  in 3,334 ms and concurrent loss completed in 3,454 ms.
+- Exact concurrent wrong-OTP case: 1 test passed and 36 tests were skipped by
+  the name filter. The test body took 6,243 ms, directly demonstrating why the
+  5,000 ms default was too short while remaining below the 15,000 ms bound.
+
+Two consecutive full guarded server runs then passed without cross-test
+contamination:
+
+- Pass 1: 18 suites passed, 213 tests passed in 67.635 s.
+- Pass 2: 18 suites passed, 213 tests passed in 70.943 s.
+
+Each guarded run started and stopped its own Firestore Emulator lifecycle.
 
 Static verification under Node 22.23.1:
 
@@ -107,6 +141,8 @@ port check returned `PORT_8080_FREE`.
 
 ## Changed Files
 
+- `server/package.json`: bounded 15,000 ms Jest timeout for emulator and
+  concurrency tests.
 - `server/models/auth.ts`: non-optional PVE progression fields.
 - `server/repositories/auth-users.ts`: legacy zero normalization, strict
   progression validation, and new-profile defaults.
