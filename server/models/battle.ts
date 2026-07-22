@@ -9,8 +9,14 @@ export type BattlePhase =
   | 'RESOLVE_ROUND'
   | 'CHECK_RESULT'
   | 'TERMINAL';
-export type BattleIntent = 'attacking' | 'guarding' | 'charging' | 'recovering';
 export type MoveKind = 'quick' | 'guard' | 'signature' | 'heal';
+export type BattleIntent = 'offensive' | 'defensive';
+export const BOT_INTENT_BY_MOVE_KIND = {
+  quick: 'offensive',
+  signature: 'offensive',
+  guard: 'defensive',
+  heal: 'defensive',
+} as const satisfies Record<MoveKind, BattleIntent>;
 export type BattleActor = 'player' | 'bot' | 'system';
 export type BattleEventType =
   | 'battle_started'
@@ -96,6 +102,10 @@ export interface CreateBattleInput {
   player: AvatarBattleInput;
   rngSeed: number;
   now: string;
+}
+
+export interface BattleTransitionInput {
+  transitionAt: string;
 }
 
 export type TerminalBattleStatus = Exclude<BattleStatus, 'active'>;

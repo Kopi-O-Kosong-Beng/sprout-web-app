@@ -11,10 +11,12 @@ import type {
   BattleMove,
   BattleParticipant,
   BattleSession,
+  BattleTransitionInput,
   CreateBattleInput,
   ProgressionDelta,
   TerminalBattleStatus,
 } from '../models/battle';
+import { BOT_INTENT_BY_MOVE_KIND } from '../models/battle';
 import { nextRandom } from './seeded-rng';
 
 const MAX_ENERGY = 2;
@@ -55,29 +57,40 @@ function assertValidStats(input: CreateBattleInput): void {
   }
 }
 
-function intentForMove(move: BattleMove): BattleIntent {
-  switch (move.kind) {
-    case 'guard':
-      return 'guarding';
-    case 'heal':
-      return 'recovering';
-    case 'quick':
-      return 'charging';
-    case 'signature':
-      return 'attacking';
+function canonicalTimestampMillis(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) return null;
+  return new Date(milliseconds).toISOString() === value ? milliseconds : null;
+}
+
+function validateTransitionTimestamp(
+  session: BattleSession,
+  transition: BattleTransitionInput
+): string {
+  const transitionAt = transition?.transitionAt;
+  const transitionMilliseconds = canonicalTimestampMillis(transitionAt);
+  const previousMilliseconds = canonicalTimestampMillis(session.updatedAt);
+  if (
+    transitionMilliseconds === null ||
+    previousMilliseconds === null ||
+    transitionMilliseconds <= previousMilliseconds
+  ) {
+    throw new Error('invalid_transition_timestamp');
   }
+  return transitionAt;
+}
+
+function intentForMove(move: BattleMove): BattleIntent {
+  return BOT_INTENT_BY_MOVE_KIND[move.kind];
 }
 
 function intentMessage(intent: BattleIntent): string {
   switch (intent) {
-    case 'attacking':
-      return 'Thornback is preparing a powerful attack.';
-    case 'guarding':
-      return 'Thornback is taking a guarded stance.';
-    case 'charging':
-      return 'Thornback is gathering Sun energy.';
-    case 'recovering':
-      return 'Thornback is preparing to recover.';
+    case 'offensive':
+      return 'Thornback is preparing an offensive action.';
+    case 'defensive':
+      return 'Thornback is preparing a defensive action.';
   }
 }
 
@@ -277,7 +290,8 @@ function validatePlayerMove(session: BattleSession, moveId: string): BattleMove 
 
 export function resolvePlayerAction(
   session: BattleSession,
-  moveId: string
+  moveId: string,
+  transition: BattleTransitionInput
 ): BattleSession {
   if (session.status !== 'active') throw new Error('battle_not_active');
   if (session.phase !== 'PLAYER_ACTION') throw new Error('invalid_battle_phase');
@@ -287,8 +301,11 @@ export function resolvePlayerAction(
     (candidate) => candidate.id === session.pendingBotMoveId
   );
   if (!botMove) throw new Error('invalid_bot_move');
+  const transitionAt = validateTransitionTimestamp(session, transition);
 
   const next = cloneSession(session);
+  next.updatedAt = transitionAt;
+  next.completedAt = null;
   next.phase = 'RESOLVE_ROUND';
   const nextPlayerMove = next.player.moves.find((move) => move.id === playerMove.id)!;
   const nextBotMove = next.bot.moves.find((move) => move.id === botMove.id)!;
@@ -327,10 +344,10 @@ export function resolvePlayerAction(
 
   next.phase = 'CHECK_RESULT';
   if (next.bot.currentHp <= 0) {
-    return completeBattle(next, 'won');
+    return completeBattle(next, 'won', transitionAt);
   }
   if (next.player.currentHp <= 0) {
-    return completeBattle(next, 'lost');
+    return completeBattle(next, 'lost', transitionAt);
   }
 
   next.turnNumber += 1;
@@ -342,13 +359,14 @@ export function resolvePlayerAction(
 
 function completeBattle(
   session: BattleSession,
-  outcome: Extract<TerminalBattleStatus, 'won' | 'lost'>
+  outcome: Extract<TerminalBattleStatus, 'won' | 'lost'>,
+  transitionAt: string
 ): BattleSession {
   session.status = outcome;
   session.phase = 'TERMINAL';
   session.pendingBotMoveId = null;
   session.botIntent = null;
-  session.completedAt = session.updatedAt;
+  session.completedAt = transitionAt;
   session.xpAwarded = calculateProgression(outcome).xp;
   appendEvent(session, {
     turnNumber: session.turnNumber,
@@ -359,16 +377,24 @@ function completeBattle(
   return session;
 }
 
-export function abandonBattle(session: BattleSession): BattleSession {
-  if (session.status === 'abandoned') return session;
+export function abandonBattle(
+  session: BattleSession,
+  transition: BattleTransitionInput
+): BattleSession {
+  if (session.status === 'abandoned') {
+    validateTransitionTimestamp(session, transition);
+    return session;
+  }
   if (session.status !== 'active') throw new Error('battle_not_active');
+  const transitionAt = validateTransitionTimestamp(session, transition);
 
   const next = cloneSession(session);
   next.status = 'abandoned';
   next.phase = 'TERMINAL';
   next.pendingBotMoveId = null;
   next.botIntent = null;
-  next.completedAt = next.updatedAt;
+  next.updatedAt = transitionAt;
+  next.completedAt = transitionAt;
   next.xpAwarded = 0;
   appendEvent(next, {
     turnNumber: next.turnNumber,
