@@ -233,6 +233,12 @@ describe('battle navigation lock', () => {
     ).toBeInTheDocument();
     expect(logoutButton).toBeEnabled();
 
+    const releasedBeforeUnload = new Event('beforeunload', {
+      cancelable: true,
+    });
+    window.dispatchEvent(releasedBeforeUnload);
+    expect(releasedBeforeUnload.defaultPrevented).toBe(false);
+
     await user.click(within(header).getByRole('link', { name: 'Archive' }));
     expect(screen.getByTestId('location')).toHaveTextContent('/archive');
     await user.click(logoutButton);
@@ -296,5 +302,11 @@ describe('battle navigation lock', () => {
     expect(
       within(screen.getByRole('banner')).getByRole('link', { name: 'Archive' })
     ).toBeInTheDocument();
+
+    const releasedBeforeUnload = new Event('beforeunload', {
+      cancelable: true,
+    });
+    window.dispatchEvent(releasedBeforeUnload);
+    expect(releasedBeforeUnload.defaultPrevented).toBe(false);
   });
 });
