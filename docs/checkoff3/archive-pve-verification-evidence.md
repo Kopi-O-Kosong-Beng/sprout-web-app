@@ -4,7 +4,10 @@
 
 **Commit under test:** `7991254a7a10a69961b120dc8fe9f8a26327b1e8`
 
-**Initial evidence artifact commit:** `d2cc497`
+**First draft evidence artifact commit:** `d2cc497`
+
+**Corrected grading/report evidence artifact commit:** `5bc87d` (contains the
+split test taxonomy and testing timeline)
 
 **Runtime used for the focused runs:** Node.js `v22.23.1`
 
