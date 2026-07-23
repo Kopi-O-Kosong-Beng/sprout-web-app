@@ -13,6 +13,7 @@ import app from '../app';
 
 const OWNER_ID = 'avatar-api-owner';
 const FOREIGN_ID = 'avatar-api-foreign';
+let previousAuthDevBypass: string | undefined;
 
 interface SeedAvatarOptions {
   id: string;
@@ -41,6 +42,7 @@ async function seedAvatar(options: SeedAvatarOptions): Promise<void> {
 }
 
 beforeEach(async () => {
+  previousAuthDevBypass = process.env.AUTH_DEV_BYPASS;
   process.env.AUTH_DEV_BYPASS = 'false';
   mockAuthAdmin.verifyIdToken.mockReset();
   mockAuthAdmin.verifyIdToken.mockImplementation(async (token: string) => {
@@ -53,6 +55,14 @@ beforeEach(async () => {
     };
   });
   await clearFirestore();
+});
+
+afterEach(() => {
+  if (previousAuthDevBypass === undefined) {
+    delete process.env.AUTH_DEV_BYPASS;
+  } else {
+    process.env.AUTH_DEV_BYPASS = previousAuthDevBypass;
+  }
 });
 
 describe('verified avatar archive API', () => {
@@ -71,6 +81,20 @@ describe('verified avatar archive API', () => {
     expect(mockAuthAdmin.verifyIdToken).toHaveBeenCalledWith(
       `verified:${OWNER_ID}`
     );
+  });
+
+  it('returns 401 without authentication and does not expose archive data', async () => {
+    await seedAvatar({
+      id: 'private-owned-avatar',
+      speciesName: 'Private Archive Fern',
+    });
+
+    const response = await request(app).get('/api/avatar');
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: 'Unauthorised.' });
+    expect(JSON.stringify(response.body)).not.toContain('Private Archive Fern');
+    expect(mockAuthAdmin.verifyIdToken).not.toHaveBeenCalled();
   });
 
   it('lists only caller-owned avatars with bounded page and pageSize values', async () => {
@@ -104,6 +128,12 @@ describe('verified avatar archive API', () => {
     const secondPage = await request(app)
       .get('/api/avatar?page=2&pageSize=1')
       .set('Authorization', authorization());
+    const finalPartialPage = await request(app)
+      .get('/api/avatar?page=2&pageSize=2')
+      .set('Authorization', authorization());
+    const beyondFinalPage = await request(app)
+      .get('/api/avatar?page=3&pageSize=2')
+      .set('Authorization', authorization());
     const maximumPageSize = await request(app)
       .get('/api/avatar?page=1&pageSize=101')
       .set('Authorization', authorization());
@@ -121,6 +151,20 @@ describe('verified avatar archive API', () => {
       pageSize: 1,
       total: 3,
       items: [{ id: 'owner-middle', userId: OWNER_ID }],
+    });
+    expect(finalPartialPage.status).toBe(200);
+    expect(finalPartialPage.body).toMatchObject({
+      page: 2,
+      pageSize: 2,
+      total: 3,
+      items: [{ id: 'owner-oldest', userId: OWNER_ID }],
+    });
+    expect(beyondFinalPage.status).toBe(200);
+    expect(beyondFinalPage.body).toEqual({
+      items: [],
+      page: 3,
+      pageSize: 2,
+      total: 3,
     });
     expect(maximumPageSize.status).toBe(200);
     expect(maximumPageSize.body).toMatchObject({

@@ -372,6 +372,53 @@ describe('per-user demo avatar set', () => {
     await expectExactDemoSet(response.body);
   });
 
+  it('disables the verified demo set while preserving a collected avatar', async () => {
+    const collectedRef = getDb()
+      .collection('avatar_records')
+      .doc('preserved-collected-avatar');
+    await collectedRef.set(collectedReplacement());
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid: USER_ID,
+      email_verified: true,
+    });
+
+    const enabled = await request(app)
+      .post('/api/avatar/demo')
+      .set('Authorization', 'Bearer verified');
+    const disabled = await request(app)
+      .delete('/api/avatar/demo')
+      .set('Authorization', 'Bearer verified');
+
+    expect(enabled.status).toBe(200);
+    expect(enabled.body).toMatchObject({ total: 6 });
+    expect(disabled.status).toBe(200);
+    expect(disabled.body).toMatchObject({
+      page: 1,
+      pageSize: 20,
+      total: 1,
+      items: [
+        {
+          id: collectedRef.id,
+          userId: USER_ID,
+          speciesName: 'Collected Fern',
+          metadata: { isDemo: false },
+        },
+      ],
+    });
+
+    const [collectedDocument, ...demoDocuments] = await Promise.all([
+      collectedRef.get(),
+      ...DEMO_AVATAR_TEMPLATES.map((template) => demoRef(template).get()),
+    ]);
+    expect(collectedDocument.exists).toBe(true);
+    expect(collectedDocument.data()).toMatchObject({
+      userId: USER_ID,
+      speciesName: 'Collected Fern',
+      metadata: { isDemo: false },
+    });
+    expect(demoDocuments.every((document) => !document.exists)).toBe(true);
+  });
+
   it('returns a controlled conflict from the verified enable route', async () => {
     await avatarRepository.ensureDemoSet(USER_ID);
     await demoRef().set({ metadata: { isDemo: false } }, { merge: true });
