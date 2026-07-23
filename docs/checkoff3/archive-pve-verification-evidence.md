@@ -2,7 +2,9 @@
 
 **Recorded:** 2026-07-23 (Asia/Singapore)
 
-**Commit under evidence:** `7991254a7a10a69961b120dc8fe9f8a26327b1e8`
+**Commit under test:** `7991254a7a10a69961b120dc8fe9f8a26327b1e8`
+
+**Initial evidence artifact commit:** `d2cc497`
 
 **Runtime used for the focused runs:** Node.js `v22.23.1`
 
@@ -23,24 +25,36 @@ results below are the focused results already obtained for commit `7991254`.
 
 ## Core Focused Report Rows
 
-These six execution sets are non-overlapping. Together they contain **223
-passing assertions across 11 focused files**.
+The six focused command groups are non-overlapping. The report taxonomy below
+separates unit/property, backend integration, frontend integration, and current
+supporting hardening evidence. Together they contain **223 passing assertions
+across 11 focused files**.
 
 | Test ID | Use case | Strategy | Tool | Expected result | Actual result | Evidence path |
 |---|---|---|---|---|---|---|
-| CORE-U01 | UC5: determine server-authoritative avatar eligibility and preserve the versioned battle catalog | Decomposition bottom-up unit testing; white-box branch and invariant cases | Jest | Collected avatars are eligible, temporary avatars respect server time, unsupported records are rejected, and the stored `thornback-v1` contract remains compatible | PASS: 2 suites, 18/18 | `server/tests/battle-eligibility.test.ts`; `server/tests/battle-catalog.test.ts` |
+| CORE-U01 | UC4/UC5: determine server-authoritative avatar eligibility | Decomposition bottom-up unit testing; black-box expiry boundaries plus white-box eligibility branches | Jest | Collected avatars are eligible, temporary avatars are decided using server time, and the exact expiry boundary is rejected | PASS: 1 suite, 6/6 | `server/tests/battle-eligibility.test.ts` |
 | CORE-I01 | UC4/UC5: read an owner-only archive and persist battle state/rewards in Firestore | Call-graph bottom-up backend integration; black-box ownership/boundary cases plus white-box transaction, concurrency, and replay paths | Jest, Supertest, Firestore Emulator | Archive list/detail responses remain owner-only and bounded; battle transactions advance once and apply terminal progression once | PASS: 2 suites, 96/96 | `server/tests/battle-repository.test.ts`; `server/tests/avatar-api.test.ts` |
 | CORE-I02 | UC5: start, read, act on, abandon, and complete a PVE battle through HTTP | Call-graph bottom-up from engine/catalog to Firestore repository/transaction, service/controller/route, then black-box HTTP | Jest, Supertest, Firestore Emulator | Verified callers receive controlled public state; malformed, stale, foreign, and duplicate requests cannot corrupt or double-reward a session | PASS: 1 suite, 18/18 | `server/tests/battle-api.test.ts` |
 | CORE-F01 | UC5: operate PVE through the real Battle page, router, and shared header | Top-down caller-side component integration with real page/router/components and mocked `sproutApi` | Vitest, React Testing Library, MemoryRouter | Roster/start/action/replay/abandon states render correctly and all real header/page navigation is locked only while non-idempotent start or replay is pending | PASS: 2 files, 28/28 | `client/src/pages/BattlePage.test.tsx`; `client/src/components/common/AppHeader.navigation-lock.test.tsx` |
-| CORE-U02 | UC5/UC4: resolve deterministic battle rounds and maintain the exact demo archive set | Decomposition bottom-up engine/property tests plus call-graph bottom-up demo repository/HTTP integration | Jest, fast-check, Supertest, Firestore Emulator | Legal transitions preserve HP/energy/terminal invariants and deterministic replay; demo enable/disable is owner-scoped, exact, idempotent, and race-safe | PASS: 3 suites, 49/49 | `server/tests/battle-engine.test.ts`; `server/tests/battle-engine.property.test.ts`; `server/tests/avatar-demo.test.ts` |
+| CORE-U02 | UC5: resolve deterministic PVE rounds and preserve battle invariants | Decomposition bottom-up unit/property testing; white-box branch, path, invariant, and generated-state cases | Jest, fast-check | Legal transitions preserve HP, energy, legal-move, terminal-state, immutability, and deterministic-replay invariants | PASS: 2 suites, 27/27 | `server/tests/battle-engine.test.ts`; `server/tests/battle-engine.property.test.ts` |
+| CORE-I03 | UC4: enable and disable the exact owner-scoped demo archive set | Call-graph bottom-up repository/HTTP integration; black-box auth/outcome cases plus white-box collision, transaction-retry, and race paths | Jest, Supertest, Firestore Emulator | Demo enable/disable is exact, owner-scoped, idempotent, race-safe, and preserves collected records | PASS: 1 suite, 22/22 | `server/tests/avatar-demo.test.ts` |
 | CORE-F02 | UC4: browse and mutate the archive through the real Archive page | Top-down caller-side component integration with real page/router/components and mocked `sproutApi`; black-box DOM/state cases | Vitest, React Testing Library, MemoryRouter | Loading, empty, pagination, demo mutation, retry, unmount, image fallback, and Archive-to-Battle handoff states match the public UI contract | PASS: 1 file, 14/14 | `client/src/pages/ArchivePage.test.tsx` |
 
 Primary report rows should select the core use-case scenarios: eligibility,
 owner-only archive reads, one-time Firestore battle transitions/rewards, PVE
 HTTP behavior, Archive-to-Battle handoff, and pending-navigation locking.
-Catalog compatibility, decoder rejection, retry/unmount behavior, responsive
-containment, and accessibility hardening support those rows; they should not be
-presented as separate headline use cases or used to inflate the total.
+Decoder rejection, retry/unmount behavior, responsive containment, and
+accessibility hardening support those rows; they should not be presented as
+separate headline use cases or used to inflate the total.
+
+## Current Supporting Hardening
+
+This current supporting row is included in the 223-test total but is not a
+headline UC4/UC5 report claim.
+
+| Test ID | Use case | Strategy | Tool | Expected result | Actual result | Evidence path |
+|---|---|---|---|---|---|---|
+| SUP-U01 | UC5 support: preserve the versioned battle catalog contract | Decomposition bottom-up unit testing; white-box compatibility and rejection branches | Jest | Stored `thornback-v1` data remains compatible while incomplete, forged, or unsupported move sets are rejected | PASS: 1 suite, 12/12 | `server/tests/battle-catalog.test.ts` |
 
 ## Focused Run Qualification
 
@@ -100,8 +114,8 @@ router, and shared components render together while `sproutApi` is mocked at
 the network boundary.
 
 There is no claim of systematic pairwise coverage. Only selected caller-side
-`page -> sproutApi` edges and the `auth -> Firebase verification` edge are
-isolated.
+mocked boundary/outcome cases on the `page -> sproutApi` and
+`auth -> Firebase verification` edges are isolated.
 
 ## Test Techniques
 
@@ -151,3 +165,20 @@ from the documented use cases rather than inferred from component tests.
 | Vitest / React Testing Library / MemoryRouter | Real React page/router/shared-component integration with mocked `sproutApi` | Current focused evidence |
 | Playwright | Real browser history and full browser-to-backend use-case journeys | Planned / not run |
 | Postman / manual checks | Supplemental API demonstration, controlled inbox, deployed configuration, and cloud-console inspection | Supplemental only; not a substitute for automated or browser system evidence |
+
+## Testing Timeline
+
+| Date | Status | Testing milestone |
+|---|---|---|
+| 20 Jul | Completed | Requirements, UC4/UC5 scope, integration order, and evidence boundaries recorded |
+| 21 Jul | Completed | Auth/email evidence retained as supporting historical regression; Firebase Storage Admin bucket preflight passed |
+| 22 Jul | Completed | Firestore-only archive/PVE increment established and active SQLite runtime removed |
+| 23 Jul | Completed | Six focused command groups passed 223 assertions across 11 files at commit `7991254`; broad regression was not run |
+| 23 Jul | Completed | Unit, backend integration, frontend integration, qualification, tools, and planned-system report rows synchronized |
+| 24 Jul | Planned / not run | Real-browser Back/Forward and full browser-to-backend Archive-to-PVE system checks |
+| 25 Jul | Planned / not run | Use case -> sequence -> code -> test -> screenshot/video traceability; live Firebase Auth/config and production Firestore only if a controlled environment is available |
+| 26 Jul | Planned / not run | PM3 evidence freeze, review, rehearsal, and explicit disclosure of every unexecuted live/system case |
+
+UC6 upload, identification, AI processing, canonical Storage integration, and
+upload-to-archive provenance remain a **PLANNED TARGET / NOT RUN**. The current
+archive records and Firebase Storage Admin preflight do not prove that flow.
