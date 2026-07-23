@@ -1,5 +1,6 @@
 import request, { type Response } from 'supertest';
 import express from 'express';
+import { MAX_BATTLE_ENERGY } from '../data/battle-rules';
 import { getDb } from '../firebase';
 import errorMiddleware from '../middleware/error.middleware';
 import avatarRepository from '../repositories/avatars';
@@ -92,6 +93,19 @@ function expectPublicSession(session: Record<string, unknown>): void {
   );
   expect(findForbiddenKeys(session)).toEqual([]);
   expect(session).not.toHaveProperty('bot.moves');
+  expect(session.player).toEqual(
+    expect.objectContaining({
+      energy: expect.any(Number),
+      maxEnergy: MAX_BATTLE_ENERGY,
+    })
+  );
+  expect(session.bot).toEqual(
+    expect.objectContaining({
+      energy: expect.any(Number),
+      maxEnergy: MAX_BATTLE_ENERGY,
+      spriteUrl: '',
+    })
+  );
 
   const serialized = JSON.stringify(session);
   for (const botMoveName of BOT_MOVE_NAMES.slice(0, 3)) {
@@ -247,9 +261,15 @@ describe('verified PVE battle API', () => {
     expect(response.body.player).toMatchObject({
       id: avatarId,
       name: 'Sunbeam',
+      maxEnergy: MAX_BATTLE_ENERGY,
       moves: expect.arrayContaining([
         expect.objectContaining({ id: 'signature', name: 'Solar Bloom' }),
       ]),
+    });
+    expect(response.body.bot).toMatchObject({
+      name: 'Thornback',
+      maxEnergy: MAX_BATTLE_ENERGY,
+      spriteUrl: '',
     });
     expect(response.body.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -261,6 +281,7 @@ describe('verified PVE battle API', () => {
       userId,
       avatarId,
       player: { name: 'Sunbeam' },
+      bot: { spriteUrl: '' },
       rngSeed: expect.any(Number),
       rngStep: 1,
       pendingBotMoveId: expect.any(String),

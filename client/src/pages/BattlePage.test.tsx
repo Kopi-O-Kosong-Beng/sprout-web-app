@@ -118,6 +118,7 @@ function battleSession(options: SessionOptions = {}): BattleSession {
     currentHp: 101,
     maxHp: 132,
     energy: 1,
+    maxEnergy: 2,
     healUsed: false,
     moves: playerMoves,
     ...options.player,
@@ -125,11 +126,12 @@ function battleSession(options: SessionOptions = {}): BattleSession {
   const bot = {
     id: 'thornback-v1',
     name: 'Thornback',
-    spriteUrl: '/battle/thornback.png',
+    spriteUrl: '',
     stats: { hp: 140, attack: 66, defense: 72, speed: 43 },
     currentHp: 118,
     maxHp: 140,
     energy: 0,
+    maxEnergy: 2,
     healUsed: false,
     ...options.bot,
   };
@@ -295,6 +297,104 @@ describe('BattlePage', () => {
     expect(screen.getByText(/choose an owned plant for this match/i)).toBeVisible();
   });
 
+  it('filters expired temporary avatars before validating the preferred route ID', async () => {
+    const now = Date.parse('2026-07-23T12:00:00.000Z');
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      items: [
+        avatar({
+          id: 'expired-boundary',
+          isTemporary: true,
+          expiresAt: '2026-07-23T12:00:00.000Z',
+          metadata: { displayName: 'Boundary Bloom' },
+        }),
+        avatar({
+          id: 'invalid-expiry',
+          isTemporary: true,
+          expiresAt: 'not-a-timestamp',
+          metadata: { displayName: 'Invalid Timestamp Ivy' },
+        }),
+        avatar({
+          id: 'permanent-past-expiry',
+          isTemporary: false,
+          expiresAt: '2020-01-01T00:00:00.000Z',
+          metadata: { displayName: 'Permanent Pine' },
+        }),
+        avatar({
+          id: 'temporary-no-expiry',
+          isTemporary: true,
+          expiresAt: null,
+          metadata: { displayName: 'Open End Orchid' },
+        }),
+        avatar({
+          id: 'temporary-future',
+          isTemporary: true,
+          expiresAt: '2026-07-23T12:00:00.001Z',
+          metadata: { displayName: 'Future Fern' },
+        }),
+      ],
+      total: 5,
+      page: 1,
+      pageSize: 100,
+    });
+
+    renderBattle({ avatarId: 'expired-boundary' });
+
+    expect(
+      await screen.findByRole('button', {
+        name: /select invalid timestamp ivy/i,
+      })
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: /select permanent pine/i })
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: /select open end orchid/i })
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: /select future fern/i })
+    ).toBeVisible();
+    expect(screen.queryByText(/boundary bloom/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /start match/i })
+    ).not.toBeInTheDocument();
+
+    dateNow.mockRestore();
+  });
+
+  it('shows the true empty-roster path when only expired temporary avatars remain', async () => {
+    const now = Date.parse('2026-07-23T12:00:00.000Z');
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      items: [
+        avatar({
+          id: 'expired-before-now',
+          isTemporary: true,
+          expiresAt: '2026-07-23T11:59:59.999Z',
+        }),
+        avatar({
+          id: 'expired-at-now',
+          isTemporary: true,
+          expiresAt: '2026-07-23T12:00:00.000Z',
+        }),
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 100,
+    });
+
+    renderBattle({ avatarId: 'expired-at-now' });
+
+    expect(
+      await screen.findByRole('heading', { name: /no battle plants yet/i })
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /start match/i })
+    ).not.toBeInTheDocument();
+
+    dateNow.mockRestore();
+  });
+
   it('shows an empty-roster path when the user owns no avatars', async () => {
     const user = userEvent.setup();
     apiMocks.listOwnedAvatars.mockResolvedValue({
@@ -400,6 +500,13 @@ describe('BattlePage', () => {
     expect(screen.getByRole('status', { name: /starting battle/i })).toBeVisible();
     expect(screen.getByRole('button', { name: /start match/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /select fern ward/i })).toBeDisabled();
+    const archiveControl = screen.getByText(/return to archive/i);
+    expect(archiveControl).toHaveAttribute('aria-disabled', 'true');
+    expect(archiveControl.closest('a')).toBeNull();
+    await user.click(archiveControl);
+    expect(
+      screen.queryByText('Owned archive destination')
+    ).not.toBeInTheDocument();
 
     await act(async () =>
       request.resolve(
@@ -438,21 +545,31 @@ describe('BattlePage', () => {
     ]);
   });
 
-  it('renders bounded server HP, Sun, broad intent, and every public move field', async () => {
+  it('renders bounded server HP, server-defined Sun, broad intent, and every public move field', async () => {
     await enterActiveBattle(
       battleSession({
         turnNumber: 7,
         botIntent: 'committed',
-        player: { currentHp: 155, maxHp: 132, energy: 9 },
-        bot: { currentHp: -4, maxHp: 140, energy: -2 },
+        player: {
+          currentHp: 155,
+          maxHp: 132,
+          energy: 9,
+          maxEnergy: 5,
+        },
+        bot: { currentHp: -4, maxHp: 140, energy: -2, maxEnergy: 3 },
       })
     );
 
     expect(screen.getByRole('progressbar', { name: /fern ward hp 132 of 132/i })).toBeVisible();
     expect(screen.getByRole('progressbar', { name: /thornback hp 0 of 140/i })).toBeVisible();
-    expect(screen.getByText('Sun 2 / 2')).toBeVisible();
-    expect(screen.getByText('Sun 0 / 2')).toBeVisible();
+    expect(screen.getByText('Sun 5 / 5')).toBeVisible();
+    expect(screen.getByText('Sun 0 / 3')).toBeVisible();
     expect(screen.getByText(/committed to a decisive action/i)).toBeVisible();
+    expect(
+      screen
+        .getByRole('img', { name: /thornback avatar/i })
+        .querySelector('img')
+    ).toBeNull();
 
     const moves = screen.getByRole('group', { name: /battle moves/i });
     expect(within(moves).getByRole('button', { name: /vine tap.*quick.*power 18.*accuracy 100%.*sun gain 1.*sun cost 0/i })).toBeVisible();
@@ -466,8 +583,22 @@ describe('BattlePage', () => {
     expect(screen.queryByText('58%')).not.toBeInTheDocument();
   });
 
-  it('exposes why unaffordable, consumed, and full-health moves are disabled', async () => {
-    const { unmount } = await enterActiveBattle(
+  it('renders invalid public energy boundaries defensively', async () => {
+    await enterActiveBattle(
+      battleSession({
+        player: { energy: 1, maxEnergy: Number.NaN },
+        bot: { energy: 1, maxEnergy: -1 },
+      })
+    );
+
+    expect(screen.getAllByText('Sun 0 / 0')).toHaveLength(2);
+    expect(
+      screen.getByRole('button', { name: /solar lance/i })
+    ).toHaveAccessibleDescription(/needs 2 sun; 0 available/i);
+  });
+
+  it('keeps unavailable moves keyboard-focusable with guarded accessible reasons', async () => {
+    const { unmount, user } = await enterActiveBattle(
       battleSession({
         player: { currentHp: 90, maxHp: 132, energy: 0, healUsed: true },
       })
@@ -475,10 +606,19 @@ describe('BattlePage', () => {
 
     const signature = screen.getByRole('button', { name: /solar lance/i });
     const heal = screen.getByRole('button', { name: /photosynthesis/i });
-    expect(signature).toBeDisabled();
+    expect(signature).not.toBeDisabled();
+    expect(signature).toHaveAttribute('aria-disabled', 'true');
     expect(signature).toHaveAccessibleDescription(/needs 2 sun; 0 available/i);
-    expect(heal).toBeDisabled();
+    expect(heal).not.toBeDisabled();
+    expect(heal).toHaveAttribute('aria-disabled', 'true');
     expect(heal).toHaveAccessibleDescription(/already used this battle/i);
+
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    expect(signature).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(apiMocks.submitPveAction).not.toHaveBeenCalled();
 
     unmount();
     await enterActiveBattle(
@@ -486,9 +626,55 @@ describe('BattlePage', () => {
         player: { currentHp: 132, maxHp: 132, energy: 2, healUsed: false },
       })
     );
-    expect(screen.getByRole('button', { name: /photosynthesis/i })).toHaveAccessibleDescription(
-      /hp is already full/i
+    const fullHealthHeal = screen.getByRole('button', {
+      name: /photosynthesis/i,
+    });
+    expect(fullHealthHeal).not.toBeDisabled();
+    expect(fullHealthHeal).toHaveAttribute('aria-disabled', 'true');
+    expect(fullHealthHeal).toHaveAccessibleDescription(/hp is already full/i);
+  });
+
+  it('applies 320px-safe containment to server-controlled battle copy', async () => {
+    const playerName = 'PlayerNameWithoutAnyNaturalBreakOpportunity'.repeat(2);
+    const botName = 'OpponentNameWithoutAnyNaturalBreakOpportunity'.repeat(2);
+    const moveName = 'MoveNameWithoutAnyNaturalBreakOpportunity'.repeat(2);
+    const logMessage = 'EventTextWithoutAnyNaturalBreakOpportunity'.repeat(3);
+    const errorMessage = 'ErrorTextWithoutAnyNaturalBreakOpportunity'.repeat(3);
+    apiMocks.submitPveAction.mockRejectedValueOnce(new Error(errorMessage));
+    const { user } = await enterActiveBattle(
+      battleSession({
+        player: {
+          name: playerName,
+          moves: playerMoves.map((move, index) =>
+            index === 0 ? { ...move, name: moveName } : move
+          ),
+        },
+        bot: { name: botName },
+        log: [
+          {
+            turnNumber: 0,
+            type: 'battle_started',
+            actor: 'system',
+            message: logMessage,
+          },
+        ],
+      })
     );
+
+    const playerHeading = screen.getByRole('heading', { name: playerName });
+    expect(playerHeading).toHaveClass('battle-server-copy');
+    expect(
+      screen.getByRole('heading', { name: botName })
+    ).toHaveClass('battle-server-copy');
+    expect(screen.getByText(moveName)).toHaveClass('battle-server-copy');
+    expect(screen.getByText(logMessage)).toHaveClass('battle-server-copy');
+
+    await user.click(
+      screen.getByRole('button', { name: new RegExp(`^${moveName}`) })
+    );
+    expect(
+      within(await screen.findByRole('alert')).getByText(errorMessage)
+    ).toHaveClass('battle-server-copy');
   });
 
   it('submits the current expected turn once on double click and locks every command', async () => {

@@ -1008,6 +1008,28 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.battle-server-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.battle-page,
+.battle-select > *,
+.battle-ready,
+.battle-console,
+.battle-arena > *,
+.fighter-panel,
+.intent-panel,
+.move-title,
+.move-facts,
+.battle-command-error > *,
+.battle-log,
+.battle-log li,
+.battle-log-meta {
+  min-width: 0;
+}
+
 .battle-select {
   align-items: start;
 }
@@ -1228,12 +1250,13 @@ textarea {
   text-transform: none;
 }
 
-.battle-actions .battle-move button:hover:not(:disabled) {
+.battle-actions .battle-move button:hover:not(:disabled):not([aria-disabled="true"]) {
   border-color: var(--color-primary);
   background: rgba(165, 230, 109, 0.08);
 }
 
 .battle-actions .battle-move button:disabled,
+.battle-actions .battle-move button[aria-disabled="true"],
 .battle-abandon:disabled,
 .battle-result-actions button:disabled {
   cursor: not-allowed;

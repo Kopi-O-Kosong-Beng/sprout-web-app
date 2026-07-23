@@ -1,4 +1,5 @@
 import fc from 'fast-check';
+import { MAX_BATTLE_ENERGY } from '../data/battle-rules';
 import {
   abandonBattle,
   createBattle,
@@ -53,7 +54,7 @@ function assertSessionBounds(session: BattleSession): void {
     expect(participant.currentHp).toBeGreaterThanOrEqual(0);
     expect(participant.currentHp).toBeLessThanOrEqual(participant.maxHp);
     expect(participant.energy).toBeGreaterThanOrEqual(0);
-    expect(participant.energy).toBeLessThanOrEqual(2);
+    expect(participant.energy).toBeLessThanOrEqual(MAX_BATTLE_ENERGY);
   }
 
   const terminalEvents = session.log
@@ -138,7 +139,8 @@ describe('battle engine invariants', () => {
             if (session.status !== 'active') break;
 
             const requested = ['quick', 'guard', 'signature', 'photosynthesis'][choice];
-            const canUseSignature = session.player.energy >= 2;
+            const canUseSignature =
+              session.player.energy >= MAX_BATTLE_ENERGY;
             const canHeal =
               !session.player.healUsed && session.player.currentHp < session.player.maxHp;
             const moveId =

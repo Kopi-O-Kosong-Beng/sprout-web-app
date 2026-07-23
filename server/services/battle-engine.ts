@@ -4,6 +4,7 @@ import {
   MOVE_CATALOG_VERSION,
   NPC_PRESET_VERSION,
 } from '../data/battle-catalog';
+import { MAX_BATTLE_ENERGY } from '../data/battle-rules';
 import type {
   BattleActor,
   BattleEvent,
@@ -18,7 +19,6 @@ import type {
 } from '../models/battle';
 import { nextRandom } from './seeded-rng';
 
-const MAX_ENERGY = 2;
 const HEAL_WEIGHT_BELOW_FORTY_PERCENT = 3;
 
 function cloneParticipant(participant: BattleParticipant): BattleParticipant {
@@ -255,7 +255,10 @@ function executeMove(
   });
 
   if (move.kind === 'guard') {
-    participant.energy = Math.min(MAX_ENERGY, participant.energy + move.energyGain);
+    participant.energy = Math.min(
+      MAX_BATTLE_ENERGY,
+      participant.energy + move.energyGain
+    );
     return;
   }
 
@@ -276,7 +279,10 @@ function executeMove(
   }
 
   participant.energy = Math.max(0, participant.energy - move.energyCost);
-  participant.energy = Math.min(MAX_ENERGY, participant.energy + move.energyGain);
+  participant.energy = Math.min(
+    MAX_BATTLE_ENERGY,
+    participant.energy + move.energyGain
+  );
   const accuracyRoll = nextRandom(session.rngState);
   session.rngState = accuracyRoll.state;
   session.rngStep += 1;

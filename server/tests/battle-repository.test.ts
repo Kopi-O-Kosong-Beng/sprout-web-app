@@ -1,4 +1,5 @@
 import { Timestamp } from 'firebase-admin/firestore';
+import { MAX_BATTLE_ENERGY } from '../data/battle-rules';
 import { getDb } from '../firebase';
 import type { AuthUserProfile } from '../models/auth';
 import type { BattleSession } from '../models/battle';
@@ -751,6 +752,11 @@ const malformedBattleCases: Array<{
   { name: 'avatar relationship', mutate: (document) => (document.avatarId = 'other') },
   { name: 'bot identity', mutate: (document) => (document.bot.id = 'other-bot') },
   {
+    name: 'bot sprite contract',
+    mutate: (document) =>
+      (document.bot.spriteUrl = '/static/sprites/thornback.png'),
+  },
+  {
     name: 'participant max HP relationship',
     mutate: (document) => (document.player.maxHp = document.player.stats.hp + 1),
   },
@@ -762,7 +768,11 @@ const malformedBattleCases: Array<{
     name: 'HP bounds',
     mutate: (document) => (document.player.currentHp = document.player.maxHp + 1),
   },
-  { name: 'energy bounds', mutate: (document) => (document.player.energy = 3) },
+  {
+    name: 'energy bounds',
+    mutate: (document) =>
+      (document.player.energy = MAX_BATTLE_ENERGY + 1),
+  },
   { name: 'heal-used type', mutate: (document) => (document.player.healUsed = 'no') },
   {
     name: 'move kind enum',
@@ -993,7 +1003,10 @@ const replayCorruptionCases: Array<{
     name: 'energy history',
     build: makePlayedSession,
     mutate: (document) => {
-      document.player.energy = Math.min(2, document.player.energy + 1);
+      document.player.energy = Math.min(
+        MAX_BATTLE_ENERGY,
+        document.player.energy + 1
+      );
     },
   },
   {

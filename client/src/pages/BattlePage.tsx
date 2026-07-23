@@ -29,7 +29,6 @@ import {
 import { toPlantAvatarData } from '../utils/avatarPresentation';
 
 const ROSTER_PAGE_SIZE = 100;
-const MAX_SUN = 2;
 
 type BattleView =
   | 'loading'
@@ -61,6 +60,15 @@ function routeAvatarId(state: unknown): string | null {
   return id.length > 0 ? id : null;
 }
 
+function isExpiredTemporaryAvatar(
+  avatar: AvatarRecord,
+  nowMilliseconds: number
+): boolean {
+  if (!avatar.isTemporary || avatar.expiresAt === null) return false;
+  const expiresAt = Date.parse(avatar.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt <= nowMilliseconds;
+}
+
 async function fetchAllOwnedAvatars(
   shouldContinue: () => boolean
 ): Promise<AvatarRecord[]> {
@@ -90,9 +98,17 @@ function viewForSession(session: BattleSession): BattleView {
   return session.status === 'active' ? 'active' : 'terminal';
 }
 
-function boundedSun(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(MAX_SUN, Math.max(0, value));
+function boundedEnergy(
+  value: number,
+  maxEnergy: number
+): { current: number; max: number } {
+  const max =
+    Number.isSafeInteger(maxEnergy) && maxEnergy >= 0 ? maxEnergy : 0;
+  const current =
+    Number.isSafeInteger(value) && value >= 0
+      ? Math.min(max, value)
+      : 0;
+  return { current, max };
 }
 
 function intentMessage(name: string, intent: BattleIntent | null): string {
@@ -136,8 +152,12 @@ function moveDisabledReason(
 ): string | null {
   if (commandLocked) return 'Another battle command is being saved.';
   if (commandFailed) return 'Retry or dismiss the failed command first.';
-  if (move.energyCost > session.player.energy) {
-    return `Needs ${move.energyCost} Sun; ${boundedSun(session.player.energy)} available.`;
+  const playerEnergy = boundedEnergy(
+    session.player.energy,
+    session.player.maxEnergy
+  );
+  if (move.energyCost > playerEnergy.current) {
+    return `Needs ${move.energyCost} Sun; ${playerEnergy.current} available.`;
   }
   if (move.kind === 'heal' && session.player.healUsed) {
     return 'Already used this battle.';
@@ -187,6 +207,28 @@ function retryLabel(command: RetryCommand | null): string {
   }
 }
 
+function ArchiveControl({
+  className,
+  disabled = false,
+}: {
+  className: string;
+  disabled?: boolean;
+}) {
+  if (disabled) {
+    return (
+      <span className={className} aria-disabled="true">
+        Return to Archive
+      </span>
+    );
+  }
+
+  return (
+    <Link className={className} to="/archive">
+      Return to Archive
+    </Link>
+  );
+}
+
 export default function BattlePage() {
   const location = useLocation();
   const preferredAvatarId = useMemo(
@@ -226,10 +268,14 @@ export default function BattlePage() {
     setNotice(null);
 
     try {
-      const nextRecords = await fetchAllOwnedAvatars(
+      const fetchedRecords = await fetchAllOwnedAvatars(
         () => request === requestVersion.current
       );
       if (request !== requestVersion.current) return;
+      const nowMilliseconds = Date.now();
+      const nextRecords = fetchedRecords.filter(
+        (record) => !isExpiredTemporaryAvatar(record, nowMilliseconds)
+      );
       setRecords(nextRecords);
       setSelectedAvatarId(
         preferredAvatarId &&
@@ -398,7 +444,15 @@ export default function BattlePage() {
   const playerAvatar = session
     ? combatAvatar(session, sessionRosterAvatar)
     : null;
+  const playerEnergy = session
+    ? boundedEnergy(session.player.energy, session.player.maxEnergy)
+    : null;
+  const botEnergy = session
+    ? boundedEnergy(session.bot.energy, session.bot.maxEnergy)
+    : null;
   const commandLocked = pendingCommand !== null;
+  const startNavigationLocked =
+    view === 'starting' && pendingCommand === 'start';
   const sessionCommandFailed = view === 'error' && session !== null;
   const showSelection = session === null && view !== 'loading';
 
@@ -431,7 +485,7 @@ export default function BattlePage() {
     <main className="content-page battle-page">
       <section className="page-heading battle-heading">
         <p className="eyebrow">PVE battle lab</p>
-        <h1>
+        <h1 className={session ? 'battle-server-copy' : undefined}>
           {session
             ? `${session.player.name} vs ${session.bot.name}`
             : 'Battle practice'}
@@ -454,7 +508,7 @@ export default function BattlePage() {
       {view === 'error' && retryCommand?.kind === 'load' && (
         <section className="archive-state battle-empty" role="alert">
           <h2>Battle roster unavailable</h2>
-          <p>{error}</p>
+          <p className="battle-server-copy">{error}</p>
           <button
             className="primary-cta archive-retry"
             type="button"
@@ -469,9 +523,7 @@ export default function BattlePage() {
         <section className="archive-state battle-empty">
           <h2>No battle plants yet</h2>
           <p>Collect a plant in your Archive before starting a PVE match.</p>
-          <Link className="primary-cta archive-retry" to="/archive">
-            Return to Archive
-          </Link>
+          <ArchiveControl className="primary-cta archive-retry" />
         </section>
       )}
 
@@ -490,7 +542,7 @@ export default function BattlePage() {
             <div className="battle-command-error" role="alert">
               <div>
                 <strong>Battle command not saved</strong>
-                <p>{error}</p>
+                <p className="battle-server-copy">{error}</p>
               </div>
               <button type="button" onClick={handleRetry}>
                 {retryLabel(retryCommand)}
@@ -520,8 +572,8 @@ export default function BattlePage() {
                   >
                     {avatar.isDemo && <span className="demo-badge">Demo</span>}
                     <PlantAvatar avatar={avatar} />
-                    <span>{avatar.name}</span>
-                    <small>{avatar.species}</small>
+                    <span className="battle-server-copy">{avatar.name}</span>
+                    <small className="battle-server-copy">{avatar.species}</small>
                   </button>
                 ))}
               </div>
@@ -532,8 +584,10 @@ export default function BattlePage() {
                 <>
                   <PlantAvatar avatar={selectedAvatar} large />
                   <p className="eyebrow">Selected combatant</p>
-                  <h2>{selectedAvatar.name} is ready</h2>
-                  <p>
+                  <h2 className="battle-server-copy">
+                    {selectedAvatar.name} is ready
+                  </h2>
+                  <p className="battle-server-copy">
                     {selectedAvatar.species} from {selectedAvatar.family}.
                   </p>
                   <StatGrid avatar={selectedAvatar} compact />
@@ -554,18 +608,17 @@ export default function BattlePage() {
                   >
                     Start Match
                   </button>
-                  <Link className="details-link" to="/archive">
-                    Return to Archive
-                  </Link>
+                  <ArchiveControl
+                    className="details-link"
+                    disabled={startNavigationLocked}
+                  />
                 </>
               ) : (
                 <>
                   <p className="eyebrow">Match setup</p>
                   <h2>Choose an owned plant for this match</h2>
                   <p>Your roster is loaded. Pick one plant to inspect and start.</p>
-                  <Link className="details-link" to="/archive">
-                    Return to Archive
-                  </Link>
+                  <ArchiveControl className="details-link" />
                 </>
               )}
             </aside>
@@ -573,7 +626,7 @@ export default function BattlePage() {
         </>
       )}
 
-      {session && playerAvatar && (
+      {session && playerAvatar && playerEnergy && botEnergy && (
         <>
           {notice?.kind === 'stale' && (
             <p
@@ -588,7 +641,7 @@ export default function BattlePage() {
             <div className="battle-command-error" role="alert">
               <div>
                 <strong>Battle command not saved</strong>
-                <p>{error}</p>
+                <p className="battle-server-copy">{error}</p>
               </div>
               <div className="battle-error-actions">
                 <button type="button" onClick={handleRetry}>
@@ -606,7 +659,7 @@ export default function BattlePage() {
               <article className="fighter-panel user-fighter">
                 <PlantAvatar avatar={playerAvatar} large />
                 <p className="fighter-label">Your plant</p>
-                <h2>{session.player.name}</h2>
+                <h2 className="battle-server-copy">{session.player.name}</h2>
                 <HealthBar
                   label={`${session.player.name} HP`}
                   current={session.player.currentHp}
@@ -614,9 +667,9 @@ export default function BattlePage() {
                 />
                 <p
                   className="sun-meter"
-                  aria-label={`${session.player.name} Sun ${boundedSun(session.player.energy)} of ${MAX_SUN}`}
+                  aria-label={`${session.player.name} Sun ${playerEnergy.current} of ${playerEnergy.max}`}
                 >
-                  Sun {boundedSun(session.player.energy)} / {MAX_SUN}
+                  Sun {playerEnergy.current} / {playerEnergy.max}
                 </p>
               </article>
 
@@ -627,7 +680,9 @@ export default function BattlePage() {
                     <h2>Turn {session.turnNumber}</h2>
                     <div className="intent-panel">
                       <span>Opponent intent</span>
-                      <strong>{intentMessage(session.bot.name, session.botIntent)}</strong>
+                      <strong className="battle-server-copy">
+                        {intentMessage(session.bot.name, session.botIntent)}
+                      </strong>
                     </div>
 
                     {pendingCommand === 'action' && (
@@ -666,18 +721,26 @@ export default function BattlePage() {
                           <div className="battle-move" key={move.id}>
                             <button
                               type="button"
-                              disabled={reason !== null}
+                              disabled={commandLocked}
+                              aria-disabled={
+                                reason !== null && !commandLocked
+                                  ? true
+                                  : undefined
+                              }
                               aria-describedby={reason ? reasonId : undefined}
-                              onClick={() =>
+                              onClick={() => {
+                                if (reason !== null) return;
                                 void runAction(
                                   session.id,
                                   move.id,
                                   session.turnNumber
-                                )
-                              }
+                                );
+                              }}
                             >
                               <span className="move-title">
-                                <strong>{move.name}</strong>
+                                <strong className="battle-server-copy">
+                                  {move.name}
+                                </strong>
                                 <span>{move.kind}</span>
                               </span>
                               <span className="move-facts">
@@ -754,7 +817,7 @@ export default function BattlePage() {
                   spriteUrl={session.bot.spriteUrl}
                 />
                 <p className="fighter-label">Opponent</p>
-                <h2>{session.bot.name}</h2>
+                <h2 className="battle-server-copy">{session.bot.name}</h2>
                 <HealthBar
                   label={`${session.bot.name} HP`}
                   current={session.bot.currentHp}
@@ -762,9 +825,9 @@ export default function BattlePage() {
                 />
                 <p
                   className="sun-meter"
-                  aria-label={`${session.bot.name} Sun ${boundedSun(session.bot.energy)} of ${MAX_SUN}`}
+                  aria-label={`${session.bot.name} Sun ${botEnergy.current} of ${botEnergy.max}`}
                 >
-                  Sun {boundedSun(session.bot.energy)} / {MAX_SUN}
+                  Sun {botEnergy.current} / {botEnergy.max}
                 </p>
               </article>
             </div>
@@ -788,7 +851,7 @@ export default function BattlePage() {
                       <span>{actorLabel(event)}</span>
                       <span>{EVENT_LABELS[event.type]}</span>
                     </div>
-                    <p>{event.message}</p>
+                    <p className="battle-server-copy">{event.message}</p>
                   </li>
                 ))}
               </ol>

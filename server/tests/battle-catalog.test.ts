@@ -1,4 +1,5 @@
 import {
+  createThornback,
   isAllowedPlayerMoveSet,
   resolveBattleMoves,
 } from '../data/battle-catalog';
@@ -50,6 +51,10 @@ const themeCases = [
 ] as const;
 
 describe('battle move catalog', () => {
+  it('uses the client-owned illustration contract for Thornback', () => {
+    expect(createThornback().spriteUrl).toBe('');
+  });
+
   it.each(themeCases)(
     'accepts the complete v1 $theme move set',
     ({ speciesName, speciesFamily, signatureName }) => {

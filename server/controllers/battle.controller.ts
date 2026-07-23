@@ -9,6 +9,7 @@ import type {
   BattleSession,
   BattleStatus,
 } from '../models/battle';
+import { MAX_BATTLE_ENERGY } from '../data/battle-rules';
 import {
   abandonPveBattle,
   getPveBattle,
@@ -24,6 +25,7 @@ export interface PublicBattlePlayer {
   currentHp: number;
   maxHp: number;
   energy: number;
+  maxEnergy: number;
   healUsed: boolean;
   moves: BattleMove[];
 }
@@ -36,6 +38,7 @@ export interface PublicBattleBot {
   currentHp: number;
   maxHp: number;
   energy: number;
+  maxEnergy: number;
   healUsed: boolean;
 }
 
@@ -156,6 +159,7 @@ export function serializeBattleSession(
       currentHp: player.currentHp,
       maxHp: player.maxHp,
       energy: player.energy,
+      maxEnergy: MAX_BATTLE_ENERGY,
       healUsed: player.healUsed,
       moves: player.moves.map(serializeMove),
     },
@@ -167,6 +171,7 @@ export function serializeBattleSession(
       currentHp: bot.currentHp,
       maxHp: bot.maxHp,
       energy: bot.energy,
+      maxEnergy: MAX_BATTLE_ENERGY,
       healUsed: bot.healUsed,
     },
     botIntent: session.botIntent,

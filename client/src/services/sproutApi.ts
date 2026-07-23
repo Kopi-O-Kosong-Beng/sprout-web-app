@@ -74,6 +74,7 @@ export interface BattlePlayer {
   currentHp: number;
   maxHp: number;
   energy: number;
+  maxEnergy: number;
   healUsed: boolean;
   moves: BattleMove[];
 }
@@ -86,6 +87,7 @@ export interface BattleBot {
   currentHp: number;
   maxHp: number;
   energy: number;
+  maxEnergy: number;
   healUsed: boolean;
 }
 

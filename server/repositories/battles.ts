@@ -3,6 +3,7 @@ import {
   createThornback,
   isAllowedPlayerMoveSet,
 } from '../data/battle-catalog';
+import { MAX_BATTLE_ENERGY } from '../data/battle-rules';
 import { getDb } from '../firebase';
 import type {
   BattleActor,
@@ -36,7 +37,6 @@ import {
 } from './firestore-normalization';
 
 const COLLECTION = 'battle_sessions';
-const MAX_ENERGY = 2;
 const MAX_UINT32 = 0xffff_ffff;
 
 const BATTLE_STATUSES = ['active', 'won', 'lost', 'abandoned'] as const;
@@ -175,6 +175,17 @@ function requireNullableString(
   return requireString(value, fieldName, COLLECTION, documentId);
 }
 
+function requireSpriteUrl(
+  value: unknown,
+  fieldName: string,
+  documentId: string
+): string {
+  if (typeof value !== 'string') {
+    invalid(documentId, `${fieldName} must be a string`);
+  }
+  return value;
+}
+
 function requireNullableIntent(
   value: unknown,
   fieldName: string,
@@ -232,14 +243,14 @@ function decodeMove(
       `${field}.energyGain`,
       documentId,
       0,
-      MAX_ENERGY
+      MAX_BATTLE_ENERGY
     ),
     energyCost: requireSafeInteger(
       data.energyCost,
       `${field}.energyCost`,
       documentId,
       0,
-      MAX_ENERGY
+      MAX_BATTLE_ENERGY
     ),
   };
 
@@ -266,7 +277,7 @@ function decodeMove(
       power: 1,
       accuracy: 85,
       energyGain: 0,
-      energyCost: 2,
+      energyCost: MAX_BATTLE_ENERGY,
     },
     photosynthesis: {
       kind: 'heal',
@@ -331,10 +342,9 @@ function decodeParticipant(
   const participant: BattleParticipant = {
     id: requireString(data.id, `${fieldName}.id`, COLLECTION, documentId),
     name: requireString(data.name, `${fieldName}.name`, COLLECTION, documentId),
-    spriteUrl: requireString(
+    spriteUrl: requireSpriteUrl(
       data.spriteUrl,
       `${fieldName}.spriteUrl`,
-      COLLECTION,
       documentId
     ),
     stats: {
@@ -367,7 +377,7 @@ function decodeParticipant(
       `${fieldName}.energy`,
       documentId,
       0,
-      MAX_ENERGY
+      MAX_BATTLE_ENERGY
     ),
     healUsed: requireBoolean(
       data.healUsed,
