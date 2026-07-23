@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NavigationLockProvider } from '../context/NavigationLockProvider';
 import type { AvatarRecord, PaginatedAvatars } from '../services/sproutApi';
 import ArchivePage from './ArchivePage';
 import BattlePage from './BattlePage';
@@ -96,10 +97,12 @@ function renderArchive({ demoTools = false }: { demoTools?: boolean } = {}) {
   const user = userEvent.setup();
   const view = render(
     <MemoryRouter initialEntries={['/archive']}>
-      <Routes>
-        <Route path="/archive" element={<ArchivePage />} />
-        <Route path="/battle" element={<BattlePage />} />
-      </Routes>
+      <NavigationLockProvider>
+        <Routes>
+          <Route path="/archive" element={<ArchivePage />} />
+          <Route path="/battle" element={<BattlePage />} />
+        </Routes>
+      </NavigationLockProvider>
     </MemoryRouter>
   );
   return { ...view, user };
