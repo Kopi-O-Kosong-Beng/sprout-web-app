@@ -22,6 +22,7 @@ export interface AvatarRecord {
   source: 'mobile' | 'web';
   isTemporary: boolean;
   expiresAt: string | null;
+  battleEligible: boolean;
   stats: AvatarStats;
   metadata: Record<string, unknown> | null;
 }

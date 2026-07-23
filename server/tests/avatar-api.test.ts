@@ -20,6 +20,8 @@ interface SeedAvatarOptions {
   userId?: string;
   speciesName?: string;
   discoveredAt?: string;
+  isTemporary?: boolean;
+  expiresAt?: string | null;
 }
 
 function authorization(userId = OWNER_ID): string {
@@ -34,8 +36,8 @@ async function seedAvatar(options: SeedAvatarOptions): Promise<void> {
     spriteUrl: `/static/sprites/${options.id}.png`,
     discoveredAt: options.discoveredAt ?? '2026-07-20T00:00:00.000Z',
     source: 'mobile',
-    isTemporary: false,
-    expiresAt: null,
+    isTemporary: options.isTemporary ?? false,
+    expiresAt: options.expiresAt ?? null,
     stats: { hp: 100, attack: 52, defense: 61, speed: 48 },
     metadata: { displayName: options.speciesName ?? 'Archive Fern' },
   });
@@ -200,8 +202,53 @@ describe('verified avatar archive API', () => {
       source: 'mobile',
       isTemporary: false,
       expiresAt: null,
+      battleEligible: true,
       stats: { hp: 100, attack: 52, defense: 61, speed: 48 },
       metadata: { displayName: 'Detail Fern' },
+    });
+  });
+
+  it('serializes server-authoritative battle eligibility on list and detail', async () => {
+    await Promise.all([
+      seedAvatar({
+        id: 'eligible-future',
+        speciesName: 'Future Fern',
+        isTemporary: true,
+        expiresAt: '2999-01-01T00:00:00.000Z',
+      }),
+      seedAvatar({
+        id: 'ineligible-expired',
+        speciesName: 'Expired Fern',
+        isTemporary: true,
+        expiresAt: '2020-01-01T00:00:00.000Z',
+      }),
+    ]);
+
+    const list = await request(app)
+      .get('/api/avatar')
+      .set('Authorization', authorization());
+    const detail = await request(app)
+      .get('/api/avatar/ineligible-expired')
+      .set('Authorization', authorization());
+
+    expect(list.status).toBe(200);
+    expect(
+      Object.fromEntries(
+        list.body.items.map(
+          (item: { id: string; battleEligible: boolean }) => [
+            item.id,
+            item.battleEligible,
+          ]
+        )
+      )
+    ).toEqual({
+      'eligible-future': true,
+      'ineligible-expired': false,
+    });
+    expect(detail.status).toBe(200);
+    expect(detail.body).toMatchObject({
+      id: 'ineligible-expired',
+      battleEligible: false,
     });
   });
 

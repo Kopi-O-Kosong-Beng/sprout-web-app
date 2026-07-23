@@ -184,6 +184,13 @@ code {
   cursor: not-allowed;
 }
 
+.brand-link.is-disabled,
+.text-link.is-disabled,
+.text-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .nav-link.is-disabled::after {
   content: none;
 }

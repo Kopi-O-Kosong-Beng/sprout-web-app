@@ -26,6 +26,7 @@ import {
   type BattleMove,
   type BattleSession,
 } from '../services/sproutApi';
+import { useNavigationLock } from '../hooks/useNavigationLock';
 import { toPlantAvatarData } from '../utils/avatarPresentation';
 
 const ROSTER_PAGE_SIZE = 100;
@@ -58,15 +59,6 @@ function routeAvatarId(state: unknown): string | null {
   if (!isRecord(state) || typeof state.avatarId !== 'string') return null;
   const id = state.avatarId.trim();
   return id.length > 0 ? id : null;
-}
-
-function isExpiredTemporaryAvatar(
-  avatar: AvatarRecord,
-  nowMilliseconds: number
-): boolean {
-  if (!avatar.isTemporary || avatar.expiresAt === null) return false;
-  const expiresAt = Date.parse(avatar.expiresAt);
-  return Number.isFinite(expiresAt) && expiresAt <= nowMilliseconds;
 }
 
 async function fetchAllOwnedAvatars(
@@ -231,6 +223,7 @@ function ArchiveControl({
 
 export default function BattlePage() {
   const location = useLocation();
+  const { isNavigationLocked, acquireNavigationLock } = useNavigationLock();
   const preferredAvatarId = useMemo(
     () => routeAvatarId(location.state),
     [location.state]
@@ -248,6 +241,7 @@ export default function BattlePage() {
   >(null);
   const requestVersion = useRef(0);
   const inFlight = useRef(false);
+  const releaseNavigationLock = useRef<(() => void) | null>(null);
 
   const beginRequest = useCallback((): number | null => {
     if (inFlight.current) return null;
@@ -272,9 +266,8 @@ export default function BattlePage() {
         () => request === requestVersion.current
       );
       if (request !== requestVersion.current) return;
-      const nowMilliseconds = Date.now();
       const nextRecords = fetchedRecords.filter(
-        (record) => !isExpiredTemporaryAvatar(record, nowMilliseconds)
+        (record) => record.battleEligible
       );
       setRecords(nextRecords);
       setSelectedAvatarId(
@@ -300,6 +293,8 @@ export default function BattlePage() {
     return () => {
       requestVersion.current += 1;
       inFlight.current = false;
+      releaseNavigationLock.current?.();
+      releaseNavigationLock.current = null;
     };
   }, [loadRoster]);
 
@@ -307,6 +302,8 @@ export default function BattlePage() {
     async (avatarId: string, kind: 'start' | 'replay') => {
       const request = beginRequest();
       if (request === null) return;
+      const releaseLock = acquireNavigationLock();
+      releaseNavigationLock.current = releaseLock;
       setPendingCommand(kind);
       setView('starting');
       setError(null);
@@ -324,11 +321,15 @@ export default function BattlePage() {
         setRetryCommand({ kind, avatarId });
         setView('error');
       } finally {
+        releaseLock();
+        if (releaseNavigationLock.current === releaseLock) {
+          releaseNavigationLock.current = null;
+        }
         if (request === requestVersion.current) setPendingCommand(null);
         finishRequest(request);
       }
     },
-    [beginRequest, finishRequest]
+    [acquireNavigationLock, beginRequest, finishRequest]
   );
 
   const runAction = useCallback(
@@ -451,8 +452,6 @@ export default function BattlePage() {
     ? boundedEnergy(session.bot.energy, session.bot.maxEnergy)
     : null;
   const commandLocked = pendingCommand !== null;
-  const startNavigationLocked =
-    view === 'starting' && pendingCommand === 'start';
   const sessionCommandFailed = view === 'error' && session !== null;
   const showSelection = session === null && view !== 'loading';
 
@@ -610,7 +609,7 @@ export default function BattlePage() {
                   </button>
                   <ArchiveControl
                     className="details-link"
-                    disabled={startNavigationLocked}
+                    disabled={isNavigationLocked}
                   />
                 </>
               ) : (

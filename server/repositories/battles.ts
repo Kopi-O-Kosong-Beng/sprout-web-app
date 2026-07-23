@@ -175,17 +175,6 @@ function requireNullableString(
   return requireString(value, fieldName, COLLECTION, documentId);
 }
 
-function requireSpriteUrl(
-  value: unknown,
-  fieldName: string,
-  documentId: string
-): string {
-  if (typeof value !== 'string') {
-    invalid(documentId, `${fieldName} must be a string`);
-  }
-  return value;
-}
-
 function requireNullableIntent(
   value: unknown,
   fieldName: string,
@@ -342,9 +331,10 @@ function decodeParticipant(
   const participant: BattleParticipant = {
     id: requireString(data.id, `${fieldName}.id`, COLLECTION, documentId),
     name: requireString(data.name, `${fieldName}.name`, COLLECTION, documentId),
-    spriteUrl: requireSpriteUrl(
+    spriteUrl: requireString(
       data.spriteUrl,
       `${fieldName}.spriteUrl`,
+      COLLECTION,
       documentId
     ),
     stats: {

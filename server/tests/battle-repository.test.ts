@@ -752,9 +752,17 @@ const malformedBattleCases: Array<{
   { name: 'avatar relationship', mutate: (document) => (document.avatarId = 'other') },
   { name: 'bot identity', mutate: (document) => (document.bot.id = 'other-bot') },
   {
-    name: 'bot sprite contract',
+    name: 'changed bot sprite contract',
     mutate: (document) =>
-      (document.bot.spriteUrl = '/static/sprites/thornback.png'),
+      (document.bot.spriteUrl = '/static/sprites/thornback-v2.png'),
+  },
+  {
+    name: 'blank player sprite URL',
+    mutate: (document) => (document.player.spriteUrl = ''),
+  },
+  {
+    name: 'blank bot sprite URL',
+    mutate: (document) => (document.bot.spriteUrl = ''),
   },
   {
     name: 'participant max HP relationship',
@@ -1105,6 +1113,20 @@ const replayCorruptionCases: Array<{
 
 describe('battle document decoder invariants', () => {
   beforeEach(clearFirestore);
+
+  it('decodes the original stored thornback-v1 sprite snapshot', async () => {
+    const document = cloneDocument();
+    expect(document.npcPresetVersion).toBe('thornback-v1');
+    expect(document.bot.spriteUrl).toBe('/static/sprites/thornback.png');
+    await getDb().collection('battle_sessions').doc(SESSION_ID).set(document);
+
+    await expect(
+      repositoryAt(ACTION_AT).repository.getOwned(USER_ID, SESSION_ID)
+    ).resolves.toMatchObject({
+      npcPresetVersion: 'thornback-v1',
+      bot: { spriteUrl: '/static/sprites/thornback.png' },
+    });
+  });
 
   it('rejects a malformed owner ID when decoding an observed document', () => {
     const document = cloneDocument();

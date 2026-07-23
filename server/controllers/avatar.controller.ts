@@ -1,8 +1,39 @@
 /** Avatar archive controller — Req 5, tasks.md 5.1/5.2 */
 import type { RequestHandler } from 'express';
+import { isAvatarBattleEligible } from '../data/battle-eligibility';
+import type { AvatarRecord, PaginatedAvatars } from '../models/avatar';
 import avatarRepository from '../repositories/avatars';
 
 const DEFAULT_PAGE_SIZE = 20;
+
+interface PublicAvatarRecord extends AvatarRecord {
+  battleEligible: boolean;
+}
+
+interface PublicPaginatedAvatars
+  extends Omit<PaginatedAvatars, 'items'> {
+  items: PublicAvatarRecord[];
+}
+
+function serializeAvatar(
+  avatar: AvatarRecord,
+  now: Date
+): PublicAvatarRecord {
+  return {
+    ...avatar,
+    battleEligible: isAvatarBattleEligible(avatar, now),
+  };
+}
+
+function serializePage(
+  page: PaginatedAvatars,
+  now: Date
+): PublicPaginatedAvatars {
+  return {
+    ...page,
+    items: page.items.map((avatar) => serializeAvatar(avatar, now)),
+  };
+}
 
 export const handleListAvatars: RequestHandler = async (req, res, next) => {
   try {
@@ -13,7 +44,7 @@ export const handleListAvatars: RequestHandler = async (req, res, next) => {
       Math.max(1, Number(req.query.pageSize) || DEFAULT_PAGE_SIZE)
     );
     const result = await avatarRepository.listByUser(userId, page, pageSize);
-    res.status(200).json(result);
+    res.status(200).json(serializePage(result, new Date()));
   } catch (err) {
     next(err);
   }
@@ -27,7 +58,7 @@ export const handleGetAvatar: RequestHandler = async (req, res, next) => {
       res.status(404).json({ error: 'Avatar not found.' });
       return;
     }
-    res.status(200).json(avatar);
+    res.status(200).json(serializeAvatar(avatar, new Date()));
   } catch (err) {
     next(err);
   }
@@ -36,7 +67,7 @@ export const handleGetAvatar: RequestHandler = async (req, res, next) => {
 export const handleEnableDemoAvatars: RequestHandler = async (req, res, next) => {
   try {
     const result = await avatarRepository.ensureDemoSet(req.user!.uid);
-    res.status(200).json(result);
+    res.status(200).json(serializePage(result, new Date()));
   } catch (err) {
     next(err);
   }
@@ -45,7 +76,7 @@ export const handleEnableDemoAvatars: RequestHandler = async (req, res, next) =>
 export const handleDisableDemoAvatars: RequestHandler = async (req, res, next) => {
   try {
     const result = await avatarRepository.removeDemoSet(req.user!.uid);
-    res.status(200).json(result);
+    res.status(200).json(serializePage(result, new Date()));
   } catch (err) {
     next(err);
   }

@@ -14,6 +14,7 @@ import type {
   BattleSession,
   PaginatedAvatars,
 } from '../services/sproutApi';
+import { NavigationLockProvider } from '../context/NavigationLockProvider';
 import BattlePage from './BattlePage';
 
 const apiMocks = vi.hoisted(() => ({
@@ -76,6 +77,7 @@ function avatar(overrides: Partial<AvatarRecord> = {}): AvatarRecord {
     source: 'mobile',
     isTemporary: false,
     expiresAt: null,
+    battleEligible: true,
     stats: { hp: 132, attack: 54, defense: 88, speed: 57 },
     metadata: { displayName: 'Fern Ward' },
     ...overrides,
@@ -193,10 +195,12 @@ function renderBattle(routeState?: unknown) {
     : '/battle';
   const view = render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/battle" element={<BattlePage />} />
-        <Route path="/archive" element={<p>Owned archive destination</p>} />
-      </Routes>
+      <NavigationLockProvider>
+        <Routes>
+          <Route path="/battle" element={<BattlePage />} />
+          <Route path="/archive" element={<p>Owned archive destination</p>} />
+        </Routes>
+      </NavigationLockProvider>
     </MemoryRouter>
   );
   return { ...view, user };
@@ -297,85 +301,76 @@ describe('BattlePage', () => {
     expect(screen.getByText(/choose an owned plant for this match/i)).toBeVisible();
   });
 
-  it('filters expired temporary avatars before validating the preferred route ID', async () => {
-    const now = Date.parse('2026-07-23T12:00:00.000Z');
-    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);
+  it('uses only server battle eligibility before validating the preferred route ID', async () => {
     apiMocks.listOwnedAvatars.mockResolvedValue({
       items: [
         avatar({
-          id: 'expired-boundary',
+          id: 'ineligible-future',
           isTemporary: true,
-          expiresAt: '2026-07-23T12:00:00.000Z',
-          metadata: { displayName: 'Boundary Bloom' },
+          expiresAt: '2999-01-01T00:00:00.000Z',
+          battleEligible: false,
+          metadata: { displayName: 'Future Locked Fern' },
         }),
         avatar({
-          id: 'invalid-expiry',
+          id: 'eligible-expired',
+          isTemporary: true,
+          expiresAt: '2020-01-01T00:00:00.000Z',
+          battleEligible: true,
+          metadata: { displayName: 'Server Approved Ivy' },
+        }),
+        avatar({
+          id: 'ineligible-permanent',
+          isTemporary: false,
+          expiresAt: null,
+          battleEligible: false,
+          metadata: { displayName: 'Locked Permanent Pine' },
+        }),
+        avatar({
+          id: 'eligible-invalid-expiry',
           isTemporary: true,
           expiresAt: 'not-a-timestamp',
-          metadata: { displayName: 'Invalid Timestamp Ivy' },
-        }),
-        avatar({
-          id: 'permanent-past-expiry',
-          isTemporary: false,
-          expiresAt: '2020-01-01T00:00:00.000Z',
-          metadata: { displayName: 'Permanent Pine' },
-        }),
-        avatar({
-          id: 'temporary-no-expiry',
-          isTemporary: true,
-          expiresAt: null,
-          metadata: { displayName: 'Open End Orchid' },
-        }),
-        avatar({
-          id: 'temporary-future',
-          isTemporary: true,
-          expiresAt: '2026-07-23T12:00:00.001Z',
-          metadata: { displayName: 'Future Fern' },
+          battleEligible: true,
+          metadata: { displayName: 'Legacy Timestamp Orchid' },
         }),
       ],
-      total: 5,
+      total: 4,
       page: 1,
       pageSize: 100,
     });
 
-    renderBattle({ avatarId: 'expired-boundary' });
+    renderBattle({ avatarId: 'ineligible-future' });
 
     expect(
       await screen.findByRole('button', {
-        name: /select invalid timestamp ivy/i,
+        name: /select server approved ivy/i,
       })
     ).toBeVisible();
     expect(
-      screen.getByRole('button', { name: /select permanent pine/i })
+      screen.getByRole('button', { name: /select legacy timestamp orchid/i })
     ).toBeVisible();
+    expect(screen.queryByText(/future locked fern/i)).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /select open end orchid/i })
-    ).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: /select future fern/i })
-    ).toBeVisible();
-    expect(screen.queryByText(/boundary bloom/i)).not.toBeInTheDocument();
+      screen.queryByText(/locked permanent pine/i)
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /start match/i })
     ).not.toBeInTheDocument();
-
-    dateNow.mockRestore();
   });
 
-  it('shows the true empty-roster path when only expired temporary avatars remain', async () => {
-    const now = Date.parse('2026-07-23T12:00:00.000Z');
-    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);
+  it('shows the true empty-roster path when every avatar is server-ineligible', async () => {
     apiMocks.listOwnedAvatars.mockResolvedValue({
       items: [
         avatar({
-          id: 'expired-before-now',
+          id: 'future-but-ineligible',
           isTemporary: true,
-          expiresAt: '2026-07-23T11:59:59.999Z',
+          expiresAt: '2999-01-01T00:00:00.000Z',
+          battleEligible: false,
         }),
         avatar({
-          id: 'expired-at-now',
-          isTemporary: true,
-          expiresAt: '2026-07-23T12:00:00.000Z',
+          id: 'permanent-but-ineligible',
+          isTemporary: false,
+          expiresAt: null,
+          battleEligible: false,
         }),
       ],
       total: 2,
@@ -383,7 +378,7 @@ describe('BattlePage', () => {
       pageSize: 100,
     });
 
-    renderBattle({ avatarId: 'expired-at-now' });
+    renderBattle({ avatarId: 'future-but-ineligible' });
 
     expect(
       await screen.findByRole('heading', { name: /no battle plants yet/i })
@@ -391,8 +386,6 @@ describe('BattlePage', () => {
     expect(
       screen.queryByRole('button', { name: /start match/i })
     ).not.toBeInTheDocument();
-
-    dateNow.mockRestore();
   });
 
   it('shows an empty-roster path when the user owns no avatars', async () => {
@@ -461,9 +454,11 @@ describe('BattlePage', () => {
           { pathname: '/battle', state: { avatarId: 'fern-1' } },
         ]}
       >
-        <Routes>
-          <Route path="/battle" element={<RouteStateHarness />} />
-        </Routes>
+        <NavigationLockProvider>
+          <Routes>
+            <Route path="/battle" element={<RouteStateHarness />} />
+          </Routes>
+        </NavigationLockProvider>
       </MemoryRouter>
     );
 

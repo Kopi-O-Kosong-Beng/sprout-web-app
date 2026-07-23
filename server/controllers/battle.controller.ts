@@ -17,6 +17,8 @@ import {
   submitPveAction,
 } from '../services/battle.service';
 
+const PUBLIC_BOT_SPRITE_URL = '';
+
 export interface PublicBattlePlayer {
   id: string;
   name: string;
@@ -166,7 +168,7 @@ export function serializeBattleSession(
     bot: {
       id: bot.id,
       name: bot.name,
-      spriteUrl: bot.spriteUrl,
+      spriteUrl: PUBLIC_BOT_SPRITE_URL,
       stats: { ...bot.stats },
       currentHp: bot.currentHp,
       maxHp: bot.maxHp,

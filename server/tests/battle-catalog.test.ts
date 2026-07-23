@@ -51,8 +51,10 @@ const themeCases = [
 ] as const;
 
 describe('battle move catalog', () => {
-  it('uses the client-owned illustration contract for Thornback', () => {
-    expect(createThornback().spriteUrl).toBe('');
+  it('preserves the original stored sprite contract for Thornback', () => {
+    expect(createThornback().spriteUrl).toBe(
+      '/static/sprites/thornback.png'
+    );
   });
 
   it.each(themeCases)(

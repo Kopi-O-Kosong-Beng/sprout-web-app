@@ -175,7 +175,7 @@ export function createThornback(): BattleParticipant {
   return {
     id: 'thornback',
     name: 'Thornback',
-    spriteUrl: '',
+    spriteUrl: '/static/sprites/thornback.png',
     stats: { hp: 124, attack: 58, defense: 55, speed: 46 },
     currentHp: 124,
     maxHp: 124,

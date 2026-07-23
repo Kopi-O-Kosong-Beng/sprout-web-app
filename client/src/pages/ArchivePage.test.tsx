@@ -31,6 +31,7 @@ function avatar(overrides: Partial<AvatarRecord> = {}): AvatarRecord {
     source: 'mobile',
     isTemporary: false,
     expiresAt: null,
+    battleEligible: true,
     stats: { hp: 132, attack: 54, defense: 88, speed: 57 },
     metadata: { displayName: 'Fern Ward' },
     ...overrides,

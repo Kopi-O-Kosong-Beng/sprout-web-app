@@ -281,7 +281,7 @@ describe('verified PVE battle API', () => {
       userId,
       avatarId,
       player: { name: 'Sunbeam' },
-      bot: { spriteUrl: '' },
+      bot: { spriteUrl: '/static/sprites/thornback.png' },
       rngSeed: expect.any(Number),
       rngStep: 1,
       pendingBotMoveId: expect.any(String),
@@ -400,6 +400,41 @@ describe('verified PVE battle API', () => {
     expect(foreign.status).toBe(404);
     expect(missing.body).toEqual({ error: 'Battle session not found.' });
     expect(foreign.body).toEqual(missing.body);
+  });
+
+  it('keeps stored thornback-v1 sessions compatible across GET, action, and abandon', async () => {
+    const started = await startBattle();
+    const rawSession = await readRawSession(started.body.id);
+
+    expect(rawSession).toMatchObject({
+      npcPresetVersion: 'thornback-v1',
+      bot: { spriteUrl: '/static/sprites/thornback.png' },
+    });
+
+    const read = await request(app)
+      .get(`/api/battle/pve/${started.body.id}`)
+      .set('Authorization', authorization(userId));
+    const action = await request(app)
+      .post(`/api/battle/pve/${started.body.id}/action`)
+      .set('Authorization', authorization(userId))
+      .send({ moveId: 'guard', expectedTurn: 1 });
+    const abandoned = await request(app)
+      .post(`/api/battle/pve/${started.body.id}/abandon`)
+      .set('Authorization', authorization(userId))
+      .send({});
+
+    expect(read.status).toBe(200);
+    expect(action.status).toBe(200);
+    expect(abandoned.status).toBe(200);
+    for (const session of [
+      started.body,
+      read.body,
+      action.body.session,
+      abandoned.body,
+    ]) {
+      expectPublicSession(session);
+      expect(session.bot.spriteUrl).toBe('');
+    }
   });
 
   it('strictly rejects empty or malformed session IDs and action bodies', async () => {

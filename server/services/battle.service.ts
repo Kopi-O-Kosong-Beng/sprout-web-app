@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { isAvatarBattleEligible } from '../data/battle-eligibility';
 import type { AvatarRecord, AvatarRepository } from '../models/avatar';
 import type { BattleSession } from '../models/battle';
 import avatarRepository from '../repositories/avatars';
@@ -124,12 +125,6 @@ function currentInstant(clock: () => Date): { date: Date; iso: string } {
   return { date, iso: date.toISOString() };
 }
 
-function isExpiredTemporary(avatar: AvatarRecord, now: Date): boolean {
-  if (!avatar.isTemporary || avatar.expiresAt === null) return false;
-  const expiresAt = Date.parse(avatar.expiresAt);
-  return Number.isFinite(expiresAt) && expiresAt <= now.getTime();
-}
-
 function avatarDisplayName(avatar: AvatarRecord): string {
   const candidate = avatar.metadata?.displayName;
   return typeof candidate === 'string' && candidate.trim().length > 0
@@ -153,7 +148,7 @@ export function createBattleService(
         if (!avatar) throw avatarNotFound();
 
         const now = currentInstant(clock);
-        if (isExpiredTemporary(avatar, now.date)) throw avatarNotFound();
+        if (!isAvatarBattleEligible(avatar, now.date)) throw avatarNotFound();
 
         const session = createBattle({
           id: validateSessionId(generateSessionId()),
