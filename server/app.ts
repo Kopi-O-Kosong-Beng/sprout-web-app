@@ -24,15 +24,16 @@ export function resolveTrustProxy(
 
 app.set('trust proxy', resolveTrustProxy());
 
-// 9.1 CORS — dev frontend origin only (Req 11.4).
-// Extra origins here are for manual browser testing (e.g. test.html served via
-// Live Server on :5500) — the real client always runs on 5173, and production
-// CORS_ORIGIN should be a single trusted origin, not this list.
+// 9.1 CORS — local frontend origins only (Req 11.4).
+// Vite normally uses :5173, but the local email configuration may intentionally
+// use :5180. Production remains restricted to its single configured origin.
 const devOrigins = [
-  process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+  'http://localhost:5173',
+  'http://localhost:5180',
+  process.env.CORS_ORIGIN,
   'http://localhost:5500',
   'http://127.0.0.1:5500',
-];
+].filter((origin): origin is string => Boolean(origin));
 app.use(
   cors({
     origin:
