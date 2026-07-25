@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { requestPasswordReset, verifyPasswordReset } from '../services/sproutApi';
 import { extractApiError } from '../services/apiClient';
@@ -10,7 +10,6 @@ type Mode = 'login' | 'reset-request' | 'reset-verify';
 
 export default function LoginPage() {
   const { status, login } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as { from?: string } | null)?.from ?? '/';
 
@@ -30,7 +29,10 @@ export default function LoginPage() {
 
   // Already signed in (Firebase session exists) — don't let this render the
   // login form again; only a logout should bring the user back here.
-  if (status === 'authenticated' || status === 'unverified') {
+  if (status === 'unverified') {
+    return <Navigate to="/verify-email" state={{ from }} replace />;
+  }
+  if (status === 'authenticated') {
     return <Navigate to={from} replace />;
   }
 
@@ -46,7 +48,6 @@ export default function LoginPage() {
     setError(null);
     try {
       await login(email.trim(), password);
-      navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed.');
     } finally {
@@ -60,9 +61,7 @@ export default function LoginPage() {
     setError(null);
     try {
       const res = await requestPasswordReset(email.trim());
-      setNotice(
-        `${res.message} With EMAIL_MODE=console the 6-digit code is printed in the backend terminal.`
-      );
+      setNotice(res.message);
       setMode('reset-verify');
     } catch (err) {
       setError(extractApiError(err, 'Could not request a reset code.'));

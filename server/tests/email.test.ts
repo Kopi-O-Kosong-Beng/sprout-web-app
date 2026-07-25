@@ -1,13 +1,9 @@
-/** Unit tests for the shared email service — the delivery seam behind
- *  UC1 (signup verification link), UC3 (reset OTP), and UC8 (ticket emails).
- *  Nodemailer is mocked; no real SMTP connection is ever made.
- *
- *  The service caches its transporter at module level, so each test that
- *  cares about transport construction re-imports a fresh copy via
- *  jest.resetModules() in beforeEach. */
-
+const mockVerify = jest.fn();
 const mockSendMail = jest.fn();
-const mockCreateTransport = jest.fn(() => ({ sendMail: mockSendMail }));
+const mockCreateTransport = jest.fn(() => ({
+  verify: mockVerify,
+  sendMail: mockSendMail,
+}));
 
 jest.mock('nodemailer', () => ({
   __esModule: true,
@@ -34,8 +30,10 @@ const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
   jest.resetModules();
+  jest.clearAllMocks();
+  mockVerify.mockReset();
   mockSendMail.mockReset().mockResolvedValue({ messageId: 'test-message' });
-  mockCreateTransport.mockClear();
+
   for (const key of EMAIL_ENV_KEYS) {
     savedEnv[key] = process.env[key];
     delete process.env[key];
@@ -43,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  jest.restoreAllMocks();
   for (const key of EMAIL_ENV_KEYS) {
     if (savedEnv[key] === undefined) delete process.env[key];
     else process.env[key] = savedEnv[key];
@@ -51,17 +50,66 @@ afterEach(() => {
 
 const payload = { to: 'user@example.com', subject: 'Hello', text: 'Body text' };
 
-describe('email.service send() — console mode', () => {
-  it('logs the email and reports delivered without touching nodemailer', async () => {
+describe('email transport', () => {
+  it('logs safely in console mode without constructing SMTP', async () => {
+    process.env.EMAIL_MODE = 'console';
+    const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const { send } = await import('../services/email.service');
+    await expect(send({ to: 'a@example.com', subject: 'Subject', text: 'Body' }))
+      .resolves.toEqual({ delivered: true, mode: 'console' });
+    expect(log).toHaveBeenCalled();
+    expect(mockCreateTransport).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it('rejects missing SMTP configuration with the missing key name only', async () => {
+    process.env.EMAIL_MODE = 'smtp';
+    const { verifyEmailTransport } = await import('../services/email.service');
+    await expect(verifyEmailTransport()).rejects.toThrow('SMTP_HOST');
+  });
+
+  it('verifies and sends through configured SMTP', async () => {
+    process.env.EMAIL_MODE = 'smtp';
+    process.env.SMTP_HOST = 'smtp.gmail.com';
+    process.env.SMTP_PORT = '587';
+    process.env.SMTP_USER = 'hello.sprout.team@gmail.com';
+    process.env.SMTP_PASS = 'test-app-password';
+    process.env.EMAIL_FROM = 'hello.sprout.team@gmail.com';
+    mockVerify.mockResolvedValue(true);
+    mockSendMail.mockResolvedValue({ messageId: 'test-id' });
+    const { send, verifyEmailTransport } = await import('../services/email.service');
+    await expect(verifyEmailTransport()).resolves.toEqual({ mode: 'smtp', verified: true });
+    await expect(send({ to: 'a@example.com', subject: 'Subject', text: 'Body' }))
+      .resolves.toEqual({ delivered: true, mode: 'smtp' });
+    expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({
+      from: 'hello.sprout.team@gmail.com',
+      to: 'a@example.com',
+    }));
+  });
+});
+
+describe('email.service send() - console mode', () => {
+  it('logs delivery metadata without exposing message content', async () => {
     process.env.EMAIL_MODE = 'console';
     const logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    const sensitivePayload = {
+      to: 'user@example.com',
+      subject: 'Sensitive delivery',
+      text: 'OTP 123456 oobCode=secret-action-code private ticket message',
+    };
 
     const send = await freshSend();
-    const result = await send(payload);
+    const result = await send(sensitivePayload);
 
     expect(result).toEqual({ delivered: true, mode: 'console' });
-    expect(logSpy.mock.calls.flat().join('\n')).toContain('user@example.com');
-    expect(logSpy.mock.calls.flat().join('\n')).toContain('Body text');
+    const logText = logSpy.mock.calls.flat().join('\n');
+    expect(logText).toContain('to=user@example.com');
+    expect(logText).toContain('subject="Sensitive delivery"');
+    expect(logText).toContain('mode=console');
+    expect(logText).toContain('delivered=true');
+    expect(logText).not.toContain('123456');
+    expect(logText).not.toContain('secret-action-code');
+    expect(logText).not.toContain('private ticket message');
     expect(mockCreateTransport).not.toHaveBeenCalled();
     logSpy.mockRestore();
   });
@@ -73,21 +121,22 @@ describe('email.service send() — console mode', () => {
     const result = await send(payload);
 
     expect(result.mode).toBe('console');
+    expect(mockCreateTransport).not.toHaveBeenCalled();
     logSpy.mockRestore();
   });
 });
 
-describe('email.service send() — smtp mode', () => {
+describe('email.service send() - smtp mode', () => {
   function setSmtpEnv(overrides: Record<string, string | undefined> = {}) {
     process.env.EMAIL_MODE = 'smtp';
     process.env.SMTP_HOST = 'smtp.gmail.com';
     process.env.SMTP_PORT = '587';
-    process.env.SMTP_USER = 'sproutteamadmin@gmail.com';
+    process.env.SMTP_USER = 'hello.sprout.team@gmail.com';
     process.env.SMTP_PASS = 'app-password';
-    process.env.EMAIL_FROM = 'sproutteamadmin@gmail.com';
-    for (const [k, v] of Object.entries(overrides)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
+    process.env.EMAIL_FROM = 'hello.sprout.team@gmail.com';
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
     }
   }
 
@@ -101,10 +150,10 @@ describe('email.service send() — smtp mode', () => {
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
-      auth: { user: 'sproutteamadmin@gmail.com', pass: 'app-password' },
+      auth: { user: 'hello.sprout.team@gmail.com', pass: 'app-password' },
     });
     expect(mockSendMail).toHaveBeenCalledWith({
-      from: 'sproutteamadmin@gmail.com',
+      from: 'hello.sprout.team@gmail.com',
       to: payload.to,
       subject: payload.subject,
       text: payload.text,
@@ -127,7 +176,7 @@ describe('email.service send() — smtp mode', () => {
     await send(payload);
 
     expect(mockSendMail).toHaveBeenCalledWith(
-      expect.objectContaining({ from: 'sproutteamadmin@gmail.com' })
+      expect.objectContaining({ from: 'hello.sprout.team@gmail.com' })
     );
   });
 
@@ -154,10 +203,45 @@ describe('email.service send() — smtp mode', () => {
   });
 });
 
-describe('email.service send() — invalid mode', () => {
+describe('email.service send() - invalid mode', () => {
   it('rejects an unsupported EMAIL_MODE with a clear error', async () => {
     process.env.EMAIL_MODE = 'carrier-pigeon';
     const send = await freshSend();
     await expect(send(payload)).rejects.toThrow('Unsupported EMAIL_MODE: carrier-pigeon');
+  });
+});
+
+describe('check-email command', () => {
+  it('preserves the explicit missing-environment message', async () => {
+    process.env.EMAIL_MODE = 'smtp';
+    const error = jest.fn();
+    const { runEmailCheck } = await import('../scripts/check-email');
+
+    const exitCode = await runEmailCheck({ error, log: jest.fn() });
+
+    expect(exitCode).toBe(1);
+    expect(error).toHaveBeenCalledWith(
+      '[email-check] failed: Missing required email env var: SMTP_HOST (required when EMAIL_MODE=smtp)'
+    );
+  });
+
+  it('maps secret-bearing transport exceptions to a stable failure message', async () => {
+    const secret = 'smtp-password=transport-secret';
+    const error = jest.fn();
+    const { runEmailCheck } = await import('../scripts/check-email');
+
+    const exitCode = await runEmailCheck({
+      verify: async () => {
+        throw new Error(secret);
+      },
+      error,
+      log: jest.fn(),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(error).toHaveBeenCalledWith(
+      '[email-check] failed: transport_verification_failed'
+    );
+    expect(error.mock.calls.flat().join('\n')).not.toContain(secret);
   });
 });

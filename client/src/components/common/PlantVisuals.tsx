@@ -1,7 +1,5 @@
-/** Shared illustrative visuals + sample data from the static design draft.
- *  The plantAvatars list is showcase data for the still-static Archive/Battle
- *  pages — the real archive will read GET /api/avatar in a later slice.
- */
+/** Shared plant visuals and sample data for the remaining static previews. */
+import { useState } from 'react';
 
 export interface PlantAvatarData {
   id: string;
@@ -14,6 +12,8 @@ export interface PlantAvatarData {
   defense: number;
   speed: number;
   color: string;
+  spriteUrl?: string;
+  isDemo?: boolean;
 }
 
 export const plantAvatars: PlantAvatarData[] = [
@@ -86,26 +86,74 @@ export function PlantAvatar({
   avatar: PlantAvatarData;
   large?: boolean;
 }) {
+  const [failedSpriteUrl, setFailedSpriteUrl] = useState<string | null>(null);
+  const spriteUrl = avatar.spriteUrl?.trim();
+  const showSprite = Boolean(spriteUrl && spriteUrl !== failedSpriteUrl);
+
   return (
-    <span className={large ? `plant-avatar ${avatar.color} large` : `plant-avatar ${avatar.color}`}>
-      <span className="leaf left" />
-      <span className="leaf right" />
-      <span className="face">
-        <span />
-        <span />
-      </span>
-      <span className="pot" />
+    <span
+      className={`${large ? `plant-avatar ${avatar.color} large` : `plant-avatar ${avatar.color}`}${showSprite ? ' has-sprite' : ''}`}
+      role="img"
+      aria-label={`${avatar.name} avatar`}
+    >
+      {showSprite ? (
+        <img
+          className="plant-sprite"
+          src={spriteUrl}
+          alt=""
+          draggable={false}
+          onError={() => setFailedSpriteUrl(spriteUrl ?? null)}
+        />
+      ) : (
+        <>
+          <span className="leaf left" />
+          <span className="leaf right" />
+          <span className="face">
+            <span />
+            <span />
+          </span>
+          <span className="pot" />
+        </>
+      )}
     </span>
   );
 }
 
-export function BotAvatar() {
+export function BotAvatar({
+  name,
+  spriteUrl,
+}: {
+  name: string;
+  spriteUrl?: string;
+}) {
+  const [failedSpriteUrl, setFailedSpriteUrl] = useState<string | null>(null);
+  const normalizedSpriteUrl = spriteUrl?.trim();
+  const showSprite = Boolean(
+    normalizedSpriteUrl && normalizedSpriteUrl !== failedSpriteUrl
+  );
+
   return (
-    <span className="bot-avatar">
-      <span className="thorn left" />
-      <span className="thorn right" />
-      <span className="bot-eyes" />
-      <span className="pot" />
+    <span
+      className={showSprite ? 'bot-avatar has-sprite' : 'bot-avatar'}
+      role="img"
+      aria-label={`${name} avatar`}
+    >
+      {showSprite ? (
+        <img
+          className="bot-sprite"
+          src={normalizedSpriteUrl}
+          alt=""
+          draggable={false}
+          onError={() => setFailedSpriteUrl(normalizedSpriteUrl ?? null)}
+        />
+      ) : (
+        <>
+          <span className="thorn left" />
+          <span className="thorn right" />
+          <span className="bot-eyes" />
+          <span className="pot" />
+        </>
+      )}
     </span>
   );
 }
@@ -174,14 +222,37 @@ export function StatGrid({
   );
 }
 
-export function HealthBar({ label, value }: { label: string; value: number }) {
+export function HealthBar({
+  label,
+  current,
+  max,
+}: {
+  label: string;
+  current: number;
+  max: number;
+}) {
+  const boundedMax = Number.isFinite(max) ? Math.max(0, max) : 0;
+  const boundedCurrent = Number.isFinite(current)
+    ? Math.min(Math.max(0, current), boundedMax)
+    : 0;
+  const percentage = boundedMax > 0 ? (boundedCurrent / boundedMax) * 100 : 0;
+
   return (
-    <div className="health-meter" aria-label={`${label} ${value} percent`}>
-      <span>{label}</span>
+    <div
+      className="health-meter"
+      role="progressbar"
+      aria-label={`${label} ${boundedCurrent} of ${boundedMax}`}
+      aria-valuemin={0}
+      aria-valuemax={boundedMax}
+      aria-valuenow={boundedCurrent}
+    >
+      <span>HP</span>
       <div>
-        <i style={{ width: `${value}%` }} />
+        <i style={{ width: `${percentage}%` }} />
       </div>
-      <strong>{value}%</strong>
+      <strong>
+        {boundedCurrent} / {boundedMax}
+      </strong>
     </div>
   );
 }

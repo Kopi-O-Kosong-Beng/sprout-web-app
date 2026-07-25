@@ -1,22 +1,26 @@
-/** T05 — query ticket integration (tasks.md 18.4 head start).
- *  Uses a throwaway SQLite file (set in setup-env.ts) so dev data is never touched. */
-import fs from 'fs';
-import path from 'path';
+/** T05 query ticket integration against the local Firestore Emulator. */
 import request from 'supertest';
+jest.mock('../services/email.service', () => ({ send: jest.fn() }));
+import { send as sendEmail } from '../services/email.service';
 import app from '../app';
-import db from '../database/db';
+import { getDb } from '../firebase';
+import ticketRepository from '../repositories/tickets';
+import { clearFirestore } from './firestore-test-utils';
 
-beforeAll(async () => {
-  await db.migrate.latest();
-});
+const mockSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
 
-afterAll(async () => {
-  await db.destroy();
-  const f = path.join(__dirname, '..', 'database', 'sprout.test.sqlite3');
-  [f, `${f}-shm`, `${f}-wal`].forEach((p) => {
-    if (fs.existsSync(p)) fs.unlinkSync(p);
-  });
-});
+async function readTicketByReference(
+  refNumber: string
+): Promise<FirebaseFirestore.DocumentData | undefined> {
+  const snapshot = await getDb()
+    .collection('query_tickets')
+    .where('refNumber', '==', refNumber)
+    .limit(1)
+    .get();
+  return snapshot.empty ? undefined : snapshot.docs[0].data();
+}
+
+beforeEach(clearFirestore);
 
 describe('GET /api/health', () => {
   it('returns ok with a timestamp', async () => {
@@ -35,14 +39,16 @@ describe('POST /api/query/submit (T05)', () => {
     message: 'Hello Sprout team!',
   };
 
+  beforeEach(() => {
+    mockSendEmail.mockReset();
+  });
+
   it('creates a ticket, returns 201 + SPR-YYYYMMDD-NNNN, persists the row', async () => {
     const res = await request(app).post('/api/query/submit').send(valid);
     expect(res.status).toBe(201);
     expect(res.body.refNumber).toMatch(/^SPR-\d{8}-\d{4}$/);
 
-    const row = await db('query_tickets')
-      .where({ refNumber: res.body.refNumber })
-      .first();
+    const row = (await readTicketByReference(res.body.refNumber))!;
     expect(row).toBeDefined();
     expect(row.status).toBe('open');
     expect(row.email).toBe(valid.email);
@@ -82,25 +88,106 @@ describe('POST /api/query/submit (T05)', () => {
   });
 
   it('UC8 alt-flow 5a: still returns 201 + persists when email delivery fails', async () => {
-    // EMAIL_MODE=smtp with no SMTP_* vars makes send() throw — the ticket
-    // service must log the failure and complete the request anyway (Req 9.8).
-    const prevMode = process.env.EMAIL_MODE;
-    process.env.EMAIL_MODE = 'smtp';
+    mockSendEmail.mockRejectedValueOnce(new Error('delivery failed'));
+    // The shared email service is mocked so this failure path stays deterministic.
     const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const res = await request(app).post('/api/query/submit').send(valid);
       expect(res.status).toBe(201);
       expect(res.body.refNumber).toMatch(/^SPR-\d{8}-\d{4}$/);
 
-      const row = await db('query_tickets')
-        .where({ refNumber: res.body.refNumber })
-        .first();
+      const row = (await readTicketByReference(res.body.refNumber))!;
       expect(row).toBeDefined();
       expect(
         errSpy.mock.calls.flat().join('\n')
       ).toContain('email delivery failed');
     } finally {
-      process.env.EMAIL_MODE = prevMode;
+      errSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ['submitter fails', [new Error('submitter failed'), { delivered: true, mode: 'smtp' }]],
+    ['admin fails', [{ delivered: true, mode: 'smtp' }, new Error('admin failed')]],
+    ['both fail', [new Error('submitter failed'), new Error('admin failed')]],
+  ])('persists and attempts both notifications when %s', async (_label, outcomes) => {
+    const previousAdminEmail = process.env.ADMIN_EMAIL;
+    delete process.env.ADMIN_EMAIL;
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      for (const outcome of outcomes) {
+        if (outcome instanceof Error) mockSendEmail.mockRejectedValueOnce(outcome);
+        else mockSendEmail.mockResolvedValueOnce(outcome);
+      }
+
+      const res = await request(app).post('/api/query/submit').send(valid);
+
+      expect(res.status).toBe(201);
+      expect(mockSendEmail).toHaveBeenCalledTimes(2);
+      expect(mockSendEmail.mock.calls[1][0].to).toBe('hello.sprout.team@gmail.com');
+      const row = (await readTicketByReference(res.body.refNumber))!;
+      expect(row).toMatchObject({
+        submitterEmailStatus: outcomes[0] instanceof Error ? 'failed' : 'sent',
+        adminEmailStatus: outcomes[1] instanceof Error ? 'failed' : 'sent',
+        lastEmailError: outcomes[0] instanceof Error
+          ? outcomes[1] instanceof Error
+            ? 'submitter_email_delivery_failed;admin_email_delivery_failed'
+            : 'submitter_email_delivery_failed'
+          : 'admin_email_delivery_failed',
+      });
+      expect(errSpy).toHaveBeenCalledTimes(1);
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[ticket] email delivery failed'),
+        expect.any(String)
+      );
+    } finally {
+      if (previousAdminEmail === undefined) delete process.env.ADMIN_EMAIL;
+      else process.env.ADMIN_EMAIL = previousAdminEmail;
+      errSpy.mockRestore();
+    }
+  });
+
+  it('never persists or logs secret-bearing provider rejection text', async () => {
+    const submitterSecret = 'smtp-password=submitter-secret';
+    const adminSecret = 'provider-token=admin-secret';
+    mockSendEmail
+      .mockRejectedValueOnce(new Error(submitterSecret))
+      .mockRejectedValueOnce(new Error(adminSecret));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const res = await request(app).post('/api/query/submit').send(valid);
+      expect(res.status).toBe(201);
+      const row = (await readTicketByReference(res.body.refNumber))!;
+      expect(row.lastEmailError).toBe(
+        'submitter_email_delivery_failed;admin_email_delivery_failed'
+      );
+      const output = errSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('submitter_email_delivery_failed');
+      expect(output).toContain('admin_email_delivery_failed');
+      expect(output).not.toContain(submitterSecret);
+      expect(output).not.toContain(adminSecret);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('never logs raw notification-state persistence errors', async () => {
+    const secret = 'database-url=secret-persistence-value';
+    mockSendEmail.mockResolvedValue({ delivered: true, mode: 'smtp' });
+    const updateSpy = jest
+      .spyOn(ticketRepository, 'updateNotificationState')
+      .mockRejectedValueOnce(new Error(secret));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const res = await request(app).post('/api/query/submit').send(valid);
+      expect(res.status).toBe(201);
+      const output = errSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('notification_status_update_failed');
+      expect(output).not.toContain(secret);
+    } finally {
+      updateSpy.mockRestore();
       errSpy.mockRestore();
     }
   });

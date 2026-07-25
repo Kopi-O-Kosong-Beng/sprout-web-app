@@ -1,5 +1,7 @@
 # Implementation Tasks
 
+> **Historical pre-cutover backlog:** database tasks and SQLite/Knex instructions in this file were superseded by the Firestore-only runtime on 2026-07-22. They remain only as project-history evidence; current implementation work follows `docs/superpowers/plans/2026-07-22-firestore-archive-pve.md`.
+
 > **How to work this file asynchronously** (read `SPECS.md` first):
 > - Each top-level task lists a **suggested owner** — adjust in the team chat, then put your name here.
 > - Branch per task: `feat/task-<n>-<slug>` (e.g. `feat/task-5-avatar-archive`). Merge to `main` via PR when your task's tests pass.

@@ -8,18 +8,32 @@ import errorMiddleware from './middleware/error.middleware';
 import authRoutes from './routes/auth.routes';
 import queryRoutes from './routes/query.routes';
 import avatarRoutes from './routes/avatar.routes';
+import battleRoutes from './routes/battle.routes';
 
 const app = express();
 
-// 9.1 CORS — dev frontend origin only (Req 11.4).
-// Extra origins here are for manual browser testing (e.g. test.html served via
-// Live Server on :5500) — the real client always runs on 5173, and production
-// CORS_ORIGIN should be a single trusted origin, not this list.
+export function resolveTrustProxy(
+  nodeEnv = process.env.NODE_ENV,
+  configuredHops = process.env.TRUST_PROXY_HOPS
+): false | number {
+  if (nodeEnv !== 'production') return false;
+  if (configuredHops === undefined) return 1;
+  const hops = Number(configuredHops);
+  return Number.isInteger(hops) && hops >= 1 && hops <= 5 ? hops : 1;
+}
+
+app.set('trust proxy', resolveTrustProxy());
+
+// 9.1 CORS — local frontend origins only (Req 11.4).
+// Vite normally uses :5173, but the local email configuration may intentionally
+// use :5180. Production remains restricted to its single configured origin.
 const devOrigins = [
-  process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+  'http://localhost:5173',
+  'http://localhost:5180',
+  process.env.CORS_ORIGIN,
   'http://localhost:5500',
   'http://127.0.0.1:5500',
-];
+].filter((origin): origin is string => Boolean(origin));
 app.use(
   cors({
     origin:
@@ -50,6 +64,7 @@ app.get('/api/health', (_req, res) =>
 app.use('/api/auth', authRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/avatar', avatarRoutes);
+app.use('/api/battle/pve', battleRoutes);
 
 // 404 for unknown API paths
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

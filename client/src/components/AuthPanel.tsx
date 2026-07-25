@@ -183,7 +183,7 @@ export default function AuthPanel() {
   async function handleRequestReset() {
     await runAction('request-reset', async () => {
       const res = await requestPasswordReset(resetEmail);
-      return `${res.message}\nRead the 6-digit OTP from the backend EMAIL_MODE=console log.`;
+      return res.message;
     });
   }
 
@@ -334,7 +334,7 @@ export default function AuthPanel() {
             Request OTP
           </button>
           <label>
-            OTP from backend log
+            OTP from email
             <input value={otp} onChange={(e) => setOtp(e.target.value)} required />
           </label>
           <label>

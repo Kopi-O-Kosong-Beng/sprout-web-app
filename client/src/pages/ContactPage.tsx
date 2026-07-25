@@ -62,10 +62,8 @@ export default function ContactPage() {
               Reference number: <strong>{refNumber}</strong>
             </h2>
             <p>
-              Keep this reference for follow-ups. A confirmation email is sent
-              to you and the Sprout team is notified (in dev,{' '}
-              <code>EMAIL_MODE=console</code> prints both to the backend
-              terminal).
+              Your ticket is stored. Keep this reference for follow-ups.
+              Notification delivery to you and the Sprout team has been attempted.
             </p>
             <button
               className="primary-cta form-submit"
@@ -134,8 +132,8 @@ export default function ContactPage() {
           <MiniArchive />
           <h2>What happens next</h2>
           <p>
-            Sprout creates a ticket like SPR-20260712-0001, emails confirmation
-            to the submitter, and notifies the team for follow-up.
+            Sprout stores a ticket like SPR-20260712-0001, then attempts a
+            confirmation email and a team notification for follow-up.
           </p>
         </aside>
       </section>

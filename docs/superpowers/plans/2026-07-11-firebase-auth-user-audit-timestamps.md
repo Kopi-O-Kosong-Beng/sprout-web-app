@@ -1,5 +1,7 @@
 # Firebase Auth User Audit Timestamps Implementation Plan
 
+> Superseded by 2026-07-22 Firestore-only design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Store user login timestamps from Firebase Auth `metadata.lastSignInTime` and logout timestamps from explicit Sprout app logout actions.

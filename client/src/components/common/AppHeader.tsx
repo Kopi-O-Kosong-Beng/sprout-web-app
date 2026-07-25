@@ -1,5 +1,6 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { useNavigationLock } from '../../hooks/useNavigationLock';
 import { SproutMark } from './PlantVisuals';
 
 const navItems = [
@@ -12,31 +13,54 @@ const navItems = [
 
 export default function AppHeader() {
   const { status, profile, firebaseUser, logout } = useAuth();
+  const { isNavigationLocked } = useNavigationLock();
   const navigate = useNavigate();
 
   const signedIn = status === 'authenticated' || status === 'unverified';
   const identity = profile?.displayName ?? firebaseUser?.email ?? 'Account';
 
   async function handleLogout() {
+    if (isNavigationLocked) return;
     await logout();
     navigate('/');
   }
 
+  const navigationDisabledTitle = 'Battle setup is being saved';
+  const brandContent = (
+    <>
+      <SproutMark />
+      <span>Sprout</span>
+    </>
+  );
+
   return (
     <header className="site-header">
-      <Link className="brand-link" to="/">
-        <SproutMark />
-        <span>Sprout</span>
-      </Link>
+      {isNavigationLocked ? (
+        <span
+          className="brand-link is-disabled"
+          aria-disabled="true"
+          title={navigationDisabledTitle}
+        >
+          {brandContent}
+        </span>
+      ) : (
+        <Link className="brand-link" to="/">
+          {brandContent}
+        </Link>
+      )}
 
       <nav className="primary-nav" aria-label="Primary">
         {navItems.map((item) =>
-          item.requiresAuth && !signedIn ? (
+          isNavigationLocked || (item.requiresAuth && !signedIn) ? (
             <span
               key={item.to}
               className="nav-link is-disabled"
               aria-disabled="true"
-              title="Log in to access"
+              title={
+                isNavigationLocked
+                  ? navigationDisabledTitle
+                  : 'Log in to access'
+              }
             >
               {item.label}
             </span>
@@ -61,19 +85,48 @@ export default function AppHeader() {
               {status === 'unverified' && <em> (unverified)</em>}
             </span>
             <span className="header-divider" aria-hidden="true" />
-            <button className="text-link" type="button" onClick={handleLogout}>
+            <button
+              className="text-link"
+              type="button"
+              disabled={isNavigationLocked}
+              aria-disabled={isNavigationLocked || undefined}
+              title={
+                isNavigationLocked ? navigationDisabledTitle : undefined
+              }
+              onClick={handleLogout}
+            >
               Log out
             </button>
           </>
         ) : (
           <>
-            <Link className="text-link" to="/login">
-              Log in
-            </Link>
+            {isNavigationLocked ? (
+              <span
+                className="text-link is-disabled"
+                aria-disabled="true"
+                title={navigationDisabledTitle}
+              >
+                Log in
+              </span>
+            ) : (
+              <Link className="text-link" to="/login">
+                Log in
+              </Link>
+            )}
             <span className="header-divider" aria-hidden="true" />
-            <Link className="text-link" to="/signup">
-              Sign up
-            </Link>
+            {isNavigationLocked ? (
+              <span
+                className="text-link is-disabled"
+                aria-disabled="true"
+                title={navigationDisabledTitle}
+              >
+                Sign up
+              </span>
+            ) : (
+              <Link className="text-link" to="/signup">
+                Sign up
+              </Link>
+            )}
           </>
         )}
       </div>

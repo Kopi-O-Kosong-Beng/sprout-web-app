@@ -35,4 +35,8 @@ export interface AvatarRepository {
   listByUser(userId: string, page: number, pageSize: number): Promise<PaginatedAvatars>;
   /** Returns a single avatar iff it belongs to the caller, else null. */
   getOwned(userId: string, avatarId: string): Promise<AvatarRecord | null>;
+  /** Creates any missing, caller-owned records in the fixed demo set. */
+  ensureDemoSet(userId: string): Promise<PaginatedAvatars>;
+  /** Removes only verified caller-owned records in the fixed demo set. */
+  removeDemoSet(userId: string): Promise<PaginatedAvatars>;
 }

@@ -3,7 +3,7 @@
  * Trigger: PostToolUse on Edit|Write (automatic), or manually:
  *   node scripts/agent-hooks/backend-check.mjs [--full]
  * Automatic mode runs typecheck only (a few seconds). The Jest suite
- * (~20s, SQLite + mocked Firebase — no credentials needed) runs with --full.
+ * (Firestore Emulator + scoped Firebase mocks — no live credentials) runs with --full.
  * Never starts servers. Exit: 0 silent on pass; 2 + stderr on failure.
  */
 import { hasScript, readStdinJson, repoRelative, runNpm, tail } from './hook-lib.mjs';

@@ -193,7 +193,7 @@ That can work, but our current backend would need extra work:
 
 - adapt Express routing to Vercel serverless
 - make sure production bundles Firestore only
-- avoid SQLite/native dependency issues from `better-sqlite3`
+- verify the clean TypeScript build contains only current Firestore runtime code
 - retest Firebase Admin initialization and cold starts
 
 So the decision is:
@@ -249,7 +249,6 @@ Important env vars:
 
 ```text
 NODE_ENV=production
-DATASTORE=firestore
 AUTH_DEV_BYPASS=false
 EMAIL_MODE=console
 USE_MOCK_APIS=true

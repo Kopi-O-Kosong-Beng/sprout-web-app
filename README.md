@@ -71,12 +71,11 @@ cp .env.example server/.env
 Windows option: copy `.env.example` in File Explorer, paste it inside
 `server/`, then rename it to `.env`.
 
-Pick one datastore:
-
-| Option | When to use | What to do |
-|---|---|---|
-| Firestore | Real shared backend data | Get `serviceAccountKey.json` privately from Zhi Feng, put it in `server/`, set `DATASTORE=firestore` in `server/.env` |
-| SQLite | Offline local testing | Set `DATASTORE=sqlite` in `server/.env`, then run `npm run migrate && npm run seed` |
+Firestore is the only application datastore. For local backend development,
+get `serviceAccountKey.json` privately from Zhi Feng, place it in `server/`, and
+set `FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json`. Automated tests
+need no key: they use the isolated `sprout-test` Firestore Emulator on
+`127.0.0.1:8080`.
 
 For local frontend work before Firebase login is implemented, keep this in
 `server/.env`:
@@ -147,7 +146,7 @@ npm run dev:server
 You should see:
 
 ```text
-Sprout backend listening on http://localhost:3001
+Sprout backend listening on http://localhost:3001 (Firestore)
 Health check: http://localhost:3001/api/health
 ```
 
@@ -204,7 +203,7 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 See the database anytime:
 
 ```bash
-npm run inspect -w server
+npm run inspect:firestore -w server
 ```
 
 ## 3. Try the API
@@ -221,7 +220,7 @@ curl -X POST http://localhost:3001/api/query/submit \
 
 → returns `201 {"refNumber":"SPR-20260712-0001"}` and the row is now in the database.
 
-**Seeded demo data:** user `demo@sprout.app` (id `demo-user-0001`) with 5 plant avatars, ready for the avatar-archive endpoints. Reseed with `npm run seed:firestore` (Firestore) or `npm run seed` (SQLite).
+**Seeded demo data:** user `demo@sprout.app` (id `demo-user-0001`) with 5 plant avatars, ready for the avatar-archive endpoints. Reseed with `npm run seed`.
 
 **Try a protected endpoint** (avatar archive) — during dev you can stand in for the demo user with one header, no login needed:
 
@@ -231,7 +230,8 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 
 → returns the 5 seeded avatars. (This dev shortcut needs `AUTH_DEV_BYPASS=true` in `server/.env`; it's off in production. See [`FRONTEND_HANDOFF.md`](FRONTEND_HANDOFF.md) §3.)
 
-**Run the tests:** `npm test` — 7 Jest/Supertest tests covering the ticket flow. They run on a throwaway SQLite database, never your dev data.
+**Run the tests:** `npm test`. Backend integration tests run against the local
+`sprout-test` Firestore Emulator and never your live Firebase project.
 
 ## 4. Current API (more coming — check back)
 
@@ -251,28 +251,36 @@ The **exact** request/response contracts (status codes, error strings, limits li
 
 ## 5. The database story (IMPORTANT — read once)
 
-The **database is Cloud Firestore** (Firebase) — the real cross-platform database shared with the Sprout mobile app. It's already set up and connected. Two ways to run it:
-
-- **Firestore** — set `DATASTORE=firestore` and put `serviceAccountKey.json` in `server/`. Get the key **from Zhi Feng privately** (it's a secret — never commit it, never post it in the group chat).
-- **SQLite** — set `DATASTORE=sqlite`, run `npm run migrate && npm run seed`. A local file, zero accounts, no internet. Perfect for offline work; it's also what the automated tests use.
-- All persistence goes through `server/repositories/` — **never** import Knex/Firestore directly in a service or controller. That seam is what makes the two datastores interchangeable (the same API code runs on both). Full Firebase steps: [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
+The database is Cloud Firestore, shared with the Sprout mobile app. Runtime code
+always uses the Firebase Admin repositories in `server/repositories/`; services
+and controllers depend on repository interfaces instead of Firebase Admin
+directly. Local automated tests use the Firebase Emulator. Full setup steps:
+[`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
 
 **Auth (for frontend work):** users sign in with the **Firebase JS SDK** in the React app, grab the ID token, and send it as `Authorization: Bearer <idToken>` on every protected API call. The current demo flow uses email/password; other Firebase sign-in providers can be added later without changing the backend token-verification pattern.
+
+## Production auth, email, and storage
+
+Render declares SMTP delivery but does not store credentials in `render.yaml`. For `hello.sprout.team@gmail.com`, enable Google 2-Step Verification, create a Google Account -> Security -> App passwords entry named `Sprout Backend`, and place the resulting 16-character app password only in local `server/.env` (`SMTP_PASS`) and Render's secret environment dashboard. With it configured, run `npm.cmd run check:email -w server`; a live SMTP preflight is successful only when it prints `[email-check] mode=smtp verified=true`.
+
+Before deployment, add the Vercel domain in Firebase Console -> Authentication -> Settings -> Authorized domains and set Render `FRONTEND_URL` to that HTTPS origin. Verification links must point to `https://<vercel-domain>/verify-email?...`, and the page must successfully apply the Firebase action code. Firebase remains the authority for identity: the client sends Firebase ID tokens and the backend verifies them.
+
+Firebase Storage is active at `sprout-dev-66f08.firebasestorage.app`. The live Node 22 Admin preflight passed write, exact read-back, and deletion on 2026-07-21. This proves backend credential/bucket access only; Admin SDK requests bypass client Security Rules. Direct client rules and the application Storage adapter remain untested, so Render stays pinned to `STORAGE_MODE=local`. The detailed status and procedure are in [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
 
 ## 6. Backend layout (where to put things)
 
 ```
 server/
 ├── app.ts              ← Express wiring (CORS, rate limit, routers, error handler)
-├── server.ts           ← entry point (migrations + listen on :3001)
+├── server.ts           ← Firestore-backed entry point listening on :3001
 ├── routes/             ← URL definitions + validation schemas
 ├── controllers/        ← request/response handling, no business logic
 ├── services/           ← business logic (ticket refs, emails, battle math…)
-├── repositories/       ← the ONLY place that touches the database (Firestore + SQLite impls)
+├── repositories/       ← Firebase Admin persistence adapters
 ├── models/             ← TypeScript domain types + repository interfaces
 ├── middleware/         ← auth (Firebase ID tokens), validation, errors
-├── database/           ← SQLite fallback (migrations/seeds) + shared seed data + Firestore seed
-├── scripts/            ← inspect-db and other dev utilities
+├── data/               ← deterministic demo avatar templates
+├── scripts/            ← Firestore seeds, inspection, and preflight utilities
 ├── firebase.ts         ← Firebase Admin SDK init (lazy)
 └── tests/              ← Jest + Supertest (ts-jest)
 ```
@@ -295,15 +303,14 @@ Rule of thumb: routes stay thin → controllers translate HTTP → services do t
 | `EADDRINUSE :::3001` on start | Something else is on port 3001. Either stop it, or run with another port: `PORT=3002 npm run dev` (PowerShell: `$env:PORT=3002; npm run dev`) — remember your frontend/test.html then needs the new port |
 | `'node' is not recognized` | Install Node LTS, then **reopen** the terminal |
 | `Cannot find module ...` | You skipped `npm install`, or you're in the wrong folder — run it from the repo root |
-| `no such table: query_tickets` | SQLite mode and you skipped `npm run migrate` |
-| Startup error mentioning Firebase / credentials | `DATASTORE=firestore` but `serviceAccountKey.json` is missing — add the key, or switch to `DATASTORE=sqlite` |
+| Startup error mentioning Firebase / credentials | Configure one Firebase Admin credential method from `.env.example`; automated tests use the emulator and need no key |
 | `The query requires an index` from Firestore | shouldn't happen with current code (we sort in-memory); if a new query hits it, click the link in the error to create the index, or sort in the app |
 | `401 Unauthorised` on `/api/avatar` | preferred: login in the auth test panel and send the Firebase ID token. Fallback: send `x-dev-uid: demo-user-0001` in dev with `AUTH_DEV_BYPASS=true` |
 | test.html says "Backend not reachable" | Backend isn't running (`npm run dev`), or it's on a different port |
 | "Failed to fetch" in browser but Postman works | CORS — dev server allows origins `:5173` and `:5500` only; serve your page from one of those (Vite / Live Server) |
 | `.env` questions | Never commit `server/.env` or `serviceAccountKey.json`. They're gitignored on purpose. `.env.example` shows what keys exist |
 
-Still stuck? Screenshot the **full** terminal error (not just the last line) into the group chat.
+Still stuck? Share only the minimal relevant, sanitized error lines. Redact tokens, OTPs, email addresses, environment values, local paths, and service-account details before posting anything to the group chat.
 
 ## Related repos
 

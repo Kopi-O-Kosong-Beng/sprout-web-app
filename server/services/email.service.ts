@@ -16,10 +16,24 @@ export interface EmailResult {
   mode: string;
 }
 
+export interface EmailTransportStatus {
+  mode: string;
+  verified: boolean;
+}
+
+export class MissingEmailEnvironmentError extends Error {
+  readonly code = 'missing_email_environment';
+
+  constructor(name: string) {
+    super(`Missing required email env var: ${name} (required when EMAIL_MODE=smtp)`);
+    this.name = 'MissingEmailEnvironmentError';
+  }
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    throw new Error(`Missing required email env var: ${name} (required when EMAIL_MODE=smtp)`);
+    throw new MissingEmailEnvironmentError(name);
   }
   return value;
 }
@@ -42,11 +56,19 @@ function getSmtpTransporter(): Transporter {
   return smtpTransporter;
 }
 
+export async function verifyEmailTransport(): Promise<EmailTransportStatus> {
+  const mode = process.env.EMAIL_MODE ?? 'console';
+  if (mode === 'console') return { mode, verified: true };
+  if (mode !== 'smtp') throw new Error(`Unsupported EMAIL_MODE: ${mode}`);
+  await getSmtpTransporter().verify();
+  return { mode, verified: true };
+}
+
 export async function send({ to, subject, text }: EmailPayload): Promise<EmailResult> {
   const mode = process.env.EMAIL_MODE ?? 'console';
 
   if (mode === 'console') {
-    console.log(`[email] to=${to} subject="${subject}"\n${text}\n`);
+    console.log(`[email] mode=console delivered=true to=${to} subject="${subject}"`);
     return { delivered: true, mode };
   }
 

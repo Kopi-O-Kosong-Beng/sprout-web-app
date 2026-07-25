@@ -1,4 +1,4 @@
-/** Firebase Admin SDK init — lazy, so SQLite-mode runs never require a key.
+/** Firebase Admin SDK initialization for Firestore, Auth, and Storage.
  *  Final architecture per Master.docx: Firestore (cross-platform DB shared with
  *  the mobile app), Firebase Auth (ID-token verification), Cloud Storage (PM3).
  *
@@ -16,6 +16,7 @@ import {
 } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { getAuth, type Auth } from 'firebase-admin/auth';
+import { getStorage, type Storage } from 'firebase-admin/storage';
 
 let app: App | undefined;
 
@@ -76,4 +77,8 @@ export function getDb(): Firestore {
 
 export function getAuthAdmin(): Auth {
   return getAuth(getApp());
+}
+
+export function getStorageAdmin(): Storage {
+  return getStorage(getApp());
 }

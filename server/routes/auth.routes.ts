@@ -1,15 +1,19 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { MemoryStore } from 'express-rate-limit';
 import Joi from 'joi';
 import {
   handleMe,
   handleRequestReset,
+  handleResendVerification,
   handleSessionLogin,
   handleSessionLogout,
   handleSignup,
   handleVerifyReset,
 } from '../controllers/auth.controller';
-import authMiddleware, { unverifiedAuthMiddleware } from '../middleware/auth.middleware';
+import authMiddleware, {
+  strictUnverifiedAuthMiddleware,
+  unverifiedAuthMiddleware,
+} from '../middleware/auth.middleware';
 import validate from '../middleware/validation.middleware';
 
 const router = Router();
@@ -21,10 +25,30 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+export const verificationResendIpStore = new MemoryStore();
+export const verificationResendAccountStore = new MemoryStore();
+
+const verificationResendIpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: verificationResendIpStore,
+});
+
+const verificationResendAccountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: verificationResendAccountStore,
+  keyGenerator: (req) => req.user!.uid,
+});
+
 const signupSchema = Joi.object({
   email: Joi.string().trim().email().required(),
   password: Joi.string().required(),
-  displayName: Joi.string().trim().min(1).max(80).required(),
+  displayName: Joi.string().trim().min(1).max(50).pattern(/^[A-Za-z0-9 _-]+$/).required(),
 });
 
 const requestResetSchema = Joi.object({
@@ -38,6 +62,13 @@ const verifyResetSchema = Joi.object({
 });
 
 router.post('/signup', authLimiter, validate(signupSchema), handleSignup);
+router.post(
+  '/resend-verification',
+  verificationResendIpLimiter,
+  strictUnverifiedAuthMiddleware,
+  verificationResendAccountLimiter,
+  handleResendVerification
+);
 router.get('/me', authMiddleware, handleMe);
 router.post('/session/login', unverifiedAuthMiddleware, handleSessionLogin);
 router.post('/session/logout', unverifiedAuthMiddleware, handleSessionLogout);

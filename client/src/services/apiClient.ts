@@ -44,7 +44,7 @@ const STATUS_MESSAGES: Record<number, string> = {
   404: 'Not found.',
   409: 'This already exists.',
   429: 'Too many requests. Wait a few minutes and try again.',
-  500: 'Server error. Check the backend terminal and try again.',
+  500: 'Server error. Try again shortly.',
 };
 
 /** Surface the human-readable reason for a failed API call: the backend's

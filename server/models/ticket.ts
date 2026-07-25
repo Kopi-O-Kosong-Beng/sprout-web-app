@@ -9,6 +9,7 @@ export const TICKET_CATEGORIES = [
 ] as const;
 
 export type TicketCategory = (typeof TICKET_CATEGORIES)[number];
+export type DeliveryStatus = 'pending' | 'sent' | 'failed';
 
 export interface TicketInput {
   name: string;
@@ -22,12 +23,23 @@ export interface Ticket extends TicketInput {
   /** Format SPR-YYYYMMDD-NNNN, unique per calendar day (Req 9.5/9.10) */
   refNumber: string;
   status: 'open' | 'resolved';
+  submitterEmailStatus: DeliveryStatus;
+  adminEmailStatus: DeliveryStatus;
+  lastEmailError: string | null;
+  notificationUpdatedAt: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
-/** The seam every datastore implementation must satisfy — services depend on
- *  this interface, never on Knex or Firestore directly. */
+export interface TicketNotificationPatch {
+  submitterEmailStatus: DeliveryStatus;
+  adminEmailStatus: DeliveryStatus;
+  lastEmailError: string | null;
+  notificationUpdatedAt: string;
+}
+
+/** Services depend on this interface rather than Firebase Admin directly. */
 export interface TicketRepository {
   create(input: TicketInput): Promise<Ticket>;
+  updateNotificationState(id: string, patch: TicketNotificationPatch): Promise<void>;
 }
