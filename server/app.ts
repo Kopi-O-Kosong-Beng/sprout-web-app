@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.routes';
 import queryRoutes from './routes/query.routes';
 import avatarRoutes from './routes/avatar.routes';
 import battleRoutes from './routes/battle.routes';
+import adminRoutes from './routes/admin.routes';
 
 const app = express();
 
@@ -65,6 +66,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/avatar', avatarRoutes);
 app.use('/api/battle/pve', battleRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 404 for unknown API paths
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

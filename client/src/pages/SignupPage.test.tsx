@@ -5,8 +5,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SignupPage from './SignupPage';
 
 const signupUser = vi.hoisted(() => vi.fn());
+const loginWithGoogle = vi.hoisted(() => vi.fn());
 
 vi.mock('../services/sproutApi', () => ({ signupUser }));
+
+vi.mock('../hooks/useAuth', () => ({
+  useAuth: () => ({
+    status: 'signed-out',
+    firebaseUser: null,
+    profile: null,
+    login: vi.fn(),
+    loginWithGoogle,
+    logout: vi.fn(),
+    refreshProfile: vi.fn(),
+  }),
+}));
 
 function renderSignup() {
   return render(
@@ -47,5 +60,16 @@ describe('SignupPage verification handoff', () => {
 
     expect(await screen.findByText('Check your email for the verification link.')).toBeInTheDocument();
     expect(screen.queryByText(/EMAIL_MODE=console/i)).not.toBeInTheDocument();
+  });
+
+  it('offers Google sign-up, which needs no verification email or password', async () => {
+    const user = userEvent.setup();
+    loginWithGoogle.mockResolvedValue(undefined);
+    renderSignup();
+
+    await user.click(screen.getByRole('button', { name: /continue with google/i }));
+
+    expect(loginWithGoogle).toHaveBeenCalledTimes(1);
+    expect(signupUser).not.toHaveBeenCalled();
   });
 });

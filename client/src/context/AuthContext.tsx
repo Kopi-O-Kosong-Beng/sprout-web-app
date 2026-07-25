@@ -12,8 +12,10 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  GoogleAuthProvider,
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   type User,
 } from 'firebase/auth';
@@ -36,6 +38,7 @@ export interface AuthContextValue {
   firebaseUser: User | null;
   profile: AuthProfile | null;
   login(email: string, password: string): Promise<void>;
+  loginWithGoogle(): Promise<void>;
   logout(): Promise<void>;
   refreshProfile(): Promise<void>;
 }
@@ -57,6 +60,17 @@ export function mapFirebaseLoginError(err: unknown): string {
     case 'auth/wrong-password':
     case 'auth/invalid-email':
       return 'Invalid email or password.';
+    // Popup-specific outcomes: the user closing the window is not an error
+    // worth alarming them about, so it maps to a calm, actionable message.
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
+      return 'Google sign-in was cancelled.';
+    case 'auth/popup-blocked':
+      return 'Your browser blocked the Google sign-in popup. Allow popups and try again.';
+    case 'auth/account-exists-with-different-credential':
+      return 'This email is already registered with a password. Log in with your password instead.';
+    case 'auth/unauthorized-domain':
+      return 'This site is not authorised for Google sign-in yet.';
     case 'auth/too-many-requests':
       return 'Too many attempts. Please wait a few minutes and try again.';
     default:
@@ -125,6 +139,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /** Google sign-in. Google asserts the email is already verified, so these
+   *  users skip the verification-link step entirely — no outbound email is
+   *  involved. The backend auto-provisions the Sprout profile on the first
+   *  /api/auth/me call, so no extra signup request is needed here. */
+  const loginWithGoogle = useCallback(async () => {
+    if (!isFirebaseConfigured()) {
+      throw new Error(
+        'Firebase is not configured — fill client/.env.local with the VITE_FIREBASE_* values.'
+      );
+    }
+    try {
+      const provider = new GoogleAuthProvider();
+      // Always show the chooser: on shared/demo machines a silent re-login as
+      // the previous account is confusing.
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const credential = await signInWithPopup(getSproutFirebaseAuth(), provider);
+      await recordSessionLogin(await credential.user.getIdToken());
+    } catch (err) {
+      throw new Error(mapFirebaseLoginError(err));
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     if (!isFirebaseConfigured()) return;
     const token = await getSproutFirebaseAuth().currentUser?.getIdToken();
@@ -146,8 +182,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [deriveState]);
 
   const value = useMemo(
-    () => ({ status, firebaseUser, profile, login, logout, refreshProfile }),
-    [status, firebaseUser, profile, login, logout, refreshProfile]
+    () => ({
+      status,
+      firebaseUser,
+      profile,
+      login,
+      loginWithGoogle,
+      logout,
+      refreshProfile,
+    }),
+    [status, firebaseUser, profile, login, loginWithGoogle, logout, refreshProfile]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -6,6 +6,10 @@ import type { AuthContextValue, AuthStatus } from '../context/AuthContext';
 import LoginPage from './LoginPage';
 
 const authState = vi.hoisted(() => ({ status: 'signed-out' as AuthStatus }));
+const authMocks = vi.hoisted(() => ({
+  login: vi.fn(),
+  loginWithGoogle: vi.fn(),
+}));
 const apiMocks = vi.hoisted(() => ({
   requestPasswordReset: vi.fn(),
   verifyPasswordReset: vi.fn(),
@@ -16,7 +20,8 @@ vi.mock('../hooks/useAuth', () => ({
     status: authState.status,
     firebaseUser: null,
     profile: null,
-    login: vi.fn(),
+    login: authMocks.login,
+    loginWithGoogle: authMocks.loginWithGoogle,
     logout: vi.fn(),
     refreshProfile: vi.fn(),
   }),
@@ -39,6 +44,8 @@ function renderLogin(status: AuthStatus) {
 
 describe('LoginPage auth redirects', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    authMocks.loginWithGoogle.mockResolvedValue(undefined);
     apiMocks.requestPasswordReset.mockResolvedValue({
       message: 'If an account exists, a reset code has been sent.',
     });
@@ -70,4 +77,48 @@ describe('LoginPage auth redirects', () => {
       screen.queryByText(/EMAIL_MODE|backend (?:terminal|log)/i)
     ).not.toBeInTheDocument();
   });
+});
+
+describe('LoginPage Google sign-in', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMocks.loginWithGoogle.mockResolvedValue(undefined);
+  });
+
+  it('starts the Google flow without submitting the password form', async () => {
+    const user = userEvent.setup();
+    renderLogin('signed-out');
+
+    await user.click(screen.getByRole('button', { name: /continue with google/i }));
+
+    expect(authMocks.loginWithGoogle).toHaveBeenCalledTimes(1);
+    expect(authMocks.login).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a cancelled popup as a readable message, not a crash', async () => {
+    const user = userEvent.setup();
+    authMocks.loginWithGoogle.mockRejectedValue(
+      new Error('Google sign-in was cancelled.')
+    );
+    renderLogin('signed-out');
+
+    await user.click(screen.getByRole('button', { name: /continue with google/i }));
+
+    expect(
+      await screen.findByText('Google sign-in was cancelled.')
+    ).toBeInTheDocument();
+  });
+
+  it('re-enables the button after a failed attempt so the user can retry', async () => {
+    const user = userEvent.setup();
+    authMocks.loginWithGoogle.mockRejectedValue(new Error('Google sign-in failed.'));
+    renderLogin('signed-out');
+
+    const googleButton = screen.getByRole('button', { name: /continue with google/i });
+    await user.click(googleButton);
+
+    expect(await screen.findByText('Google sign-in failed.')).toBeInTheDocument();
+    expect(googleButton).toBeEnabled();
+  });
+
 });

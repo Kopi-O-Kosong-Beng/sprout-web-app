@@ -9,7 +9,7 @@ import { MiniArchive } from '../components/common/PlantVisuals';
 type Mode = 'login' | 'reset-request' | 'reset-verify';
 
 export default function LoginPage() {
-  const { status, login } = useAuth();
+  const { status, login, loginWithGoogle } = useAuth();
   const location = useLocation();
   const from = (location.state as { from?: string } | null)?.from ?? '/';
 
@@ -50,6 +50,18 @@ export default function LoginPage() {
       await login(email.trim(), password);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleGoogleLogin() {
+    setBusy(true);
+    setError(null);
+    try {
+      await loginWithGoogle();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Google sign-in failed.');
     } finally {
       setBusy(false);
     }
@@ -144,6 +156,17 @@ export default function LoginPage() {
             <button className="primary-cta form-submit" type="submit" disabled={busy}>
               <span aria-hidden="true">-&gt;</span>
               {busy ? 'Signing in…' : 'Log In'}
+            </button>
+            <p className="auth-divider">or</p>
+            {/* Google asserts the address is verified, so this path needs no
+                verification email at all. */}
+            <button
+              className="secondary-cta form-submit"
+              type="button"
+              onClick={handleGoogleLogin}
+              disabled={busy}
+            >
+              Continue with Google
             </button>
           </form>
         )}
