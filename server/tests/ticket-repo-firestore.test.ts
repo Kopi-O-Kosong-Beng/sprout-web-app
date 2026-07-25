@@ -10,6 +10,7 @@ describe('Firestore ticket repository', () => {
     const ticket = await ticketRepository.create({
       name: 'Ada Lovelace',
       email: 'ada@example.com',
+      subject: 'Test subject',
       category: 'general',
       message: 'Hello Sprout team!',
     });
@@ -30,6 +31,7 @@ describe('Firestore ticket repository', () => {
     const input = {
       name: 'Ada Lovelace',
       email: 'ada@example.com',
+      subject: 'Test subject',
       category: 'general' as const,
       message: 'Hello Sprout team!',
     };
@@ -51,6 +53,7 @@ describe('Firestore ticket repository', () => {
       refNumber: 'SPR-20260722-0001',
       name: 'Ada Lovelace',
       email: 'ada@example.com',
+      subject: 'Test subject',
       category: 'general',
       message: 'Hello Sprout team!',
       status: 'open',
@@ -75,6 +78,7 @@ describe('Firestore ticket repository', () => {
     await reference.set({
       name: 'Missing Reference',
       email: 'ada@example.com',
+      subject: 'Test subject',
       category: 'general',
       message: 'Hello Sprout team!',
       status: 'open',

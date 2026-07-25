@@ -392,3 +392,38 @@ describe('ArchivePage', () => {
     expect(visual.querySelector('.leaf')).not.toBeNull();
   });
 });
+
+describe('ArchivePage species detail (UC4 step 3)', () => {
+  it('shows habitat and conservation status when the record carries them', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      ...collectedPage,
+      items: [
+        avatar({
+          metadata: {
+            displayName: 'Fern Ward',
+            habitat: 'Shaded tropical understorey',
+            conservationStatus: 'Least Concern',
+          },
+        }),
+      ],
+      total: 1,
+    });
+    renderArchive();
+
+    expect(await screen.findByText('Shaded tropical understorey')).toBeInTheDocument();
+    expect(screen.getByText('Least Concern')).toBeInTheDocument();
+  });
+
+  it('omits the facts list entirely for records without those fields', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      ...collectedPage,
+      items: [avatar()],
+      total: 1,
+    });
+    renderArchive();
+
+    await screen.findByRole('button', { name: /battle with fern ward/i });
+    expect(screen.queryByText('Habitat')).not.toBeInTheDocument();
+    expect(screen.queryByText('Conservation status')).not.toBeInTheDocument();
+  });
+});

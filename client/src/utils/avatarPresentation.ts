@@ -45,5 +45,10 @@ export function toPlantAvatarData(record: AvatarRecord): PlantAvatarData {
     color: stablePaletteClass(presentationKey ?? record.id),
     spriteUrl: record.spriteUrl.trim() || undefined,
     isDemo: record.metadata?.isDemo === true,
+    // UC4 step 3 lists habitat and conservation status among the details.
+    // Absent for records whose species metadata predates those fields.
+    habitat: metadataString(record.metadata, 'habitat') ?? undefined,
+    conservationStatus:
+      metadataString(record.metadata, 'conservationStatus') ?? undefined,
   };
 }

@@ -124,6 +124,22 @@ export default function ArchivePage() {
               {selected.species} from {selected.family}. Discovered on{' '}
               {selected.discovered}.
             </p>
+            {(selected.habitat || selected.conservationStatus) && (
+              <dl className="species-facts">
+                {selected.habitat && (
+                  <>
+                    <dt>Habitat</dt>
+                    <dd>{selected.habitat}</dd>
+                  </>
+                )}
+                {selected.conservationStatus && (
+                  <>
+                    <dt>Conservation status</dt>
+                    <dd>{selected.conservationStatus}</dd>
+                  </>
+                )}
+              </dl>
+            )}
             <StatGrid avatar={selected} />
             <button
               className="primary-cta detail-action"

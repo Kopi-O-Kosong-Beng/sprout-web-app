@@ -12,12 +12,20 @@ export async function createTicket(input: TicketInput): Promise<Ticket> {
     sendEmail({
       to: ticket.email,
       subject: `Sprout - we received your query (${ticket.refNumber})`,
-      text: `Hi ${ticket.name}, thanks for contacting Sprout. Your reference number is ${ticket.refNumber}.`,
+      text:
+        `Hi ${ticket.name}, thanks for contacting Sprout. ` +
+        `Your reference number is ${ticket.refNumber}.\n\n` +
+        `Subject: ${ticket.subject}\n`,
     }),
     sendEmail({
       to: adminEmail,
-      subject: `New query ticket ${ticket.refNumber} [${ticket.category}]`,
-      text: `${ticket.name} <${ticket.email}>\n\n${ticket.message}`,
+      subject: `New query ticket ${ticket.refNumber} [${ticket.category}] ${ticket.subject}`,
+      text:
+        `${ticket.name} <${ticket.email}>\n` +
+        `Organisation: ${ticket.organisation || '-'}\n` +
+        `Inquiry type: ${ticket.category}\n` +
+        `Subject: ${ticket.subject}\n\n` +
+        `${ticket.message}`,
     }),
   ]);
 
