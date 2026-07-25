@@ -11,6 +11,7 @@ const MAX_MESSAGE_LENGTH = 2000;
 export default function TicketPanel() {
   const [name, setName] = useState('Test User');
   const [email, setEmail] = useState('test@example.com');
+  const [subject, setSubject] = useState('Backend test-page ticket');
   const [category, setCategory] = useState<TicketCategory>('general');
   const [message, setMessage] = useState(
     'Testing the query ticket endpoint from the React test page.'
@@ -25,7 +26,7 @@ export default function TicketPanel() {
     setError(null);
     setRefNumber(null);
     try {
-      const res = await submitTicket({ name, email, category, message });
+      const res = await submitTicket({ name, email, subject, category, message });
       setRefNumber(res.refNumber);
     } catch (err) {
       setError(extractApiError(err, 'Request failed.'));
@@ -58,14 +59,23 @@ export default function TicketPanel() {
           />
         </label>
         <label>
-          Category
+          Subject
+          <input
+            type="text"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            required
+          />
+        </label>
+        <label>
+          Inquiry type
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value as TicketCategory)}
           >
             {TICKET_CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
+              <option key={c.value} value={c.value}>
+                {c.label}
               </option>
             ))}
           </select>

@@ -9,10 +9,14 @@ import { MiniArchive } from '../components/common/PlantVisuals';
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_NAME_LENGTH = 100;
+const MAX_SUBJECT_LENGTH = 150;
+const MAX_ORGANISATION_LENGTH = 120;
 
 export default function ContactPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [organisation, setOrganisation] = useState('');
+  const [subject, setSubject] = useState('');
   const [category, setCategory] = useState<TicketCategory>('general');
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -27,6 +31,8 @@ export default function ContactPage() {
       const res = await submitTicket({
         name: name.trim(),
         email: email.trim(),
+        organisation: organisation.trim() || undefined,
+        subject: subject.trim(),
         category,
         message,
       });
@@ -34,6 +40,8 @@ export default function ContactPage() {
       // Clear only on success — a failed submit keeps everything typed.
       setName('');
       setEmail('');
+      setOrganisation('');
+      setSubject('');
       setCategory('general');
       setMessage('');
     } catch (err) {
@@ -98,14 +106,35 @@ export default function ContactPage() {
               />
             </label>
             <label>
-              Category
+              Organisation (optional)
+              <input
+                type="text"
+                value={organisation}
+                onChange={(e) => setOrganisation(e.target.value)}
+                placeholder="Company, school, or team"
+                maxLength={MAX_ORGANISATION_LENGTH}
+              />
+            </label>
+            <label>
+              Subject
+              <input
+                type="text"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="What is your query about?"
+                maxLength={MAX_SUBJECT_LENGTH}
+                required
+              />
+            </label>
+            <label>
+              Inquiry type
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value as TicketCategory)}
               >
                 {TICKET_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c.charAt(0).toUpperCase() + c.slice(1)}
+                  <option key={c.value} value={c.value}>
+                    {c.label}
                   </option>
                 ))}
               </select>

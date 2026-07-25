@@ -40,6 +40,8 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
       taxonomy: 'flower',
       confidence: 0.97,
       locality: { city: 'Singapore', venue: 'Gardens by the Bay' },
+      habitat: 'Open fields and cultivated plots in full sun',
+      conservationStatus: 'Least Concern',
     },
   },
   {
@@ -53,6 +55,8 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
       taxonomy: 'tree',
       confidence: 0.93,
       locality: { city: 'Singapore', venue: 'Botanic Gardens' },
+      habitat: 'Temperate deciduous woodland',
+      conservationStatus: 'Least Concern',
     },
   },
   {
@@ -62,7 +66,12 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     source: 'mobile',
     isTemporary: false,
     stats: { hp: 112, attack: 58, defense: 63, speed: 47 },
-    metadata: { taxonomy: 'plant', confidence: 0.91 },
+    metadata: {
+      taxonomy: 'plant',
+      confidence: 0.91,
+      habitat: 'Tropical rainforest understorey',
+      conservationStatus: 'Least Concern',
+    },
   },
   {
     id: 'demo-avatar-ficus-lyrata',
@@ -71,7 +80,12 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     source: 'mobile',
     isTemporary: false,
     stats: { hp: 134, attack: 39, defense: 74, speed: 33 },
-    metadata: { taxonomy: 'tree', confidence: 0.89 },
+    metadata: {
+      taxonomy: 'tree',
+      confidence: 0.89,
+      habitat: 'West African lowland rainforest',
+      conservationStatus: 'Least Concern',
+    },
   },
   {
     id: 'demo-avatar-amanita-muscaria',
@@ -80,7 +94,12 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     source: 'web',
     isTemporary: true, // TempAvatar from a web upload — 24h TTL
     stats: { hp: 74, attack: 91, defense: 28, speed: 55 },
-    metadata: { taxonomy: 'fungus', confidence: 0.82 },
+    metadata: {
+      taxonomy: 'fungus',
+      confidence: 0.82,
+      habitat: 'Birch and conifer woodland, often near host trees',
+      conservationStatus: 'Not Evaluated',
+    },
   },
 ];
 

@@ -35,6 +35,7 @@ describe('POST /api/query/submit (T05)', () => {
   const valid = {
     name: 'Ada Lovelace',
     email: 'ada@example.com',
+    subject: 'Test subject',
     category: 'general',
     message: 'Hello Sprout team!',
   };
@@ -64,6 +65,53 @@ describe('POST /api/query/submit (T05)', () => {
     const { email: _omitted, ...noEmail } = valid;
     const res = await request(app).post('/api/query/submit').send(noEmail);
     expect(res.status).toBe(400);
+  });
+
+  it('accepts the UC8 field set including an optional organisation', async () => {
+    const res = await request(app)
+      .post('/api/query/submit')
+      .send({
+        ...valid,
+        organisation: 'SUTD',
+        subject: 'Partnership enquiry',
+        category: 'partnership',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.refNumber).toMatch(/^SPR-\d{8}-\d{4}$/);
+  });
+
+  it.each(['general', 'partnership', 'technical_support', 'feedback'])(
+    'accepts documented inquiry type %s',
+    async (category) => {
+      const res = await request(app)
+        .post('/api/query/submit')
+        .send({ ...valid, category });
+
+      expect(res.status).toBe(201);
+    }
+  );
+
+  it('requires a subject', async () => {
+    const { subject: _omitted, ...noSubject } = valid;
+
+    const res = await request(app).post('/api/query/submit').send(noSubject);
+
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a subject longer than the documented limit', async () => {
+    const res = await request(app)
+      .post('/api/query/submit')
+      .send({ ...valid, subject: 'x'.repeat(151) });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('treats organisation as optional, not required', async () => {
+    const res = await request(app).post('/api/query/submit').send(valid);
+
+    expect(res.status).toBe(201);
   });
 
   it('rejects an invalid category with 400 (Req 9.12)', async () => {

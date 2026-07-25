@@ -5,6 +5,7 @@
 import { randomUUID } from 'crypto';
 import type { Transaction } from 'firebase-admin/firestore';
 import { getDb } from '../firebase';
+import { TICKET_CATEGORIES } from '../models/ticket';
 import type {
   DeliveryStatus,
   Ticket,
@@ -51,9 +52,21 @@ export function mapTicketDocument(snapshot: FirestoreSnapshotLike): Ticket {
     ),
     name: requireString(data.name, 'name', 'query_tickets', snapshot.id),
     email: requireString(data.email, 'email', 'query_tickets', snapshot.id),
+    // Tickets stored before the form was realigned to UC8 have no
+    // organisation/subject, so both decode leniently.
+    organisation:
+      optionalNullableString(
+        data.organisation,
+        'organisation',
+        'query_tickets',
+        snapshot.id
+      ) ?? undefined,
+    subject:
+      optionalNullableString(data.subject, 'subject', 'query_tickets', snapshot.id) ??
+      '',
     category: requireOneOf<TicketCategory>(
       data.category,
-      ['general', 'bug', 'billing', 'partnership', 'other'],
+      TICKET_CATEGORIES,
       'category',
       snapshot.id
     ),
@@ -101,7 +114,14 @@ export function mapTicketDocument(snapshot: FirestoreSnapshotLike): Ticket {
 }
 
 const firestoreTicketRepository: TicketRepository = {
-  async create({ name, email, category, message }: TicketInput): Promise<Ticket> {
+  async create({
+    name,
+    email,
+    organisation,
+    subject,
+    category,
+    message,
+  }: TicketInput): Promise<Ticket> {
     const db = getDb();
     const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const counterRef = db.collection('counters').doc(`tickets-${datePart}`);
@@ -116,6 +136,9 @@ const firestoreTicketRepository: TicketRepository = {
         refNumber: `SPR-${datePart}-${String(seq).padStart(4, '0')}`,
         name,
         email,
+        // Firestore rejects undefined; an omitted organisation stores as ''.
+        organisation: organisation?.trim() ? organisation.trim() : '',
+        subject,
         category,
         message,
         status: 'open',

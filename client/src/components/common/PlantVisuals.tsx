@@ -14,6 +14,9 @@ export interface PlantAvatarData {
   color: string;
   spriteUrl?: string;
   isDemo?: boolean;
+  /** UC4 detail fields; optional because older records may not carry them. */
+  habitat?: string;
+  conservationStatus?: string;
 }
 
 export const plantAvatars: PlantAvatarData[] = [

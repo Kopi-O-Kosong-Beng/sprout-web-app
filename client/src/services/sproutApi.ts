@@ -139,18 +139,21 @@ export interface BattleActionResult {
   stale: boolean;
 }
 
+/** Inquiry types offered by the Contact Us form (UC8 step 1). Labels are
+ *  shown to the user; values are what the API accepts. */
 export const TICKET_CATEGORIES = [
-  'general',
-  'bug',
-  'billing',
-  'partnership',
-  'other',
+  { value: 'general', label: 'General' },
+  { value: 'partnership', label: 'Partnership' },
+  { value: 'technical_support', label: 'Technical Support' },
+  { value: 'feedback', label: 'Feedback' },
 ] as const;
-export type TicketCategory = (typeof TICKET_CATEGORIES)[number];
+export type TicketCategory = (typeof TICKET_CATEGORIES)[number]['value'];
 
 export interface TicketInput {
   name: string;
   email: string;
+  organisation?: string;
+  subject: string;
   category: TicketCategory;
   message: string;
 }

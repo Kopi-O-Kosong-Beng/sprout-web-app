@@ -7,9 +7,13 @@ import { TICKET_CATEGORIES } from '../models/ticket';
 
 const router = Router();
 
+// Field set per UC8 step 1: name, email, organisation (optional), subject,
+// message, inquiry type.
 const querySchema = Joi.object({
   name: Joi.string().trim().min(1).max(100).required(),
   email: Joi.string().trim().email().required(),
+  organisation: Joi.string().trim().max(120).allow('').optional(),
+  subject: Joi.string().trim().min(1).max(150).required(),
   category: Joi.string()
     .valid(...TICKET_CATEGORIES)
     .required(), // Req 9.12
