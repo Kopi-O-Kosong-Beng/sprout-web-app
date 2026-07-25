@@ -24,6 +24,8 @@ const EMAIL_ENV_KEYS = [
   'SMTP_PORT',
   'SMTP_USER',
   'SMTP_PASS',
+  'RESEND_API_KEY',
+  'RESEND_FROM',
 ] as const;
 
 const savedEnv: Record<string, string | undefined> = {};
@@ -203,6 +205,144 @@ describe('email.service send() - smtp mode', () => {
   });
 });
 
+describe('email.service send() - resend mode', () => {
+  const RESEND_ENDPOINT = 'https://api.resend.com/emails';
+
+  function setResendEnv(overrides: Record<string, string | undefined> = {}) {
+    process.env.EMAIL_MODE = 'resend';
+    process.env.RESEND_API_KEY = 'test-resend-key';
+    process.env.EMAIL_FROM = 'hello.sprout.team@gmail.com';
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+
+  function mockFetchOnce(init: { ok: boolean; status?: number; body?: string }) {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: init.ok,
+      status: init.status ?? (init.ok ? 200 : 422),
+      text: async () => init.body ?? '',
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    return fetchMock;
+  }
+
+  afterEach(() => {
+    delete (global as { fetch?: unknown }).fetch;
+  });
+
+  it('posts the payload to the Resend API and reports the resend mode', async () => {
+    setResendEnv();
+    const fetchMock = mockFetchOnce({ ok: true, body: '{"id":"re_123"}' });
+
+    const send = await freshSend();
+    await expect(send(payload)).resolves.toEqual({ delivered: true, mode: 'resend' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(RESEND_ENDPOINT);
+    expect(options.method).toBe('POST');
+    expect((options.headers as Record<string, string>).Authorization).toBe(
+      'Bearer test-resend-key'
+    );
+    expect(JSON.parse(options.body as string)).toEqual({
+      from: 'hello.sprout.team@gmail.com',
+      to: [payload.to],
+      subject: payload.subject,
+      text: payload.text,
+    });
+    // SMTP must stay untouched: the whole point is avoiding blocked ports.
+    expect(mockCreateTransport).not.toHaveBeenCalled();
+  });
+
+  it('prefers RESEND_FROM over EMAIL_FROM for the verified sender', async () => {
+    setResendEnv({ RESEND_FROM: 'onboarding@resend.dev' });
+    const fetchMock = mockFetchOnce({ ok: true });
+
+    const send = await freshSend();
+    await send(payload);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string).from).toBe('onboarding@resend.dev');
+  });
+
+  it('falls back to the shared Resend sender when no from address is set', async () => {
+    setResendEnv({ EMAIL_FROM: undefined });
+    const fetchMock = mockFetchOnce({ ok: true });
+
+    const send = await freshSend();
+    await send(payload);
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string).from).toBe('onboarding@resend.dev');
+  });
+
+  it('fails with a clear error when RESEND_API_KEY is missing', async () => {
+    setResendEnv({ RESEND_API_KEY: undefined });
+    const fetchMock = mockFetchOnce({ ok: true });
+
+    const send = await freshSend();
+    await expect(send(payload)).rejects.toThrow(
+      'Missing required email env var: RESEND_API_KEY (required when EMAIL_MODE=resend)'
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a provider rejection without leaking the API key', async () => {
+    setResendEnv();
+    mockFetchOnce({ ok: false, status: 422, body: 'domain is not verified' });
+
+    const send = await freshSend();
+    await expect(send(payload)).rejects.toThrow(/HTTP 422.*domain is not verified/s);
+    await expect(send(payload)).rejects.not.toThrow(/test-resend-key/);
+  });
+
+  it('truncates a verbose provider body so recipient content cannot leak', async () => {
+    setResendEnv();
+    mockFetchOnce({ ok: false, status: 500, body: 'x'.repeat(5000) });
+
+    const send = await freshSend();
+    await expect(send(payload)).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.stringMatching(/^Resend API request failed \(HTTP 500\): x{200}$/),
+      })
+    );
+  });
+
+  it('aborts a stalled provider request instead of hanging the caller', async () => {
+    setResendEnv();
+    // Reject on abort the way fetch does, proving the timeout wiring is live.
+    global.fetch = jest.fn((_url: string, options: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () =>
+          reject(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }))
+        );
+      });
+    }) as unknown as typeof fetch;
+
+    jest.useFakeTimers();
+    const send = await freshSend();
+    const pending = send(payload);
+    const assertion = expect(pending).rejects.toThrow(/aborted/i);
+    jest.advanceTimersByTime(10_000);
+    await assertion;
+    jest.useRealTimers();
+  });
+
+  it('verifies transport by config presence without sending a probe email', async () => {
+    setResendEnv();
+    const fetchMock = mockFetchOnce({ ok: true });
+
+    const { verifyEmailTransport } = await import('../services/email.service');
+    await expect(verifyEmailTransport()).resolves.toEqual({
+      mode: 'resend',
+      verified: true,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('email.service send() - invalid mode', () => {
   it('rejects an unsupported EMAIL_MODE with a clear error', async () => {
     process.env.EMAIL_MODE = 'carrier-pigeon';
@@ -212,6 +352,18 @@ describe('email.service send() - invalid mode', () => {
 });
 
 describe('check-email command', () => {
+  // Unlike the other suites, check-email imports ../env inside the test, so
+  // dotenv re-reads the developer's real server/.env after setup-env.ts has
+  // already cleared it. Stub the loader so "missing SMTP_HOST" stays missing
+  // on a configured laptop as well as on CI.
+  beforeEach(() => {
+    jest.doMock('dotenv', () => ({
+      __esModule: true,
+      default: { config: jest.fn() },
+      config: jest.fn(),
+    }));
+  });
+
   it('preserves the explicit missing-environment message', async () => {
     process.env.EMAIL_MODE = 'smtp';
     const error = jest.fn();
