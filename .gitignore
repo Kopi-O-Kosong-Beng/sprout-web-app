@@ -18,6 +18,9 @@ firestore-debug.log
 .env.local
 .env.*.local
 
+# Dashboard-import env files with real secrets (deploy/README.md is tracked)
+deploy/*.env
+
 # Isolated implementation worktrees
 .worktrees/
 

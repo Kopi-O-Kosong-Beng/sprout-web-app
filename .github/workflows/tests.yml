@@ -62,17 +62,23 @@ jobs:
       - name: Typecheck server
         run: npm run typecheck
 
+      # Always invoke the server-local jest entrypoint (jest 29) through node.
+      # The root node_modules hoists a jest 30 peer of ts-jest, and a bare
+      # `jest` on the PATH can resolve to it inside emulators:exec, mixing
+      # jest 30's runtime with the server's jest 29 test environment
+      # ("clearMocksOnScope is not a function"). `node node_modules/jest/...`
+      # is unambiguous and works under both sh (CI) and cmd (local Windows).
       - name: 'Group 1: eligibility + catalog unit suites (no emulator)'
-        run: npm exec -- jest --runInBand --runTestsByPath tests/battle-eligibility.test.ts tests/battle-catalog.test.ts
+        run: node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/battle-eligibility.test.ts tests/battle-catalog.test.ts
 
       - name: 'Group 2: Firestore battle repository + avatar HTTP API'
-        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "jest --runInBand --runTestsByPath tests/battle-repository.test.ts tests/avatar-api.test.ts"
+        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/battle-repository.test.ts tests/avatar-api.test.ts"
 
       - name: 'Group 3: PVE HTTP API'
-        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "jest --runInBand --runTestsByPath tests/battle-api.test.ts"
+        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/battle-api.test.ts"
 
       - name: 'Group 4: battle engine unit/property + demo archive'
-        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "jest --runInBand --runTestsByPath tests/battle-engine.test.ts tests/battle-engine.property.test.ts tests/avatar-demo.test.ts"
+        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/battle-engine.test.ts tests/battle-engine.property.test.ts tests/avatar-demo.test.ts"
 
   client-focused:
     name: Client focused suites (Vitest + Testing Library)
