@@ -1431,11 +1431,13 @@ select option {
    Battle — the arena is still a field record
    ========================================================================== */
 
+/* The two fighters face each other on the top row and the move console spans
+   beneath them. Placing the menu in its own row (rather than the middle
+   column) is what stops the fighters being crushed into slivers. */
 .battle-arena {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: end;
-  gap: var(--space-md);
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg) var(--space-md);
   padding: var(--space-lg) var(--space-md);
   border: 1px solid var(--rule-soft);
   border-radius: var(--radius-md);
@@ -1444,40 +1446,71 @@ select option {
     var(--plate);
 }
 
-@media (max-width: 52rem) {
+.user-fighter {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.bot-fighter {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.battle-menu {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+/* Stacked, but the two fighters stay adjacent — source order puts the move
+   console between them, which would hide the opponent below the fold. */
+@media (max-width: 40rem) {
   .battle-arena {
     grid-template-columns: 1fr;
-    justify-items: center;
-    text-align: center;
+    gap: var(--space-md);
+  }
+
+  .user-fighter,
+  .bot-fighter,
+  .battle-menu {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .user-fighter {
+    order: 1;
+  }
+
+  .bot-fighter {
+    order: 2;
+  }
+
+  .battle-menu {
+    order: 3;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--rule-soft);
   }
 }
 
 .fighter-panel {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.4rem;
   justify-items: center;
-  align-content: end;
+  align-content: start;
+  text-align: center;
 }
 
 /* Both fighters draw at the same scale so neither looks favoured. */
 .fighter-panel .plant-avatar,
 .fighter-panel .bot-avatar {
-  max-width: 7rem;
+  max-width: 8rem;
+  margin-bottom: 0.3rem;
 }
 
-.battle-heading {
-  align-self: center;
-  margin: 0;
-  padding: 0.4rem 1rem;
-  border: 1px solid var(--rule-soft);
-  border-radius: var(--radius-pill);
-  background: var(--ground-2);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  white-space: nowrap;
+/* The battle heading is a `.page-heading` section, so it inherits the shared
+   rule. Only the live matchup line needs narrowing: it is a plant-vs-plant
+   title, not body copy, so it wants a tighter measure than the 46rem default. */
+.battle-heading h1 {
+  font-size: clamp(2rem, 4.6vw, 3.2rem);
 }
 
 .fighter-label {
@@ -1488,21 +1521,18 @@ select option {
   color: var(--ink-3);
 }
 
-.battle-heading,
 .battle-section-heading {
   margin-bottom: var(--space-sm);
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.battle-section-heading h2 {
   font-size: 1.3rem;
 }
 
-.battle-section-heading {
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--rule-soft);
-  font-size: 1.05rem;
-}
-
-/* Values are rendered as text ("HP 148 / 148"); there is no percentage to
-   drive a fill, so these are typographic readouts rather than a meter that
-   would always look empty. */
+/* `HealthBar` renders label / track / readout and drives the fill width from
+   current-over-max, so the meter is a real gauge backed by real numbers. */
 .health-meter,
 .sun-meter {
   display: flex;
@@ -1514,6 +1544,47 @@ select option {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
   color: var(--ink-2);
+}
+
+.health-meter {
+  width: 100%;
+  max-width: 13rem;
+}
+
+.health-meter > span {
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+}
+
+.health-meter > div {
+  flex: 1;
+  min-width: 3rem;
+  height: 0.4rem;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-pill);
+  background: var(--ground);
+  overflow: hidden;
+}
+
+.health-meter > div > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--verdant);
+  transition: width 320ms var(--ease);
+}
+
+.health-meter > strong {
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .health-meter > div > i {
+    transition: none;
+  }
 }
 
 .sun-meter {
@@ -1551,43 +1622,96 @@ select option {
   color: var(--danger);
 }
 
-.battle-menu,
-.battle-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.7rem;
-  align-items: center;
+/* The console is a vertical stack: turn number, opponent intent, moves, then
+   the abandon escape hatch. */
+.battle-menu {
+  display: grid;
+  gap: var(--space-sm);
+  align-content: start;
+  justify-items: start;
 }
 
+.battle-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.7rem;
+  width: 100%;
+}
+
+/* `.battle-move` is only a wrapper — it holds the button plus its disabled
+   reason. The card affordance belongs on the button the user actually presses. */
 .battle-move {
   display: grid;
-  gap: 0.25rem;
-  min-width: 10rem;
-  padding: 0.7rem 0.9rem;
+  gap: 0.3rem;
+  align-content: start;
+}
+
+.battle-move > button {
+  display: grid;
+  gap: 0.4rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.75rem 0.9rem;
   border: 1px solid var(--rule-soft);
   border-radius: var(--radius-sm);
   background: var(--ground-2);
   color: var(--ink);
   text-align: left;
+  cursor: pointer;
   transition: border-color 200ms var(--ease), background 200ms var(--ease),
     transform 200ms var(--ease);
 }
 
-.battle-move:hover:not(:disabled) {
+.battle-move > button:hover:not(:disabled):not([aria-disabled='true']) {
   border-color: var(--accent);
   background: var(--plate-2);
   transform: translateY(-1px);
 }
 
-.battle-move:disabled {
+.battle-move > button:disabled,
+.battle-move > button[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .battle-move > button {
+    transition: border-color 200ms var(--ease), background 200ms var(--ease);
+  }
+
+  .battle-move > button:hover:not(:disabled):not([aria-disabled='true']) {
+    transform: none;
+  }
+}
+
+/* Name over kind, not name jammed against kind. */
 .move-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.move-title strong {
   font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 600;
+  color: var(--ink);
+  letter-spacing: 0;
+}
+
+.move-title > span {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--verdant);
+}
+
+/* Four independent stats — they need separators, not concatenation. */
+.move-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.85rem;
 }
 
 .move-facts,
@@ -1596,6 +1720,10 @@ select option {
   font-size: 0.68rem;
   letter-spacing: 0.05em;
   color: var(--ink-3);
+}
+
+.move-disabled-reason {
+  color: var(--ochre);
 }
 
 .battle-log-panel,
@@ -1630,12 +1758,36 @@ select option {
   border-bottom: 1px solid var(--rule-soft);
 }
 
+/* `.battle-server-copy` marks text that came back from the server. It renders
+   as meta-sized mono for inline data, but it is a provenance marker — not a
+   licence to flatten headings, which keep the display face. */
 .battle-log-meta,
 .battle-server-copy {
   font-family: var(--font-mono);
   font-size: 0.7rem;
   letter-spacing: 0.05em;
   color: var(--ink-3);
+}
+
+h1.battle-server-copy,
+h2.battle-server-copy {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+h2.battle-server-copy {
+  font-size: 1.15rem;
+}
+
+/* Turn / actor / event are three separate facts; they must not run together. */
+.battle-log-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin-bottom: 0.2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
 .battle-result h2 {
@@ -1655,17 +1807,98 @@ select option {
   font-size: 0.88rem;
 }
 
+/* Roster on the left, the chosen combatant held beside it — a full-width
+   band under the grid strands the portrait in dead space. */
 .battle-select {
   display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(15rem, 0.85fr);
   gap: var(--space-md);
+  align-items: start;
+}
+
+@media (max-width: 62rem) {
+  .battle-select {
+    grid-template-columns: 1fr;
+  }
+}
+
+.battle-ready {
+  display: grid;
+  justify-items: center;
+  gap: 0.4rem;
+  text-align: center;
+}
+
+.battle-ready .plant-avatar {
+  max-width: 8.5rem;
+  margin-bottom: 0.3rem;
+}
+
+/* Four stats in a narrow rail read better stacked two-up. */
+.battle-ready .stat-grid {
+  grid-template-columns: repeat(2, 1fr);
+  width: 100%;
+  margin-block: var(--space-xs);
+}
+
+.battle-ready .primary-cta {
+  width: 100%;
+  margin-top: var(--space-xs);
+}
+
+.battle-ready .details-link {
+  margin-top: 0.35rem;
 }
 
 .battle-page > * + * {
   margin-top: var(--space-lg);
 }
 
-.battle-abandon {
+/* Label above the read, so the two do not run together. */
+.intent-panel {
+  display: grid;
+  gap: 0.3rem;
+  width: 100%;
+}
+
+.intent-panel > span {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--ink-3);
+}
+
+.intent-panel > strong {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+/* Destructive escape hatch: quiet until hovered, never competing with moves. */
+.battle-abandon {
+  justify-self: start;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 200ms var(--ease), color 200ms var(--ease);
+}
+
+.battle-abandon:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.battle-abandon:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ============================================================================
@@ -2077,25 +2310,33 @@ select option {
   transform: rotate(12deg);
 }
 
+/* The opponent must never read as one of your own plants. It keeps the field
+   guide's palette but sits at the bramble end of it — dead-wood red-brown
+   rather than living green — so friend and foe are separable at a glance. */
+.bot-avatar {
+  --body: linear-gradient(158deg, oklch(0.48 0.105 34), oklch(0.31 0.075 28));
+}
+
 .thorn {
   position: absolute;
-  width: 1.5px;
-  height: 8%;
-  border-radius: var(--radius-pill);
-  background: oklch(0.95 0.03 100 / 0.6);
+  bottom: 46%;
+  width: 0;
+  height: 0;
+  border-right: 0.42rem solid transparent;
+  border-bottom: 0.85rem solid oklch(0.62 0.11 40);
   z-index: calc(var(--z-base) + 1);
 }
 
 .thorn.left {
-  left: 36%;
-  bottom: 56%;
-  transform: rotate(-24deg);
+  left: 16%;
+  transform: rotate(-42deg);
 }
 
 .thorn.right {
-  right: 36%;
-  bottom: 62%;
-  transform: rotate(24deg);
+  right: 16%;
+  border-right: 0;
+  border-left: 0.42rem solid transparent;
+  transform: rotate(42deg);
 }
 
 .bot-sprite,
