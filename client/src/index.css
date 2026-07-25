@@ -1,16 +1,25 @@
+/* Document-level defaults only. The design system lives in App.css. */
+
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 * {
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
-  background: #fafafa;
+html {
+  scroll-behavior: smooth;
 }
 
-code {
-  font-family: ui-monospace, Consolas, monospace;
+body {
+  margin: 0;
+  /* Matches --ground so there is no flash of light before App.css applies. */
+  background: #0d1a12;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
