@@ -1,0 +1,101 @@
+# Sprout focused test suites (Checkoff 3 evidence set).
+#
+# Mirrors the six non-overlapping focused command groups recorded in
+# docs/checkoff3/archive-pve-verification-evidence.md so every pull request
+# to main re-runs the same evidence commands (223 assertions across 11 files
+# at the time of recording).
+#
+# No secrets are required: server tests force the Firestore Emulator
+# (tests/setup-env.ts sets FIRESTORE_EMULATOR_HOST/GCLOUD_PROJECT and strips
+# service-account variables), email runs in console mode, and client tests
+# mock sproutApi at the network boundary.
+
+name: tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-focused:
+    name: Server focused suites (Jest + Firestore Emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # The Firestore Emulator is a Java program.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # firebase-tools downloads the emulator jar on first use.
+      - name: Cache Firebase emulator binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            firebase-emulators-${{ runner.os }}-
+
+      - name: Install workspaces
+        run: npm ci
+        working-directory: .
+
+      - name: Typecheck server
+        run: npm run typecheck
+
+      - name: 'Group 1: eligibility + catalog unit suites (no emulator)'
+        run: npm exec -- jest --runInBand --runTestsByPath tests/battle-eligibility.test.ts tests/battle-catalog.test.ts
+
+      - name: 'Group 2: Firestore battle repository + avatar HTTP API'
+        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "jest --runInBand --runTestsByPath tests/battle-repository.test.ts tests/avatar-api.test.ts"
+
+      - name: 'Group 3: PVE HTTP API'
+        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "jest --runInBand --runTestsByPath tests/battle-api.test.ts"
+
+      - name: 'Group 4: battle engine unit/property + demo archive'
+        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "jest --runInBand --runTestsByPath tests/battle-engine.test.ts tests/battle-engine.property.test.ts tests/avatar-demo.test.ts"
+
+  client-focused:
+    name: Client focused suites (Vitest + Testing Library)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspaces
+        run: npm ci
+        working-directory: .
+
+      - name: 'Group 5: BattlePage + AppHeader navigation lock'
+        run: npm exec -- vitest run src/pages/BattlePage.test.tsx src/components/common/AppHeader.navigation-lock.test.tsx
+
+      - name: 'Group 6: ArchivePage'
+        run: npm exec -- vitest run src/pages/ArchivePage.test.tsx
