@@ -31,6 +31,7 @@ vi.mock('../hooks/useAuth', () => ({
     firebaseUser: null,
     profile: null,
     login: vi.fn(),
+    loginWithGoogle: vi.fn(),
     logout: vi.fn(),
     refreshProfile: mocks.refreshProfile,
   }),

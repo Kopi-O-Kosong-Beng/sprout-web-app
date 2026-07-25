@@ -135,6 +135,7 @@ const authValue: AuthContextValue = {
     emailVerified: true,
   },
   login: vi.fn(),
+  loginWithGoogle: vi.fn(),
   logout,
   refreshProfile: vi.fn(),
 };

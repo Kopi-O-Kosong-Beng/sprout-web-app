@@ -319,6 +319,43 @@ export async function recordSessionLogout(idToken?: string): Promise<AuthProfile
   return data;
 }
 
+export interface AdminAccount {
+  id: string;
+  email: string;
+  displayName: string;
+  isVerified: boolean;
+  isAdmin: boolean;
+  pveXp: number;
+  pveWins: number;
+  pveLosses: number;
+  createdAt: string | null;
+  lastLogin: string | null;
+}
+
+export interface AdminAccountList {
+  items: AdminAccount[];
+  total: number;
+}
+
+export interface DeleteAccountResult {
+  id: string;
+  firebaseIdentityDeleted: boolean;
+  profileDeleted: boolean;
+}
+
+/** Admin-only: 403 for anyone outside the server's ADMIN_EMAILS allowlist. */
+export async function listAdminAccounts(): Promise<AdminAccountList> {
+  const { data } = await apiClient.get<AdminAccountList>('/api/admin/users');
+  return data;
+}
+
+export async function deleteAdminAccount(uid: string): Promise<DeleteAccountResult> {
+  const { data } = await apiClient.delete<DeleteAccountResult>(
+    `/api/admin/users/${encodeURIComponent(uid)}`
+  );
+  return data;
+}
+
 export async function requestPasswordReset(email: string): Promise<MessageResponse> {
   const { data } = await apiClient.post<MessageResponse>('/api/auth/request-reset', {
     email,

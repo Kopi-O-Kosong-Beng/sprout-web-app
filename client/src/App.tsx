@@ -11,6 +11,7 @@ import ContactPage from './pages/ContactPage';
 import ArchivePage from './pages/ArchivePage';
 import BattlePage from './pages/BattlePage';
 import BackendTestPage from './pages/BackendTestPage';
+import AdminPage from './pages/AdminPage';
 import './App.css';
 
 function App() {
@@ -39,6 +40,16 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <BattlePage />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Signed-in gate only; the server's ADMIN_EMAILS allowlist is
+                  the real authority and returns 403 to everyone else. */}
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute>
+                    <AdminPage />
                   </ProtectedRoute>
                 }
               />

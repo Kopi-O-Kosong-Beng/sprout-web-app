@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { signupUser, type SignupResponse } from '../services/sproutApi';
 import { extractApiError } from '../services/apiClient';
+import { useAuth } from '../hooks/useAuth';
 import { getPasswordCriteria, isStrongPassword } from '../utils/validation';
 
 export default function SignupPage() {
+  const { loginWithGoogle } = useAuth();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -17,6 +19,19 @@ export default function SignupPage() {
 
   const criteria = getPasswordCriteria(password);
   const passwordsMatch = password === confirm;
+
+  async function handleGoogleSignup() {
+    setError(null);
+    setDuplicateEmail(false);
+    setSubmitting(true);
+    try {
+      await loginWithGoogle();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Google sign-in failed.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -182,6 +197,17 @@ export default function SignupPage() {
           <button className="primary-cta form-submit" type="submit" disabled={submitting}>
             <span aria-hidden="true">-&gt;</span>
             {submitting ? 'Creating…' : 'Create Account'}
+          </button>
+          <p className="auth-divider">or</p>
+          {/* Google accounts arrive already verified, so this route skips the
+              verification email entirely. */}
+          <button
+            className="secondary-cta form-submit"
+            type="button"
+            onClick={handleGoogleSignup}
+            disabled={submitting}
+          >
+            Continue with Google
           </button>
         </form>
 
