@@ -651,6 +651,28 @@ textarea {
   text-transform: uppercase;
 }
 
+/* UC4 species facts (habitat, conservation status) in the archive detail. */
+.species-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0.85rem 0 0;
+  font-size: 0.92rem;
+}
+
+.species-facts dt {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+  text-transform: uppercase;
+  font-size: 0.74rem;
+  align-self: center;
+}
+
+.species-facts dd {
+  margin: 0;
+}
+
 /* Admin account table. Wide content scrolls inside its own container so the
    page body never scrolls horizontally on a narrow screen. */
 .table-scroll {
