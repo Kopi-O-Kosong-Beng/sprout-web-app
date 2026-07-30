@@ -1,0 +1,131 @@
+import sharp from "sharp";
+import { SPROUT_PALETTE, SPRITE_SIZE } from "../config";
+
+/** Alpha at or below this counts as background for the connected-region pass. */
+const OPAQUE_THRESHOLD = 32;
+
+/**
+ * Step 1 / §3d: finishSprite
+ *
+ * Downscales to 192x192 with a nearest-neighbour kernel, drops every opaque
+ * region except the largest, then snaps the survivors to SPROUT_PALETTE.
+ *
+ * `fit: "contain"` rather than "cover": cover crops to fill, which lopped the
+ * top off tall sprites (a leaf crown, a plume). Contain letterboxes into
+ * transparency instead, so the creature arrives whole and the dimensions stay
+ * exactly 192x192 for programmaticEval's dimsOk check.
+ */
+export async function finishSprite(png: Buffer): Promise<Buffer> {
+  const { data, info } = await sharp(png)
+    .resize(SPRITE_SIZE, SPRITE_SIZE, {
+      kernel: "nearest",
+      fit: "contain",
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  removeStrayIslands(data, info.width, info.height);
+
+  const pal = SPROUT_PALETTE.map(hex => [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ]);
+
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 128) continue; // leave transparent pixels
+    let best = 0, bestD = Infinity;
+    for (let p = 0; p < pal.length; p++) {
+      const dr = data[i] - pal[p][0];
+      const dg = data[i + 1] - pal[p][1];
+      const db = data[i + 2] - pal[p][2];
+      const d = dr * dr + dg * dg + db * db;
+      if (d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    data[i] = pal[best][0];
+    data[i + 1] = pal[best][1];
+    data[i + 2] = pal[best][2];
+  }
+
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })
+    .png()
+    .toBuffer();
+}
+
+/**
+ * Keeps only the largest connected opaque region, zeroing the alpha of
+ * everything else. This clears the stray white islands the matting model leaves
+ * in a corner — the "background didn't fully trim" artifact — while leaving the
+ * creature itself untouched.
+ *
+ * Mutates `data` (RGBA) in place. 4-connectivity, iterative flood fill so a
+ * large sprite can't blow the call stack.
+ */
+function removeStrayIslands(data: Buffer, width: number, height: number): void {
+  const count = width * height;
+  const alphaAt = (i: number) => data[i * 4 + 3];
+
+  const labels = new Int32Array(count).fill(-1);
+  const stack: number[] = [];
+  let bestLabel = -1;
+  let bestSize = 0;
+  let nextLabel = 0;
+
+  for (let start = 0; start < count; start++) {
+    if (labels[start] !== -1 || alphaAt(start) <= OPAQUE_THRESHOLD) continue;
+
+    const label = nextLabel++;
+    let size = 0;
+    stack.push(start);
+    labels[start] = label;
+
+    while (stack.length > 0) {
+      const p = stack.pop()!;
+      size++;
+      const x = p % width;
+      const y = (p / width) | 0;
+
+      const neighbours = [
+        x > 0 ? p - 1 : -1,
+        x < width - 1 ? p + 1 : -1,
+        y > 0 ? p - width : -1,
+        y < height - 1 ? p + width : -1,
+      ];
+      for (const n of neighbours) {
+        if (n >= 0 && labels[n] === -1 && alphaAt(n) > OPAQUE_THRESHOLD) {
+          labels[n] = label;
+          stack.push(n);
+        }
+      }
+    }
+
+    if (size > bestSize) {
+      bestSize = size;
+      bestLabel = label;
+    }
+  }
+
+  if (bestLabel === -1) return; // fully transparent input — nothing to keep
+
+  for (let p = 0; p < count; p++) {
+    if (labels[p] !== bestLabel) data[p * 4 + 3] = 0;
+  }
+}
+
+/**
+ * Tier 4 Fallback: Crop center of photo to 192x192 PNG buffer
+ */
+export async function cropPhoto(photoBase64: string): Promise<Buffer> {
+  const cleanB64 = photoBase64.replace(/^data:image\/\w+;base64,/, "");
+  const inputBuffer = Buffer.from(cleanB64, "base64");
+  
+  return sharp(inputBuffer)
+    .resize(SPRITE_SIZE, SPRITE_SIZE, { fit: "cover" })
+    .png()
+    .toBuffer();
+}

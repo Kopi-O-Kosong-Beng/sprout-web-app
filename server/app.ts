@@ -10,6 +10,8 @@ import queryRoutes from './routes/query.routes';
 import avatarRoutes from './routes/avatar.routes';
 import battleRoutes from './routes/battle.routes';
 import adminRoutes from './routes/admin.routes';
+import pipelineRoutes from './routes/pipeline.routes';
+import platformRoutes from './routes/platform.routes';
 
 const app = express();
 
@@ -67,6 +69,11 @@ app.use('/api/query', queryRoutes);
 app.use('/api/avatar', avatarRoutes);
 app.use('/api/battle/pve', battleRoutes);
 app.use('/api/admin', adminRoutes);
+// Migrated from Sprout_Dev_Platform. The sprite pipeline any verified account
+// may run, and the operations portal that watches it — which kept the platform's
+// route names but moved off /api/admin, already used by account management.
+app.use('/api/pipeline', pipelineRoutes);
+app.use('/api/platform', platformRoutes);
 
 // 404 for unknown API paths
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

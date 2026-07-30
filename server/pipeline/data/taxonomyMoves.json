@@ -1,0 +1,28 @@
+{
+  "defaultMoves": [
+    { "id": "tackle", "name": "Tackle", "power": 15, "cooldown": 0, "accuracy": 90, "type": "Physical" },
+    { "id": "vine_whip", "name": "Vine Whip", "power": 20, "cooldown": 0, "accuracy": 85, "type": "Grass" },
+    { "id": "leaf_shield", "name": "Leaf Shield", "power": 0, "cooldown": 10, "accuracy": 100, "type": "Status" },
+    { "id": "solar_blast", "name": "Solar Blast", "power": 35, "cooldown": -5, "accuracy": 75, "type": "Special" }
+  ],
+  "taxonomyMap": {
+    "Plantae": [
+      { "id": "petal_dance", "name": "Petal Dance", "power": 25, "cooldown": 0, "accuracy": 90, "type": "Grass" },
+      { "id": "spore_burst", "name": "Spore Burst", "power": 18, "cooldown": 2, "accuracy": 95, "type": "Status" },
+      { "id": "root_tangle", "name": "Root Tangle", "power": 22, "cooldown": 1, "accuracy": 88, "type": "Grass" },
+      { "id": "sunlight_beam", "name": "Sunlight Beam", "power": 30, "cooldown": 3, "accuracy": 80, "type": "Special" }
+    ],
+    "Tracheophyta": [
+      { "id": "sap_drain", "name": "Sap Drain", "power": 20, "cooldown": 1, "accuracy": 90, "type": "Special" },
+      { "id": "thorn_barrage", "name": "Thorn Barrage", "power": 24, "cooldown": 0, "accuracy": 85, "type": "Physical" },
+      { "id": "photosynthesis", "name": "Photosynthesis", "power": 0, "cooldown": 8, "accuracy": 100, "type": "Status" },
+      { "id": "chlorophyll_surge", "name": "Chlorophyll Surge", "power": 28, "cooldown": 2, "accuracy": 85, "type": "Special" }
+    ],
+    "Magnoliopsida": [
+      { "id": "pollen_storm", "name": "Pollen Storm", "power": 26, "cooldown": 2, "accuracy": 85, "type": "Special" },
+      { "id": "brier_whip", "name": "Brier Whip", "power": 22, "cooldown": 0, "accuracy": 90, "type": "Physical" },
+      { "id": "flora_shield", "name": "Flora Shield", "power": 0, "cooldown": 10, "accuracy": 100, "type": "Status" },
+      { "id": "petal_blades", "name": "Petal Blades", "power": 32, "cooldown": 3, "accuracy": 80, "type": "Physical" }
+    ]
+  }
+}

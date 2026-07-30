@@ -27,3 +27,39 @@ describe('trust proxy configuration', () => {
     );
   });
 });
+
+/** Routes migrated from Sprout_Dev_Platform.
+ *
+ *  There they were served from the same origin as the SPA with no credentials
+ *  at all. The two things worth pinning here are that they are mounted where the
+ *  client now expects them, and that neither is reachable anonymously —
+ *  /config-status enumerates which provider keys exist and /run-tests spawns a
+ *  process, so an unauthenticated 200 from either would be the bug.
+ */
+describe('migrated pipeline and platform routes', () => {
+  it('keeps the pre-existing health check unauthenticated', async () => {
+    const response = await request(app).get('/api/health');
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('ok');
+  });
+
+  it('mounts the sprite pipeline behind authentication', async () => {
+    const response = await request(app)
+      .post('/api/pipeline/run-stream')
+      .send({ imageBase64: 'data:image/jpeg;base64,AAAA' });
+
+    // 401, not 404: the route exists, the caller is simply not signed in.
+    expect(response.status).toBe(401);
+  });
+
+  it('mounts the operations portal behind authentication', async () => {
+    const response = await request(app).get('/api/platform/config-status');
+    expect(response.status).toBe(401);
+  });
+
+  it('does not let the portal shadow the account-management admin routes', async () => {
+    // Both were called /api/admin in their source repos; only one still is.
+    const response = await request(app).get('/api/admin/users');
+    expect(response.status).toBe(401);
+  });
+});
