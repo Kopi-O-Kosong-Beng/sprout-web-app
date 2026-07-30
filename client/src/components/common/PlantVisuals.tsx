@@ -1,4 +1,17 @@
-/** Shared plant visuals and sample data for the remaining static previews. */
+/**
+ * Shared plant visuals.
+ *
+ * These used to be CSS-art — layered spans drawing a leaf, a face and a pot.
+ * The pixel-art system ships the real painted assets the Android game used, so
+ * each avatar is now the genuine composite the garden screens draw: the empty
+ * pot from `/img/ic_pot_empty.png` with the plant's 192×192 sprite standing in
+ * it. When a record has no sprite yet the pot renders on its own, which is what
+ * an empty slot on the shelf looks like anyway.
+ *
+ * The exported surface is unchanged — `PlantAvatarData`, the role="img"
+ * wrappers and their aria-labels are what the archive, battle and presentation
+ * layers are written against.
+ */
 import { useState } from 'react';
 
 export interface PlantAvatarData {
@@ -82,6 +95,34 @@ export const plantAvatars: PlantAvatarData[] = [
   },
 ];
 
+/** The pot, and the sprite standing in it when there is one. */
+function PottedSprite({
+  spriteUrl,
+  wiggle = false,
+}: {
+  spriteUrl?: string;
+  wiggle?: boolean;
+}) {
+  const [failedSpriteUrl, setFailedSpriteUrl] = useState<string | null>(null);
+  const trimmed = spriteUrl?.trim();
+  const showSprite = Boolean(trimmed && trimmed !== failedSpriteUrl);
+
+  return (
+    <>
+      <img className="pot-art" src="/img/ic_pot_empty.png" alt="" draggable={false} />
+      {showSprite && (
+        <img
+          className={wiggle ? 'plant-sprite wiggle' : 'plant-sprite'}
+          src={trimmed}
+          alt=""
+          draggable={false}
+          onError={() => setFailedSpriteUrl(trimmed ?? null)}
+        />
+      )}
+    </>
+  );
+}
+
 export function PlantAvatar({
   avatar,
   large = false,
@@ -89,35 +130,17 @@ export function PlantAvatar({
   avatar: PlantAvatarData;
   large?: boolean;
 }) {
-  const [failedSpriteUrl, setFailedSpriteUrl] = useState<string | null>(null);
-  const spriteUrl = avatar.spriteUrl?.trim();
-  const showSprite = Boolean(spriteUrl && spriteUrl !== failedSpriteUrl);
+  const showSprite = Boolean(avatar.spriteUrl?.trim());
 
   return (
     <span
-      className={`${large ? `plant-avatar ${avatar.color} large` : `plant-avatar ${avatar.color}`}${showSprite ? ' has-sprite' : ''}`}
+      className={`plant-avatar ${avatar.color}${large ? ' large' : ''}${
+        showSprite ? ' has-sprite' : ''
+      }`}
       role="img"
       aria-label={`${avatar.name} avatar`}
     >
-      {showSprite ? (
-        <img
-          className="plant-sprite"
-          src={spriteUrl}
-          alt=""
-          draggable={false}
-          onError={() => setFailedSpriteUrl(spriteUrl ?? null)}
-        />
-      ) : (
-        <>
-          <span className="leaf left" />
-          <span className="leaf right" />
-          <span className="face">
-            <span />
-            <span />
-          </span>
-          <span className="pot" />
-        </>
-      )}
+      <PottedSprite spriteUrl={avatar.spriteUrl} />
     </span>
   );
 }
@@ -129,11 +152,7 @@ export function BotAvatar({
   name: string;
   spriteUrl?: string;
 }) {
-  const [failedSpriteUrl, setFailedSpriteUrl] = useState<string | null>(null);
-  const normalizedSpriteUrl = spriteUrl?.trim();
-  const showSprite = Boolean(
-    normalizedSpriteUrl && normalizedSpriteUrl !== failedSpriteUrl
-  );
+  const showSprite = Boolean(spriteUrl?.trim());
 
   return (
     <span
@@ -141,57 +160,34 @@ export function BotAvatar({
       role="img"
       aria-label={`${name} avatar`}
     >
-      {showSprite ? (
-        <img
-          className="bot-sprite"
-          src={normalizedSpriteUrl}
-          alt=""
-          draggable={false}
-          onError={() => setFailedSpriteUrl(normalizedSpriteUrl ?? null)}
-        />
-      ) : (
-        <>
-          <span className="thorn left" />
-          <span className="thorn right" />
-          <span className="bot-eyes" />
-          <span className="pot" />
-        </>
-      )}
+      <PottedSprite spriteUrl={spriteUrl} />
     </span>
   );
 }
 
-export function CactusHero() {
-  return (
-    <div className="cactus-hero" aria-hidden="true">
-      <span className="arm arm-left" />
-      <span className="arm arm-right" />
-      <span className="cactus-body">
-        <i />
-        <i />
-        <i />
-      </span>
-      <span className="cactus-face" />
-      <span className="hero-pot" />
-    </div>
-  );
-}
-
+/** The Sprout mark — a seedling inside a camera aperture. */
 export function SproutMark() {
   return (
-    <span className="sprout-mark" aria-hidden="true">
-      <span />
-      <span />
-    </span>
+    <img
+      className="sprout-mark"
+      src="/brand/sprout_mark_white.png"
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+    />
   );
 }
 
+/** Three pots on a shelf — the decorative aside on the auth and contact pages. */
 export function MiniArchive() {
   return (
     <div className="mini-archive" aria-hidden="true">
-      {plantAvatars.slice(0, 3).map((avatar) => (
-        <PlantAvatar key={avatar.id} avatar={avatar} />
-      ))}
+      <div className="mini-archive-slots">
+        {plantAvatars.slice(0, 3).map((avatar) => (
+          <PlantAvatar key={avatar.id} avatar={avatar} />
+        ))}
+      </div>
+      <img className="shelf-art" src="/img/ic_shelf.png" alt="" draggable={false} />
     </div>
   );
 }
@@ -239,10 +235,14 @@ export function HealthBar({
     ? Math.min(Math.max(0, current), boundedMax)
     : 0;
   const percentage = boundedMax > 0 ? (boundedCurrent / boundedMax) * 100 : 0;
+  // Green above 50%, amber above 20%, red below — standard HP-bar banding,
+  // carried over from the Android battle screen.
+  const band =
+    percentage > 50 ? 'is-high' : percentage > 20 ? 'is-mid' : 'is-low';
 
   return (
     <div
-      className="health-meter"
+      className={`health-meter ${band}`}
       role="progressbar"
       aria-label={`${label} ${boundedCurrent} of ${boundedMax}`}
       aria-valuemin={0}

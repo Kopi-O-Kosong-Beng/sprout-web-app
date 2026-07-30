@@ -560,10 +560,12 @@ describe('BattlePage', () => {
     expect(screen.getByText('Sun 5 / 5')).toBeVisible();
     expect(screen.getByText('Sun 0 / 3')).toBeVisible();
     expect(screen.getByText(/committed to a decisive action/i)).toBeVisible();
+    // No sprite on the bot: the pot is drawn on its own. Scoped to
+    // .plant-sprite because the pot itself is now a painted <img>.
     expect(
       screen
         .getByRole('img', { name: /thornback avatar/i })
-        .querySelector('img')
+        .querySelector('.plant-sprite')
     ).toBeNull();
 
     const moves = screen.getByRole('group', { name: /battle moves/i });
@@ -608,9 +610,12 @@ describe('BattlePage', () => {
     expect(heal).toHaveAttribute('aria-disabled', 'true');
     expect(heal).toHaveAccessibleDescription(/already used this battle/i);
 
-    await user.tab();
-    await user.tab();
-    await user.tab();
+    // Tab until the guarded move is reached rather than assuming a fixed count:
+    // the point is that an unavailable move stays in the tab order, and the
+    // battle screen's chrome (the back button) sits ahead of the move grid.
+    for (let i = 0; i < 12 && document.activeElement !== signature; i += 1) {
+      await user.tab();
+    }
     expect(signature).toHaveFocus();
     await user.keyboard('{Enter}');
     expect(apiMocks.submitPveAction).not.toHaveBeenCalled();

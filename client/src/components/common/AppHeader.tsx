@@ -3,10 +3,14 @@ import { useAuth } from '../../hooks/useAuth';
 import { useNavigationLock } from '../../hooks/useNavigationLock';
 import { SproutMark } from './PlantVisuals';
 
+/** `/home` is the in-game hub; `/` is the public landing page. Scan is reached
+ *  from the hub, which is where the game's own design puts it. */
 const navItems = [
   { to: '/', label: 'Home', requiresAuth: false },
+  { to: '/home', label: 'Play', requiresAuth: true },
   { to: '/archive', label: 'Archive', requiresAuth: true },
   { to: '/battle', label: 'PVE Battle', requiresAuth: true },
+  { to: '/studio', label: 'Studio', requiresAuth: true },
   { to: '/contact', label: 'Contact', requiresAuth: false },
   { to: '/test', label: 'API Test', requiresAuth: false },
 ];

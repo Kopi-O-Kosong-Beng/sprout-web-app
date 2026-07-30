@@ -373,7 +373,7 @@ describe('ArchivePage', () => {
     expect(await screen.findByRole('heading', { name: 'Fern Ward' })).toBeVisible();
   });
 
-  it('falls back to the CSS plant when a sprite image fails', async () => {
+  it('falls back to the empty pot when a sprite image fails', async () => {
     apiMocks.listOwnedAvatars.mockResolvedValue({
       ...collectedPage,
       items: [collectedPage.items[0]],
@@ -383,13 +383,16 @@ describe('ArchivePage', () => {
     const visual = (await screen.findAllByRole('img', {
       name: /fern ward avatar/i,
     }))[0];
-    const sprite = visual.querySelector('img');
+    const sprite = visual.querySelector('.plant-sprite');
 
     expect(sprite).not.toBeNull();
     fireEvent.error(sprite!);
 
-    expect(visual.querySelector('img')).toBeNull();
-    expect(visual.querySelector('.leaf')).not.toBeNull();
+    // The pixel-art redesign draws the pot as a real painted asset and stands
+    // the sprite in it, so a broken sprite leaves the pot rather than the
+    // CSS-art leaf/face/pot spans this used to assert on.
+    expect(visual.querySelector('.plant-sprite')).toBeNull();
+    expect(visual.querySelector('.pot-art')).not.toBeNull();
   });
 });
 

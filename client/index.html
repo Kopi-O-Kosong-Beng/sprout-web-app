@@ -1,26 +1,42 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f1b13" />
+    <link rel="icon" type="image/png" href="/img/app_logo.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- viewport-fit=cover lets the game screens extend behind the notch and the
+         home indicator; the .safe-top / .safe-bottom helpers pad them back.
+         maximum-scale blocks the double-tap zoom that makes tapping pixel
+         buttons feel broken. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover"
+    />
+    <!-- Sprout brand green, sampled from the logo card. -->
+    <meta name="theme-color" content="#203727" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- iOS Safari has long keyed off this legacy tag to launch without browser
+         chrome. Both are declared so full-screen mode does not rely on aliasing. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta
       name="description"
-      content="Sprout turns the plants around you into a field guide you can play. Identify a species, collect its plate, and battle with what you have found."
+      content="Scan real plants. Battle them. Sprout identifies a species from a photo, renders it as a pixel-art creature, and gives it a moveset drawn from its real botanical taxonomy."
     />
-    <title>Sprout — a field guide you can play</title>
+    <title>Sprout — Scan real plants. Battle them.</title>
 
-    <!-- Fraunces carries the plate headings (optical size + soft/wonk axes),
-         IBM Plex Sans the reading text, IBM Plex Mono the taxonomy labels. -->
+    <!-- Press Start 2P is self-hosted (see the @font-face in index.css) and
+         carries the game chrome. These three serve the studio section: Inter for
+         its dense operational copy, JetBrains Mono for telemetry, Silkscreen for
+         its section kickers. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Silkscreen:wght@400;700&display=swap"
       rel="stylesheet"
     />
   </head>
-  <body>
+  <body class="min-h-full antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -1,36 +1,58 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PlantAvatar, StatGrid } from '../components/common/PlantVisuals';
+import BackButton from '../components/common/BackButton';
+import {
+  PlantAvatar,
+  StatGrid,
+  type PlantAvatarData,
+} from '../components/common/PlantVisuals';
 import { useArchive } from '../hooks/useArchive';
+
+/**
+ * The archive, drawn as the Android garden: pots resting on shelf planks, three
+ * to a plank, with the selected plant's record on a card underneath.
+ *
+ * Ported from plantemon-web's (app)/garden/page.tsx. That screen hard-capped at
+ * six pots because the Android garden had six; the archive here has no cap, so
+ * the shelves keep stacking in rows of three and the empty tail of the last row
+ * is padded out so the plank still reads as a shelf.
+ */
+
+/** Pots to a plank, from activity_garden.xml. */
+const SLOTS_PER_SHELF = 3;
 
 export default function ArchivePage() {
   const navigate = useNavigate();
   const demoToolsEnabled = import.meta.env.VITE_ENABLE_DEMO_TOOLS === 'true';
-  const {
-    avatars,
-    status,
-    error,
-    demoEnabled,
-    setDemoEnabled,
-    retry,
-  } = useArchive();
+  const { avatars, status, error, demoEnabled, setDemoEnabled, retry } = useArchive();
   const [selectedAvatarId, setSelectedAvatarId] = useState<string | null>(null);
   const selected =
     avatars.find((avatar) => avatar.id === selectedAvatarId) ?? avatars[0] ?? null;
   const demoAction = demoEnabled ? 'Remove demo plants' : 'Add five demo plants';
+  const settled = status === 'ready' || status === 'mutating';
+
+  // Pad the final plank so a row of one or two still sits on a full shelf.
+  const shelfCount = Math.max(1, Math.ceil(avatars.length / SLOTS_PER_SHELF));
+  const shelves = Array.from({ length: shelfCount }, (_, row) =>
+    Array.from(
+      { length: SLOTS_PER_SHELF },
+      (_, column) => avatars[row * SLOTS_PER_SHELF + column]
+    )
+  );
 
   return (
-    <main className="content-page">
-      <section className="page-heading">
-        <p className="eyebrow">Plant archival</p>
-        <h1>Your plant archive</h1>
-        <p>Your collected plants, ready for the next match.</p>
-      </section>
+    <main className="screen screen-scrollable flex flex-col">
+      <img
+        src="/img/bg_garden.jpeg"
+        alt=""
+        className="absolute inset-0 -z-10 h-full w-full object-cover"
+      />
 
-      {demoToolsEnabled && (
-        <div className="archive-toolbar">
+      <div className="safe-top flex items-center justify-between gap-2 px-3">
+        <BackButton />
+        {demoToolsEnabled && settled && (
           <button
-            className="demo-switch"
+            className="press pixel-button px-3 py-2 text-[9px]"
             type="button"
             role="switch"
             aria-checked={demoEnabled}
@@ -39,124 +61,213 @@ export default function ArchivePage() {
             disabled={status !== 'ready'}
             onClick={() => void setDemoEnabled(!demoEnabled)}
           >
-            <span className="demo-switch-track" aria-hidden="true">
-              <span />
-            </span>
-            <span>{demoAction}</span>
+            {demoAction}
           </button>
-          {status === 'mutating' && (
-            <span
-              className="demo-mutation-status"
-              role="status"
-              aria-label="Updating demo plants"
-            >
-              Updating demo plants...
-            </span>
-          )}
-        </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-center gap-3 px-4">
+        <img
+          src="/img/ic_garden_header.png"
+          alt=""
+          className="pixelated h-16 w-16 object-contain sm:h-24 sm:w-24"
+        />
+        <h1 className="font-pixel text-outline text-xl text-white sm:text-3xl">Archive</h1>
+      </div>
+
+      {status === 'mutating' && (
+        <p
+          className="pixel-panel mx-auto mt-2 px-3 py-2 text-center text-[10px]"
+          role="status"
+          aria-label="Updating demo plants"
+        >
+          Updating demo plants...
+        </p>
       )}
 
       {status === 'loading' && (
-        <section
-          className="archive-layout archive-loading"
+        <div
+          className="flex flex-1 items-center justify-center p-8"
           role="status"
           aria-label="Loading archive"
           aria-live="polite"
         >
-          <div className="avatar-grid" aria-hidden="true">
-            {Array.from({ length: 5 }, (_, index) => (
-              <span className="archive-skeleton-card" key={index} />
-            ))}
-          </div>
-          <aside className="detail-panel archive-skeleton-detail" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </aside>
-        </section>
+          <p className="pixel-panel font-pixel px-4 py-3 text-xs">Loading…</p>
+        </div>
       )}
 
       {status === 'error' && (
-        <section className="archive-state archive-error" role="alert">
-          <h2>Archive unavailable</h2>
-          <p>{error}</p>
-          <button className="primary-cta archive-retry" type="button" onClick={retry}>
-            Retry
-          </button>
-        </section>
+        <div className="flex flex-1 items-center justify-center p-6" role="alert">
+          <div className="pixel-panel w-full max-w-xs p-4 text-center">
+            <h2 className="font-pixel text-xs leading-relaxed">Archive unavailable</h2>
+            <p className="mt-2 text-[10px] leading-relaxed opacity-80">{error}</p>
+            <button
+              className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
+              type="button"
+              onClick={retry}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
       )}
 
-      {(status === 'ready' || status === 'mutating') && avatars.length === 0 && (
-        <section className="archive-state archive-empty">
-          <h2>No plants collected yet</h2>
-        </section>
+      {settled && avatars.length === 0 && (
+        <div className="flex flex-1 items-center justify-center p-6">
+          <p className="pixel-panel w-full max-w-xs p-4 text-center text-xs leading-relaxed">
+            No plants collected yet. Scan a plant to grow your first Plantemon.
+          </p>
+        </div>
       )}
 
-      {(status === 'ready' || status === 'mutating') && selected && (
-        <section className="archive-layout">
-          <div className="avatar-grid">
-            {avatars.map((avatar) => (
-              <button
-                key={avatar.id}
-                className={
-                  avatar.id === selected.id
-                    ? `avatar-card ${avatar.color} is-selected`
-                    : `avatar-card ${avatar.color}`
-                }
-                type="button"
-                aria-label={`Select ${avatar.name}${avatar.isDemo ? ' (Demo)' : ''}`}
-                aria-pressed={avatar.id === selected.id}
-                onClick={() => setSelectedAvatarId(avatar.id)}
-              >
-                {avatar.isDemo && <span className="demo-badge">Demo</span>}
-                <PlantAvatar avatar={avatar} />
-                <span>{avatar.name}</span>
-                <small>{avatar.species}</small>
-              </button>
+      {settled && selected && (
+        <div className="safe-bottom mx-auto w-full max-w-3xl px-2 pb-6">
+          <div className="mt-2 flex flex-col gap-2">
+            {shelves.map((plants, index) => (
+              <Shelf
+                key={index}
+                plants={plants}
+                selectedId={selected.id}
+                onSelect={setSelectedAvatarId}
+              />
             ))}
           </div>
 
-          <aside className="detail-panel">
-            <PlantAvatar key={selected.id} avatar={selected} large />
-            <p className="eyebrow">Selected avatar</p>
-            <h2>{selected.name}</h2>
-            <p>
-              {selected.species} from {selected.family}. Discovered on{' '}
-              {selected.discovered}.
-            </p>
-            {(selected.habitat || selected.conservationStatus) && (
-              <dl className="species-facts">
-                {selected.habitat && (
-                  <>
-                    <dt>Habitat</dt>
-                    <dd>{selected.habitat}</dd>
-                  </>
-                )}
-                {selected.conservationStatus && (
-                  <>
-                    <dt>Conservation status</dt>
-                    <dd>{selected.conservationStatus}</dd>
-                  </>
-                )}
-              </dl>
-            )}
-            <StatGrid avatar={selected} />
-            <button
-              className="primary-cta detail-action"
-              type="button"
-              disabled={status === 'mutating'}
-              onClick={() =>
-                navigate('/battle', {
-                  state: { avatarId: selected.id, avatar: selected },
-                })
-              }
-            >
-              <span aria-hidden="true">-&gt;</span>
-              Battle with {selected.name}
-            </button>
-          </aside>
-        </section>
+          <SpecimenCard
+            avatar={selected}
+            busy={status === 'mutating'}
+            onBattle={() =>
+              navigate('/battle', {
+                state: { avatarId: selected.id, avatar: selected },
+              })
+            }
+          />
+        </div>
       )}
     </main>
+  );
+}
+
+/** One plank with three potted slots resting on it. */
+function Shelf({
+  plants,
+  selectedId,
+  onSelect,
+}: {
+  plants: (PlantAvatarData | undefined)[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <section className="relative">
+      {/* Slots sit directly on the plank, which is drawn behind their feet. */}
+      <div className="relative z-10 flex items-end justify-around">
+        {plants.map((avatar, index) =>
+          avatar ? (
+            <button
+              key={avatar.id}
+              type="button"
+              aria-label={`Select ${avatar.name}${avatar.isDemo ? ' (Demo)' : ''}`}
+              aria-pressed={avatar.id === selectedId}
+              onClick={() => onSelect(avatar.id)}
+              className="press flex w-1/3 flex-col items-center"
+            >
+              <span
+                className={
+                  avatar.id === selectedId
+                    ? 'relative block rounded-full outline-3 outline-offset-2 outline-[color:var(--color-brand)]'
+                    : 'relative block'
+                }
+              >
+                <PlantAvatar avatar={avatar} />
+              </span>
+              {avatar.isDemo && (
+                <span className="font-pixel border-2 border-black bg-[color:var(--color-hp-mid)] px-1 text-[7px]">
+                  Demo
+                </span>
+              )}
+              <span className="font-pixel text-outline max-w-full truncate px-1 text-[7px] text-white sm:text-[9px]">
+                {avatar.name}
+              </span>
+            </button>
+          ) : (
+            <div key={`empty-${index}`} className="flex w-1/3 flex-col items-center opacity-90">
+              <span className="relative flex h-22 w-full items-end justify-center">
+                <img
+                  src="/img/ic_pot_empty.png"
+                  alt="Empty pot"
+                  className="pixelated h-14 w-14 object-contain sm:h-16 sm:w-16"
+                />
+              </span>
+            </div>
+          )
+        )}
+      </div>
+      <img
+        src="/img/ic_shelf.png"
+        alt=""
+        className="pixelated -mt-2 h-5 w-full object-fill sm:h-8"
+      />
+    </section>
+  );
+}
+
+/**
+ * The selected plant's record — the Android InfoActivity card, inlined under
+ * the shelves rather than living on its own route, so picking a pot and reading
+ * its record stay one screen.
+ */
+function SpecimenCard({
+  avatar,
+  busy,
+  onBattle,
+}: {
+  avatar: PlantAvatarData;
+  busy: boolean;
+  onBattle: () => void;
+}) {
+  return (
+    <div className="pixel-panel mt-4 p-4">
+      <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
+        <PlantAvatar key={avatar.id} avatar={avatar} large />
+
+        <div className="min-w-0 flex-1 text-center sm:text-left">
+          <p className="font-pixel text-[8px] opacity-60">Selected plant</p>
+          <h2 className="font-pixel mt-2 text-sm leading-relaxed">{avatar.name}</h2>
+          <p className="mt-2 text-xs leading-relaxed opacity-80">
+            {avatar.species} from {avatar.family}. Discovered on {avatar.discovered}.
+          </p>
+
+          {(avatar.habitat || avatar.conservationStatus) && (
+            <dl className="mt-3 space-y-1.5 text-xs leading-relaxed">
+              {avatar.habitat && (
+                <div>
+                  <dt className="font-pixel inline text-[8px]">Habitat</dt>{' '}
+                  <dd className="inline opacity-85">{avatar.habitat}</dd>
+                </div>
+              )}
+              {avatar.conservationStatus && (
+                <div>
+                  <dt className="font-pixel inline text-[8px]">Conservation status</dt>{' '}
+                  <dd className="inline opacity-85">{avatar.conservationStatus}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+        </div>
+      </div>
+
+      <StatGrid avatar={avatar} />
+
+      <button
+        className="press pixel-button mt-4 w-full px-2 py-3 text-[9px]"
+        style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+        type="button"
+        disabled={busy}
+        onClick={onBattle}
+      >
+        Battle with {avatar.name}
+      </button>
+    </div>
   );
 }

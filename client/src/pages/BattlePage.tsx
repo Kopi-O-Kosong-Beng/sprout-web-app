@@ -6,6 +6,7 @@ import {
   useState,
 } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import BackButton from '../components/common/BackButton';
 import {
   BotAvatar,
   HealthBar,
@@ -481,383 +482,460 @@ export default function BattlePage() {
   };
 
   return (
-    <main className="content-page battle-page">
-      <section className="page-heading battle-heading">
-        <p className="eyebrow">PVE battle lab</p>
-        <h1 className={session ? 'battle-server-copy' : undefined}>
-          {session
-            ? `${session.player.name} vs ${session.bot.name}`
-            : 'Battle practice'}
-        </h1>
-        <p>Read the intent, manage Sun, and commit one move per turn.</p>
-      </section>
+    <main className="screen screen-scrollable flex flex-col">
+      <img
+        src="/img/bg_battle.jpg"
+        alt=""
+        className="absolute inset-0 -z-10 h-full w-full object-cover"
+      />
 
-      {view === 'loading' && (
-        <section
-          className="archive-state battle-loading"
-          role="status"
-          aria-label="Loading battle roster"
-          aria-live="polite"
+      <div className="safe-top flex items-center px-3">
+        <BackButton />
+      </div>
+
+      <div className="px-4 pt-1 text-center">
+        <p className="font-pixel text-outline text-[8px] text-white">PVE battle lab</p>
+        <h1
+          className={`font-pixel text-outline mt-2 text-sm leading-relaxed text-white${
+            session ? ' battle-server-copy' : ''
+          }`}
         >
-          <span className="battle-loading-mark" aria-hidden="true" />
-          <h2>Loading your battle plants...</h2>
-        </section>
-      )}
+          {session ? `${session.player.name} vs ${session.bot.name}` : 'Battle practice'}
+        </h1>
+        <p className="text-soft-shadow mt-2 text-xs text-white/85">
+          Read the intent, manage Sun, and commit one move per turn.
+        </p>
+      </div>
 
-      {view === 'error' && retryCommand?.kind === 'load' && (
-        <section className="archive-state battle-empty" role="alert">
-          <h2>Battle roster unavailable</h2>
-          <p className="battle-server-copy">{error}</p>
-          <button
-            className="primary-cta archive-retry"
-            type="button"
-            onClick={handleRetry}
+      <div className="safe-bottom mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-3 py-3">
+        {view === 'loading' && (
+          <section
+            className="pixel-panel flex flex-col items-center gap-3 p-6 text-center"
+            role="status"
+            aria-label="Loading battle roster"
+            aria-live="polite"
           >
-            Retry roster
-          </button>
-        </section>
-      )}
-
-      {showSelection && records.length === 0 && retryCommand?.kind !== 'load' && (
-        <section className="archive-state battle-empty">
-          <h2>No battle plants yet</h2>
-          <p>Collect a plant in your Archive before starting a PVE match.</p>
-          <ArchiveControl className="primary-cta archive-retry" />
-        </section>
-      )}
-
-      {showSelection && records.length > 0 && (
-        <>
-          {notice?.kind === 'abandoned' && (
-            <p
-              className="battle-notice"
-              role="status"
-              aria-label="Battle abandoned"
-            >
-              {notice.message}
-            </p>
-          )}
-          {error && retryCommand?.kind !== 'load' && (
-            <div className="battle-command-error" role="alert">
-              <div>
-                <strong>Battle command not saved</strong>
-                <p className="battle-server-copy">{error}</p>
-              </div>
-              <button type="button" onClick={handleRetry}>
-                {retryLabel(retryCommand)}
-              </button>
-            </div>
-          )}
-          <section className="battle-select">
-            <div className="battle-roster">
-              <div className="battle-section-heading">
-                <p className="eyebrow">Owned roster</p>
-                <h2>Choose your plant</h2>
-              </div>
-              <div className="avatar-grid compact">
-                {avatars.map((avatar) => (
-                  <button
-                    key={avatar.id}
-                    className={
-                      avatar.id === selectedAvatar?.id
-                        ? `avatar-card ${avatar.color} is-selected`
-                        : `avatar-card ${avatar.color}`
-                    }
-                    type="button"
-                    aria-label={`Select ${avatar.name}${avatar.isDemo ? ' (Demo)' : ''}`}
-                    aria-pressed={avatar.id === selectedAvatar?.id}
-                    disabled={commandLocked}
-                    onClick={() => selectAvatar(avatar.id)}
-                  >
-                    {avatar.isDemo && <span className="demo-badge">Demo</span>}
-                    <PlantAvatar avatar={avatar} />
-                    <span className="battle-server-copy">{avatar.name}</span>
-                    <small className="battle-server-copy">{avatar.species}</small>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <aside className="battle-ready">
-              {selectedAvatar ? (
-                <>
-                  <PlantAvatar avatar={selectedAvatar} large />
-                  <p className="eyebrow">Selected combatant</p>
-                  <h2 className="battle-server-copy">
-                    {selectedAvatar.name} is ready
-                  </h2>
-                  <p className="battle-server-copy">
-                    {selectedAvatar.species} from {selectedAvatar.family}.
-                  </p>
-                  <StatGrid avatar={selectedAvatar} compact />
-                  {view === 'starting' && pendingCommand === 'start' && (
-                    <p
-                      className="battle-pending"
-                      role="status"
-                      aria-label="Starting battle"
-                    >
-                      Creating a persisted match...
-                    </p>
-                  )}
-                  <button
-                    className="primary-cta detail-action"
-                    type="button"
-                    disabled={commandLocked}
-                    onClick={() => void runStart(selectedAvatar.id, 'start')}
-                  >
-                    Start Match
-                  </button>
-                  <ArchiveControl
-                    className="details-link"
-                    disabled={isNavigationLocked}
-                  />
-                </>
-              ) : (
-                <>
-                  <p className="eyebrow">Match setup</p>
-                  <h2>Choose an owned plant for this match</h2>
-                  <p>Your roster is loaded. Pick one plant to inspect and start.</p>
-                  <ArchiveControl className="details-link" />
-                </>
-              )}
-            </aside>
+            <span className="spin h-6 w-6 rounded-full border-2 border-black border-t-transparent" />
+            <h2 className="font-pixel text-xs leading-relaxed">Loading your battle plants...</h2>
           </section>
-        </>
-      )}
+        )}
 
-      {session && playerAvatar && playerEnergy && botEnergy && (
-        <>
-          {notice?.kind === 'stale' && (
-            <p
-              className="battle-notice"
-              role="status"
-              aria-label="Battle synchronized"
+        {view === 'error' && retryCommand?.kind === 'load' && (
+          <section className="pixel-panel p-5 text-center" role="alert">
+            <h2 className="font-pixel text-xs leading-relaxed">Battle roster unavailable</h2>
+            <p className="mt-2 text-xs leading-relaxed opacity-80">{error}</p>
+            <button
+              className="press pixel-button mt-4 w-full px-3 py-2 text-[9px]"
+              type="button"
+              onClick={handleRetry}
             >
-              {notice.message}
+              Retry roster
+            </button>
+          </section>
+        )}
+
+        {showSelection && records.length === 0 && retryCommand?.kind !== 'load' && (
+          <section className="pixel-panel p-5 text-center">
+            <h2 className="font-pixel text-xs leading-relaxed">No battle plants yet</h2>
+            <p className="mt-2 text-xs leading-relaxed opacity-80">
+              Collect a plant in your Archive before starting a PVE match.
             </p>
-          )}
-          {error && (
-            <div className="battle-command-error" role="alert">
-              <div>
-                <strong>Battle command not saved</strong>
-                <p className="battle-server-copy">{error}</p>
-              </div>
-              <div className="battle-error-actions">
-                <button type="button" onClick={handleRetry}>
+            <ArchiveControl className="press pixel-button mt-4 inline-block px-3 py-2 text-[9px]" />
+          </section>
+        )}
+
+        {showSelection && records.length > 0 && (
+          <>
+            {notice?.kind === 'abandoned' && (
+              <p
+                className="pixel-panel px-3 py-2 text-center text-[10px] leading-relaxed"
+                role="status"
+                aria-label="Battle abandoned"
+              >
+                {notice.message}
+              </p>
+            )}
+            {error && retryCommand?.kind !== 'load' && (
+              <div className="pixel-panel p-3" role="alert">
+                <strong className="font-pixel block text-[9px] leading-relaxed">
+                  Battle command not saved
+                </strong>
+                <p className="battle-server-copy mt-1.5 text-[10px] leading-relaxed opacity-80">{error}</p>
+                <button
+                  className="press pixel-button mt-3 px-3 py-2 text-[9px]"
+                  type="button"
+                  onClick={handleRetry}
+                >
                   {retryLabel(retryCommand)}
                 </button>
-                <button type="button" onClick={dismissSessionError}>
-                  Back to turn
-                </button>
               </div>
-            </div>
-          )}
+            )}
 
-          <section className="battle-console">
-            <div className="battle-arena">
-              <article className="fighter-panel user-fighter">
-                <PlantAvatar avatar={playerAvatar} large />
-                <p className="fighter-label">Your plant</p>
-                <h2 className="battle-server-copy">{session.player.name}</h2>
-                <HealthBar
-                  label={`${session.player.name} HP`}
-                  current={session.player.currentHp}
-                  max={session.player.maxHp}
-                />
-                <p
-                  className="sun-meter"
-                  aria-label={`${session.player.name} Sun ${playerEnergy.current} of ${playerEnergy.max}`}
-                >
-                  Sun {playerEnergy.current} / {playerEnergy.max}
-                </p>
-              </article>
-
-              <div className="battle-menu">
-                {session.status === 'active' ? (
-                  <>
-                    <p className="eyebrow">Your turn</p>
-                    <h2>Turn {session.turnNumber}</h2>
-                    <div className="intent-panel">
-                      <span>Opponent intent</span>
-                      <strong className="battle-server-copy">
-                        {intentMessage(session.bot.name, session.botIntent)}
-                      </strong>
-                    </div>
-
-                    {pendingCommand === 'action' && (
-                      <p
-                        className="battle-pending"
-                        role="status"
-                        aria-label={`Resolving turn ${session.turnNumber}`}
-                      >
-                        Resolving turn {session.turnNumber} on the server...
-                      </p>
-                    )}
-                    {pendingCommand === 'abandon' && (
-                      <p
-                        className="battle-pending"
-                        role="status"
-                        aria-label="Abandoning battle"
-                      >
-                        Saving abandonment...
-                      </p>
-                    )}
-
-                    <div
-                      className="battle-actions"
-                      role="group"
-                      aria-label="Battle moves"
-                    >
-                      {session.player.moves.map((move, index) => {
-                        const reason = moveDisabledReason(
-                          move,
-                          session,
-                          commandLocked,
-                          sessionCommandFailed
-                        );
-                        const reasonId = `move-reason-${index}`;
-                        return (
-                          <div className="battle-move" key={move.id}>
-                            <button
-                              type="button"
-                              disabled={commandLocked}
-                              aria-disabled={
-                                reason !== null && !commandLocked
-                                  ? true
-                                  : undefined
-                              }
-                              aria-describedby={reason ? reasonId : undefined}
-                              onClick={() => {
-                                if (reason !== null) return;
-                                void runAction(
-                                  session.id,
-                                  move.id,
-                                  session.turnNumber
-                                );
-                              }}
-                            >
-                              <span className="move-title">
-                                <strong className="battle-server-copy">
-                                  {move.name}
-                                </strong>
-                                <span>{move.kind}</span>
-                              </span>
-                              <span className="move-facts">
-                                <span>Power {move.power}</span>
-                                <span>Accuracy {move.accuracy}%</span>
-                                <span>Sun gain {move.energyGain}</span>
-                                <span>Sun cost {move.energyCost}</span>
-                              </span>
-                            </button>
-                            {reason && (
-                              <span className="move-disabled-reason" id={reasonId}>
-                                {reason}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
+            <section className="flex flex-col gap-3">
+              <div className="pixel-panel p-3">
+                <p className="font-pixel text-[8px] opacity-60">Owned roster</p>
+                <h2 className="font-pixel mt-2 text-xs leading-relaxed">Choose your plant</h2>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {avatars.map((avatar) => (
                     <button
-                      className="battle-abandon"
+                      key={avatar.id}
+                      className={`press flex flex-col items-center gap-1 border-3 p-2 ${
+                        avatar.id === selectedAvatar?.id
+                          ? 'border-[color:var(--color-brand-lo)] bg-[color:var(--color-brand-lo)]/15'
+                          : 'border-black/20'
+                      }`}
                       type="button"
-                      disabled={commandLocked || sessionCommandFailed}
-                      onClick={() => void runAbandon(session.id)}
+                      aria-label={`Select ${avatar.name}${avatar.isDemo ? ' (Demo)' : ''}`}
+                      aria-pressed={avatar.id === selectedAvatar?.id}
+                      disabled={commandLocked}
+                      onClick={() => selectAvatar(avatar.id)}
                     >
-                      Abandon Match
+                      {avatar.isDemo && (
+                        <span className="font-pixel border-2 border-black bg-[color:var(--color-hp-mid)] px-1 text-[7px]">
+                          Demo
+                        </span>
+                      )}
+                      <PlantAvatar avatar={avatar} />
+                      <span className="battle-server-copy font-pixel max-w-full truncate text-[8px]">
+                        {avatar.name}
+                      </span>
+                      <small className="battle-server-copy max-w-full truncate text-[9px] opacity-70">
+                        {avatar.species}
+                      </small>
                     </button>
+                  ))}
+                </div>
+              </div>
+
+              <aside className="pixel-panel p-4 text-center">
+                {selectedAvatar ? (
+                  <>
+                    <div className="flex justify-center">
+                      <PlantAvatar avatar={selectedAvatar} large />
+                    </div>
+                    <p className="font-pixel mt-2 text-[8px] opacity-60">Selected combatant</p>
+                    <h2 className="battle-server-copy font-pixel mt-2 text-xs leading-relaxed">
+                      {selectedAvatar.name} is ready
+                    </h2>
+                    <p className="battle-server-copy mt-2 text-xs leading-relaxed opacity-80">
+                      {selectedAvatar.species} from {selectedAvatar.family}.
+                    </p>
+                    <StatGrid avatar={selectedAvatar} compact />
+                    {view === 'starting' && pendingCommand === 'start' && (
+                      <p
+                        className="pulse-soft mt-3 text-[10px] leading-relaxed opacity-80"
+                        role="status"
+                        aria-label="Starting battle"
+                      >
+                        Creating a persisted match...
+                      </p>
+                    )}
+                    <button
+                      className="press pixel-button mt-4 w-full px-3 py-3 text-[9px]"
+                      style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+                      type="button"
+                      disabled={commandLocked}
+                      onClick={() => void runStart(selectedAvatar.id, 'start')}
+                    >
+                      Start Match
+                    </button>
+                    <ArchiveControl
+                      className="mt-3 inline-block text-[10px] underline underline-offset-2"
+                      disabled={isNavigationLocked}
+                    />
                   </>
                 ) : (
-                  <div className="battle-result">
-                    <p className="eyebrow">Match complete</p>
-                    <h2>
-                      {session.status === 'won'
-                        ? 'Victory'
-                        : session.status === 'lost'
-                          ? 'Defeat'
-                          : 'Battle abandoned'}
+                  <>
+                    <p className="font-pixel text-[8px] opacity-60">Match setup</p>
+                    <h2 className="font-pixel mt-2 text-xs leading-relaxed">
+                      Choose an owned plant for this match
                     </h2>
-                    <p>XP awarded: {session.xpAwarded}</p>
-                    {pendingCommand === 'replay' && (
-                      <p
-                        className="battle-pending"
-                        role="status"
-                        aria-label="Starting replay"
-                      >
-                        Creating a new persisted match...
-                      </p>
-                    )}
-                    <div className="battle-result-actions">
-                      <button
-                        className="primary-cta"
-                        type="button"
-                        disabled={commandLocked || sessionCommandFailed}
-                        onClick={() => void runStart(session.avatarId, 'replay')}
-                      >
-                        Replay
-                      </button>
-                      <button
-                        className="details-link"
-                        type="button"
-                        disabled={commandLocked || sessionCommandFailed}
-                        onClick={returnToSelection}
-                      >
-                        Change Plant
-                      </button>
-                    </div>
-                  </div>
+                    <p className="mt-2 text-xs leading-relaxed opacity-80">
+                      Your roster is loaded. Pick one plant to inspect and start.
+                    </p>
+                    <ArchiveControl className="mt-3 inline-block text-[10px] underline underline-offset-2" />
+                  </>
                 )}
-              </div>
+              </aside>
+            </section>
+          </>
+        )}
 
-              <article className="fighter-panel bot-fighter">
-                <BotAvatar
-                  name={session.bot.name}
-                  spriteUrl={session.bot.spriteUrl}
-                />
-                <p className="fighter-label">Opponent</p>
-                <h2 className="battle-server-copy">{session.bot.name}</h2>
-                <HealthBar
-                  label={`${session.bot.name} HP`}
-                  current={session.bot.currentHp}
-                  max={session.bot.maxHp}
-                />
-                <p
-                  className="sun-meter"
-                  aria-label={`${session.bot.name} Sun ${botEnergy.current} of ${botEnergy.max}`}
-                >
-                  Sun {botEnergy.current} / {botEnergy.max}
-                </p>
-              </article>
+        {session && playerAvatar && playerEnergy && botEnergy && (
+          <>
+            {notice?.kind === 'stale' && (
+              <p
+                className="pixel-panel px-3 py-2 text-center text-[10px] leading-relaxed"
+                role="status"
+                aria-label="Battle synchronized"
+              >
+                {notice.message}
+              </p>
+            )}
+            {error && (
+              <div className="pixel-panel p-3" role="alert">
+                <strong className="font-pixel block text-[9px] leading-relaxed">
+                  Battle command not saved
+                </strong>
+                <p className="battle-server-copy mt-1.5 text-[10px] leading-relaxed opacity-80">{error}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    className="press pixel-button px-3 py-2 text-[9px]"
+                    type="button"
+                    onClick={handleRetry}
+                  >
+                    {retryLabel(retryCommand)}
+                  </button>
+                  <button
+                    className="press pixel-button px-3 py-2 text-[9px]"
+                    type="button"
+                    onClick={dismissSessionError}
+                  >
+                    Back to turn
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/*
+              The arena reads top-to-bottom the way the Android battle screen
+              did: opponent above, the turn console between them, your plant
+              below — so the two health bars frame whatever is happening.
+            */}
+            <Combatant
+              role="Opponent"
+              name={session.bot.name}
+              currentHp={session.bot.currentHp}
+              maxHp={session.bot.maxHp}
+              energy={botEnergy}
+              align="end"
+              visual={<BotAvatar name={session.bot.name} spriteUrl={session.bot.spriteUrl} />}
+            />
+
+            <div className="pixel-panel p-3">
+              {session.status === 'active' ? (
+                <>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="font-pixel text-[8px] opacity-60">Your turn</p>
+                    <h2 className="font-pixel text-[10px]">Turn {session.turnNumber}</h2>
+                  </div>
+
+                  <div className="mt-2 border-2 border-black/25 px-2 py-1.5">
+                    <span className="font-pixel block text-[7px] opacity-60">
+                      Opponent intent
+                    </span>
+                    <strong className="battle-server-copy mt-1 block text-[10px] leading-relaxed">
+                      {intentMessage(session.bot.name, session.botIntent)}
+                    </strong>
+                  </div>
+
+                  {pendingCommand === 'action' && (
+                    <p
+                      className="pulse-soft mt-2 text-[10px] leading-relaxed opacity-80"
+                      role="status"
+                      aria-label={`Resolving turn ${session.turnNumber}`}
+                    >
+                      Resolving turn {session.turnNumber} on the server...
+                    </p>
+                  )}
+                  {pendingCommand === 'abandon' && (
+                    <p
+                      className="pulse-soft mt-2 text-[10px] leading-relaxed opacity-80"
+                      role="status"
+                      aria-label="Abandoning battle"
+                    >
+                      Saving abandonment...
+                    </p>
+                  )}
+
+                  <div
+                    className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2"
+                    role="group"
+                    aria-label="Battle moves"
+                  >
+                    {session.player.moves.map((move, index) => {
+                      const reason = moveDisabledReason(
+                        move,
+                        session,
+                        commandLocked,
+                        sessionCommandFailed
+                      );
+                      const reasonId = `move-reason-${index}`;
+                      return (
+                        <div key={move.id}>
+                          <button
+                            className="press pixel-button w-full px-2 py-2 text-left"
+                            type="button"
+                            disabled={commandLocked}
+                            aria-disabled={
+                              reason !== null && !commandLocked ? true : undefined
+                            }
+                            aria-describedby={reason ? reasonId : undefined}
+                            onClick={() => {
+                              if (reason !== null) return;
+                              void runAction(session.id, move.id, session.turnNumber);
+                            }}
+                          >
+                            <span className="flex items-baseline justify-between gap-2">
+                              <strong className="battle-server-copy text-[9px] leading-relaxed">{move.name}</strong>
+                              <span className="text-[7px] opacity-60">{move.kind}</span>
+                            </span>
+                            <span className="mt-1.5 grid grid-cols-2 gap-x-2 text-[8px] font-normal opacity-75">
+                              <span>Power {move.power}</span>
+                              <span>Accuracy {move.accuracy}%</span>
+                              <span>Sun gain {move.energyGain}</span>
+                              <span>Sun cost {move.energyCost}</span>
+                            </span>
+                          </button>
+                          {reason && (
+                            <span
+                              className="mt-1 block text-[9px] leading-relaxed opacity-70"
+                              id={reasonId}
+                            >
+                              {reason}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    className="press pixel-button mt-3 w-full px-2 py-2 text-[9px]"
+                    style={{ background: 'var(--color-hp-low)', color: '#fff' }}
+                    type="button"
+                    disabled={commandLocked || sessionCommandFailed}
+                    onClick={() => void runAbandon(session.id)}
+                  >
+                    Abandon Match
+                  </button>
+                </>
+              ) : (
+                <div className="text-center">
+                  <p className="font-pixel text-[8px] opacity-60">Match complete</p>
+                  <h2 className="font-pixel mt-2 text-sm leading-relaxed">
+                    {session.status === 'won'
+                      ? 'Victory'
+                      : session.status === 'lost'
+                        ? 'Defeat'
+                        : 'Battle abandoned'}
+                  </h2>
+                  <p className="mt-2 text-xs">XP awarded: {session.xpAwarded}</p>
+                  {pendingCommand === 'replay' && (
+                    <p
+                      className="pulse-soft mt-2 text-[10px] leading-relaxed opacity-80"
+                      role="status"
+                      aria-label="Starting replay"
+                    >
+                      Creating a new persisted match...
+                    </p>
+                  )}
+                  <div className="mt-4 flex flex-col gap-2">
+                    <button
+                      className="press pixel-button w-full px-2 py-3 text-[9px]"
+                      style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+                      type="button"
+                      disabled={commandLocked || sessionCommandFailed}
+                      onClick={() => void runStart(session.avatarId, 'replay')}
+                    >
+                      Replay
+                    </button>
+                    <button
+                      className="text-[10px] underline underline-offset-2 disabled:opacity-45"
+                      type="button"
+                      disabled={commandLocked || sessionCommandFailed}
+                      onClick={returnToSelection}
+                    >
+                      Change Plant
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <section className="battle-log-panel">
-              <div className="battle-section-heading">
-                <p className="eyebrow">Server record</p>
-                <h2>Battle log</h2>
-              </div>
-              <ol className="battle-log" role="log" aria-label="Battle log">
+            <Combatant
+              role="Your plant"
+              name={session.player.name}
+              currentHp={session.player.currentHp}
+              maxHp={session.player.maxHp}
+              energy={playerEnergy}
+              align="start"
+              visual={<PlantAvatar avatar={playerAvatar} large />}
+            />
+
+            <section className="pixel-panel p-3">
+              <p className="font-pixel text-[8px] opacity-60">Server record</p>
+              <h2 className="font-pixel mt-2 text-xs leading-relaxed">Battle log</h2>
+              <ol
+                className="mt-3 max-h-72 space-y-2 overflow-y-auto"
+                role="log"
+                aria-label="Battle log"
+              >
                 {session.log.map((event, index) => (
                   <li
                     key={`${event.turnNumber}-${event.type}-${event.actor}-${index}`}
+                    className="border-2 border-black/15 px-2 py-1.5"
                   >
-                    <div className="battle-log-meta">
+                    <div className="font-pixel flex flex-wrap gap-x-2 text-[7px] opacity-60">
                       <span>
-                        {event.turnNumber === 0
-                          ? 'Opening'
-                          : `Turn ${event.turnNumber}`}
+                        {event.turnNumber === 0 ? 'Opening' : `Turn ${event.turnNumber}`}
                       </span>
                       <span>{actorLabel(event)}</span>
                       <span>{EVENT_LABELS[event.type]}</span>
                     </div>
-                    <p className="battle-server-copy">{event.message}</p>
+                    <p className="battle-server-copy mt-1 text-[10px] leading-relaxed">{event.message}</p>
                   </li>
                 ))}
               </ol>
             </section>
-          </section>
-        </>
-      )}
+          </>
+        )}
+      </div>
     </main>
+  );
+}
+
+/**
+ * One side of the arena: the sprite, then a panel carrying the name, the HP bar
+ * and the Sun readout. Mirrored for the opponent so the two face each other, as
+ * the Android battle screen laid them out.
+ */
+function Combatant({
+  role,
+  name,
+  currentHp,
+  maxHp,
+  energy,
+  align,
+  visual,
+}: {
+  role: string;
+  name: string;
+  currentHp: number;
+  maxHp: number;
+  energy: { current: number; max: number };
+  align: 'start' | 'end';
+  visual: React.ReactNode;
+}) {
+  return (
+    <section
+      className={`flex items-center gap-3 ${align === 'end' ? 'flex-row-reverse' : ''}`}
+    >
+      <div className="shrink-0">{visual}</div>
+
+      <article className="pixel-panel min-w-0 flex-1 px-3 py-2">
+        <p className="font-pixel text-[7px] opacity-60">{role}</p>
+        <h2 className="battle-server-copy font-pixel mt-1 truncate text-[10px]">{name}</h2>
+        <div className="mt-2">
+          <HealthBar label={`${name} HP`} current={currentHp} max={maxHp} />
+        </div>
+        <p
+          className="font-pixel mt-1.5 text-[8px]"
+          aria-label={`${name} Sun ${energy.current} of ${energy.max}`}
+        >
+          Sun {energy.current} / {energy.max}
+        </p>
+      </article>
+    </section>
   );
 }

@@ -1,25 +1,477 @@
-/* Document-level defaults only. The design system lives in App.css. */
+@import "tailwindcss";
+
+/* ============================================================================
+   SPROUT — pixel-art design system
+   ----------------------------------------------------------------------------
+   Two looks share one token set, because they share one product:
+
+   1. The GAME (default, app-wide). Ported from the Plantemon Android theme via
+      plantemon-web: Press Start 2P for chrome, full-bleed painted backgrounds,
+      chunky white panels with hard offset shadows. A fixed-palette game, not a
+      document — so it pins to `light` and never inverts.
+
+   2. The STUDIO (`.studio-root` only). The AI sprite-pipeline operations portal,
+      ported from Sprout_Dev_Platform. Dark, dense, and coloured entirely from
+      Florentine24 — the same 24-colour palette the pipeline quantises sprites
+      to, so the interface and its output share one gamut.
+
+   Scoped rather than global because the studio is a section of the app, not the
+   app: a dark operational console reachable from a light painted game.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Press Start 2P";
+  src: url("/font/press_start_2p.ttf") format("truetype");
+  font-display: swap;
+}
+
+@theme {
+  /* --- Type ------------------------------------------------------------- */
+  --font-pixel: "Press Start 2P", monospace;
+  /* Readable stack for paragraphs; Press Start 2P is display-only. */
+  --font-body:
+    ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto,
+    sans-serif;
+  /* Studio type. Silkscreen is a second pixel face, narrower than Press Start
+     2P and legible at 9px, which is what the studio's dense kickers need. */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-silkscreen: "Silkscreen", "Courier New", monospace;
+
+  /* --- Game palette ----------------------------------------------------- */
+  /*
+   * Sprout brand green, sampled from the logo card. The single brand colour the
+   * hub composes against — scrim, panel borders, and the PWA theme colour.
+   */
+  --color-sprout: #203727;
+
+  /* Carried over from the Android values/colors.xml */
+  --color-plantemon-primary: #6200ee;
+  --color-plantemon-primary-dark: #3700b3;
+  --color-plantemon-secondary: #03dac5;
+  --color-hp-high: #4caf50;
+  --color-hp-mid: #ffc107;
+  --color-hp-low: #f44336;
+
+  /* --- Raw Florentine24 (Haboo, lospec.com/palette-list/florentine24) --- */
+  --color-f24-teal-deep: #175145;
+  --color-f24-teal: #2e8065;
+  --color-f24-green: #51b341;
+  --color-f24-lime: #9bd547;
+  --color-f24-yellow: #fff971;
+  --color-f24-orange: #ff7f4f;
+  --color-f24-coral: #ff4f4f;
+  --color-f24-red: #ee3046;
+  --color-f24-pink: #df426e;
+  --color-f24-magenta: #a62654;
+  --color-f24-purple: #621b52;
+  --color-f24-purple-deep: #371848;
+  --color-f24-navy: #0c082a;
+  --color-f24-indigo-deep: #261152;
+  --color-f24-indigo: #272573;
+  --color-f24-blue: #4876bb;
+  --color-f24-cyan: #7fd3e6;
+  --color-f24-mist: #c7f7f2;
+  --color-f24-white: #ffffff;
+  --color-f24-tan: #d29c8a;
+  --color-f24-brick: #9e4d4d;
+  --color-f24-brick-deep: #712835;
+  --color-f24-wine: #5d1835;
+  --color-f24-wine-deep: #35082a;
+
+  /* --- Studio surfaces (stepped #0C082A → #261152) ---------------------- */
+  --color-void: #06041a; /* page ground, one step below navy */
+  --color-base: #0c082a; /* app background          (Florentine) */
+  --color-panel: #120b36; /* card / panel */
+  --color-raised: #180e42; /* nested panel, inputs */
+  --color-elevated: #1f114e; /* popovers, active rows */
+  --color-line: #261152; /* hairline border         (Florentine) */
+  --color-line-soft: #1a0e3e; /* subtle divider */
+  --color-line-strong: #371848; /* emphasised border       (Florentine) */
+
+  /* --- Studio text ladder (single palette colour + opacity) ------------- */
+  --color-txt: #ffffff;
+  --color-txt-2: #c7f7f2;
+  --color-txt-3: rgb(199 247 242 / 0.62);
+  --color-txt-4: rgb(199 247 242 / 0.42);
+  --color-txt-5: rgb(199 247 242 / 0.26);
+
+  /* --- Semantic roles --------------------------------------------------- */
+  --color-brand: #9bd547; /* primary action, active nav, focus */
+  --color-brand-hi: #b6e56d;
+  --color-brand-lo: #51b341;
+  --color-ok: #51b341; /* pass / healthy */
+  --color-warn: #ff7f4f; /* degraded / tail risk */
+  --color-danger: #ee3046; /* fail / missing key */
+  --color-gate: #df426e; /* awaiting human decision */
+  --color-info: #7fd3e6; /* telemetry, latency, counts */
+  --color-gold: #fff971; /* highlight, prompt output */
+  --color-link: #4876bb;
+
+  /* --- Studio type scale ------------------------------------------------ */
+  --text-display: 1.5rem;
+  --text-display--line-height: 1.9rem;
+  --text-display--letter-spacing: -0.02em;
+  --text-title: 1.0625rem;
+  --text-title--line-height: 1.45rem;
+  --text-title--letter-spacing: -0.01em;
+  --text-body: 0.8125rem;
+  --text-body--line-height: 1.25rem;
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1.1rem;
+  --text-label: 0.6875rem;
+  --text-label--line-height: 0.9rem;
+
+  /* --- Radii — tighter than stock, reads as a game panel ---------------- */
+  --radius-pane: 10px;
+  --radius-card: 8px;
+  --radius-chip: 5px;
+}
+
+/* ============================================================================
+   Base — the game's defaults
+   ========================================================================== */
 
 :root {
-  color-scheme: dark;
+  /*
+   * This is a fixed-palette game — painted backgrounds and white panels — not a
+   * document that should invert in dark mode. Pinning to `light` stops the
+   * browser defaulting text, form controls, and scrollbars to white on a
+   * dark-mode device, which rendered dark text as white-on-white inside the
+   * white panels. The studio sets its colours explicitly, so it is unaffected.
+   */
+  color-scheme: light;
 }
 
 * {
   box-sizing: border-box;
 }
 
-html {
-  scroll-behavior: smooth;
+html,
+body {
+  height: 100%;
+  /* Stops the rubber-band scroll that makes an installed PWA feel like a page. */
+  overscroll-behavior-y: none;
 }
 
 body {
   margin: 0;
-  /* Matches --ground so there is no flash of light before App.css applies. */
-  background: #0d1a12;
+  /* Body defaults to the readable font; opt into pixel with .font-pixel. */
+  font-family: var(--font-body);
+  /* Explicit dark default, so text never inherits a white system colour. */
+  color: #1a1a1a;
+  /* Matches --color-sprout, so there is no white flash before the painted
+     backgrounds load. */
+  background: #203727;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Press Start 2P — headings, labels, buttons, and other short chrome. */
+.font-pixel {
+  font-family: var(--font-pixel);
+  letter-spacing: -0.04em;
+}
+
+/* Dense copy: readable font, comfortable line height. */
+.font-body {
+  font-family: var(--font-body);
+  letter-spacing: normal;
+}
+
+/* ============================================================================
+   Screens — full-bleed painted game boards
+   ========================================================================== */
+
+/*
+ * Fills the viewport including the area behind the iOS notch and home
+ * indicator. dvh rather than vh, so Safari's collapsing toolbar does not leave
+ * a gap at the bottom.
+ */
+.screen {
+  position: relative;
+  min-height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+}
+
+/*
+ * Opt a .screen out of clipping. The game boards are each built to fit exactly,
+ * but screens that stack real content must be able to scroll on a short
+ * viewport or at an enlarged system font size rather than lose the last tile.
+ */
+.screen-scrollable {
+  overflow-y: auto;
+}
+
+.safe-top {
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* ============================================================================
+   Pixel chrome
+   ========================================================================== */
+
+/* Matches the Android MainActivity.pressAnim: scale to 0.90 over 80ms held. */
+.press {
+  transition: transform 80ms ease-out;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.press:active {
+  transform: scale(0.9);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
+  .press,
+  .press:active {
+    transition: none;
+    transform: none;
   }
+}
+
+/* Chunky pixel button, standing in for the Android Widget.App.Button. */
+.pixel-button {
+  font-family: var(--font-pixel);
+  letter-spacing: -0.04em;
+  border: 3px solid #1a1a1a;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.45);
+  background: #ffffff;
+  color: #1a1a1a;
+}
+
+.pixel-button:disabled {
+  opacity: 0.45;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+}
+
+.pixel-panel {
+  border: 3px solid #1a1a1a;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.35);
+  background: rgba(255, 255, 255, 0.94);
+  /* Always a light panel, so pin dark text regardless of system scheme. */
+  color: #1a1a1a;
+}
+
+/*
+ * Brand-tinted panel, for Sprout-branded surfaces (the hub). A modifier rather
+ * than a change to .pixel-panel, so the game boards keep the near-black chrome
+ * the Android theme gave them.
+ */
+.pixel-panel-brand {
+  border-color: #203727;
+  box-shadow: 4px 4px 0 rgba(32, 55, 39, 0.45);
+  color: #203727;
+}
+
+/*
+ * Panel for surfaces sitting on the dark brand green rather than on painted
+ * art. Same chunky border and hard shadow, inverted so it reads as a raised
+ * card on a dark field instead of a white sticker.
+ */
+.pixel-panel-dark {
+  border: 3px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.35);
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+/* Outlined label text, so white copy stays legible over painted art. */
+.text-outline {
+  text-shadow:
+    -2px -2px 0 #000,
+    2px -2px 0 #000,
+    -2px 2px 0 #000,
+    2px 2px 0 #000;
+}
+
+/*
+ * Soft drop shadow for copy set over painted art. .text-outline's hard 2px halo
+ * suits Press Start 2P, but on the rounded body font it reads as a black smear,
+ * so brand copy uses this instead.
+ */
+.text-soft-shadow {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.55),
+    0 2px 10px rgba(32, 55, 39, 0.75);
+}
+
+/* ============================================================================
+   Pixel-art utilities — available to both looks
+   ========================================================================== */
+
+/* Sprites are 192×192 nearest-neighbour art. Browsers smooth them on upscale by
+   default, which destroys the pixel grid. Required on every sprite <img>. */
+@utility pixelated {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Aseprite-style alpha checkerboard, so a transparent cutout is visibly
+   transparent instead of ambiguously white. */
+@utility checkerboard {
+  background-color: #150c38;
+  background-image:
+    linear-gradient(45deg, #1f114e 25%, transparent 25%),
+    linear-gradient(-45deg, #1f114e 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1f114e 75%),
+    linear-gradient(-45deg, transparent 75%, #1f114e 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0px;
+}
+
+/* Hard offset shadow — no blur. Reads as a stacked game panel rather than a
+   soft material card. */
+@utility shadow-pixel {
+  box-shadow: 3px 3px 0 0 var(--color-f24-indigo-deep);
+}
+@utility shadow-pixel-brand {
+  box-shadow: 3px 3px 0 0 var(--color-brand-lo);
+}
+
+/* Scanline overlay for the studio's hero sprite frame. */
+@utility scanlines {
+  position: relative;
+}
+@utility scanlines-overlay {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgb(12 8 42 / 0.28) 0px,
+    rgb(12 8 42 / 0.28) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* Pixel-font eyebrow for the studio's section kickers and stage numbers.
+   Silkscreen rather than Press Start 2P: it stays legible at this size. */
+@utility pixel-label {
+  font-family: var(--font-silkscreen);
+  font-size: 0.5625rem;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ============================================================================
+   Animation
+   ========================================================================== */
+
+/*
+ * Wiggle for plants that are targetable while shovelling — the "jiggling icons"
+ * cue that a delete mode is armed.
+ */
+@keyframes wiggle {
+  0%,
+  100% {
+    transform: rotate(-3deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
+
+.wiggle {
+  animation: wiggle 0.35s ease-in-out infinite;
+}
+
+/* Spinner for the active step in the scan progress overlay. */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+/* Gentle pulse for the label under the active step. */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.pulse-soft {
+  animation: pulse-soft 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wiggle,
+  .spin,
+  .pulse-soft {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================================
+   Studio — scoped dark console
+   ----------------------------------------------------------------------------
+   Everything below applies only inside .studio-root. The studio's components
+   set their own colours from the Florentine tokens above; these rules cover the
+   inherited defaults the game's base would otherwise impose (light scheme,
+   rounded body font, dark ink).
+   ========================================================================== */
+
+.studio-root {
+  min-height: 100dvh;
+  /* The studio's own controls and scrollbars should render dark. */
+  color-scheme: dark;
+  background-color: var(--color-void);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  color: var(--color-txt-2);
+}
+
+.studio-root ::selection {
+  background-color: var(--color-brand);
+  color: var(--color-base);
+}
+
+/* Focus is brand-lime throughout the studio, never removed. */
+.studio-root :focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Scrollbars in-palette rather than default grey. */
+.studio-root * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+.studio-root *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.studio-root *::-webkit-scrollbar-thumb {
+  background-color: var(--color-line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+.studio-root *::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-f24-indigo);
 }
