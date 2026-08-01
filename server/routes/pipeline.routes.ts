@@ -32,6 +32,10 @@ import {
   TOTAL_BUDGET_MS,
 } from '../pipeline/deadline';
 import { serverEnv } from '../platform/env';
+import { persistScan } from '../services/scan-persistence';
+import createFirebaseSpriteStorage from '../services/sprite-storage';
+import dexRepository from '../repositories/dex';
+import avatarRepository from '../repositories/avatars';
 
 const router = Router();
 
@@ -253,7 +257,8 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       sendEvent,
       rawSpriteBuffer,
       identification,
-      deadline
+      deadline,
+      req.user!.uid
     );
 
     sendEvent({
@@ -261,6 +266,10 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       finalPlant: tail.plant,
       finalSpriteB64: tail.finishedB64,
       totalTimeMs: lat1 + lat2a + lat2b + tail.elapsedMs,
+      avatarId: tail.persistence.avatarId,
+      saved: tail.persistence.saved,
+      saveError: tail.persistence.saveError,
+      discovery: tail.persistence.discovery,
     });
 
     res.end();
@@ -300,7 +309,8 @@ router.post('/run-stage2c', async (req: Request, res: Response) => {
       sendEvent,
       rawSpriteBuffer,
       identification,
-      deadline
+      deadline,
+      req.user!.uid
     );
 
     sendEvent({
@@ -308,6 +318,10 @@ router.post('/run-stage2c', async (req: Request, res: Response) => {
       finalPlant: tail.plant,
       finalSpriteB64: tail.finishedB64,
       totalTimeMs: tail.elapsedMs,
+      avatarId: tail.persistence.avatarId,
+      saved: tail.persistence.saved,
+      saveError: tail.persistence.saveError,
+      discovery: tail.persistence.discovery,
     });
 
     res.end();
@@ -328,8 +342,9 @@ router.post('/run-stage2c', async (req: Request, res: Response) => {
 async function runStage2cOnward(
   sendEvent: (data: unknown) => void,
   rawSpriteBuffer: Buffer,
-  identification: { name: string; common_names?: string[]; probability?: number },
-  deadline: ReturnType<typeof createDeadline>
+  identification: any,
+  deadline: ReturnType<typeof createDeadline>,
+  userId: string
 ) {
   // Step 2c: Background Removal
   sendEvent({
@@ -445,10 +460,27 @@ async function runStage2cOnward(
     autoApproved,
   });
 
+  // Spec section E: persistence lives here, in the tail both entry points share,
+  // so the human-gate route cannot produce a sprite that never gets saved.
+  // finishedPngBuffer (line 374) is the source of finishedB64 — reuse it rather
+  // than decoding the base64 string back into bytes.
+  const persistence = await persistScan(
+    {
+      storage: createFirebaseSpriteStorage(),
+      dex: dexRepository,
+      avatars: avatarRepository,
+    },
+    userId,
+    identification.name,
+    identification.taxonomy?.family ?? null,
+    finishedPngBuffer
+  );
+
   return {
     plant,
     finishedB64,
     elapsedMs: lat2c + lat2d + lat3 + lat4,
+    persistence,
   };
 }
 
