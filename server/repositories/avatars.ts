@@ -242,6 +242,18 @@ function demoAvatarConflictError(): DemoAvatarConflictError {
   return error;
 }
 
+interface EmptySpeciesNameError extends Error {
+  status: 400;
+}
+
+function emptySpeciesNameError(): EmptySpeciesNameError {
+  const error = new Error(
+    'speciesName must contain at least one alphanumeric character'
+  ) as EmptySpeciesNameError;
+  error.status = 400;
+  return error;
+}
+
 const firestoreAvatarRepository: AvatarRepository = {
   async listByUser(
     userId: string,
@@ -280,13 +292,19 @@ const firestoreAvatarRepository: AvatarRepository = {
     const db = getDb();
     const speciesKey = sanitizeSpeciesKey(input.speciesName);
     if (!speciesKey) {
-      throw new Error('speciesName must contain at least one alphanumeric character');
+      throw emptySpeciesNameError();
     }
 
     // The repository already filters by userId and works in memory rather than
     // adding a composite index (see the note at the top of this file). Matching
     // the sanitized name here follows that same trade-off, and avoids a schema
     // migration for the seeded demo records, which carry no species key.
+    //
+    // Known limit: this only inspects the caller's most recent 1000 records
+    // (listByUser page size below). A user with more than 1000 distinct
+    // species would get a duplicate record instead of a de-duplication error.
+    // Deliberately deferred per spec decision D3 (no composite index, no
+    // transaction) — see the design spec discussion for this trade-off.
     const existingPage = await this.listByUser(userId, 1, 1000);
     const match = existingPage.items.find(
       (candidate) => sanitizeSpeciesKey(candidate.speciesName) === speciesKey
@@ -295,9 +313,21 @@ const firestoreAvatarRepository: AvatarRepository = {
     const now = new Date().toISOString();
 
     if (match) {
+      // Spec decision D2 applies here too: a match means the user has now
+      // genuinely scanned this species themselves, even if the matched
+      // record started out as a temporary (e.g. seeded) one. Upgrade it to
+      // persistent so it doesn't expire mid-showcase, exactly like a
+      // brand-new scan would be.
       const metadata = { ...(match.metadata ?? {}), lastSeenAt: now };
-      await db.collection('avatar_records').doc(match.id).update({ metadata });
-      return { record: { ...match, metadata }, created: false };
+      await db.collection('avatar_records').doc(match.id).update({
+        metadata,
+        isTemporary: false,
+        expiresAt: null,
+      });
+      return {
+        record: { ...match, metadata, isTemporary: false, expiresAt: null },
+        created: false,
+      };
     }
 
     const ref = db.collection('avatar_records').doc();

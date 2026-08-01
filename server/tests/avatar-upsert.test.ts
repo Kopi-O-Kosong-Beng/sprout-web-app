@@ -1,5 +1,6 @@
 import avatarRepository from '../repositories/avatars';
 import type { ScanUpsertInput } from '../models/avatar';
+import { getDb } from '../firebase';
 import { clearFirestore } from './firestore-test-utils';
 
 const USER = 'user-scan-1';
@@ -87,5 +88,58 @@ describe('avatar upsertFromScan', () => {
     const { isAvatarBattleEligible } = await import('../data/battle-eligibility');
 
     expect(isAvatarBattleEligible(record, new Date())).toBe(true);
+  });
+
+  it('upgrades a matched temporary record to persistent on a real scan', async () => {
+    const db = getDb();
+    const tempId = 'temp-amanita-1';
+    const discoveredAt = new Date('2026-07-01T00:00:00.000Z').toISOString();
+    const expiresAt = new Date('2026-07-02T00:00:00.000Z').toISOString();
+
+    // Seed the way an existing temporary record (e.g. the seeded demo
+    // Amanita muscaria) actually looks: isTemporary true with a real TTL.
+    await db.collection('avatar_records').doc(tempId).set({
+      userId: USER,
+      speciesName: 'Amanita muscaria',
+      speciesFamily: 'Amanitaceae',
+      spriteUrl: '/static/sprites/amanita-muscaria.png',
+      discoveredAt,
+      source: 'web',
+      isTemporary: true,
+      expiresAt,
+      stats: { hp: 74, attack: 91, defense: 28, speed: 55 },
+      metadata: { taxonomy: 'fungus' },
+    });
+
+    const { record, created } = await avatarRepository.upsertFromScan(
+      USER,
+      input({
+        speciesName: 'Amanita muscaria',
+        speciesFamily: 'Amanitaceae',
+        stats: { hp: 74, attack: 91, defense: 28, speed: 55 },
+      })
+    );
+
+    expect(created).toBe(false);
+    expect(record.id).toBe(tempId);
+    expect(record.isTemporary).toBe(false);
+    expect(record.expiresAt).toBeNull();
+    expect(record.discoveredAt).toBe(discoveredAt);
+
+    const { isAvatarBattleEligible } = await import('../data/battle-eligibility');
+    expect(isAvatarBattleEligible(record, new Date())).toBe(true);
+
+    const persisted = (await db.collection('avatar_records').doc(tempId).get()).data();
+    expect(persisted).toMatchObject({
+      isTemporary: false,
+      expiresAt: null,
+      discoveredAt,
+    });
+  });
+
+  it('rejects a species name that sanitizes to empty with a 400 status', async () => {
+    await expect(
+      avatarRepository.upsertFromScan(USER, input({ speciesName: '!!!' }))
+    ).rejects.toMatchObject({ status: 400 });
   });
 });
