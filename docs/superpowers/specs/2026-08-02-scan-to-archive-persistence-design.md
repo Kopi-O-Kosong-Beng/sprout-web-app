@@ -23,11 +23,12 @@ not the identity.
 
 ## Scope
 
-In: authentication on the pipeline routes, canonical sprite storage, the
-archive write, per-user species de-duplication, deterministic battle stats,
-first-discoverer attribution, and the failure path.
+In: canonical sprite storage, the archive write, per-user species
+de-duplication, deterministic battle stats, first-discoverer attribution, the
+failure path, and the client's sign-in message for a rejected scan.
 
-Out: a discoverer leaderboard page, sprite regeneration/versioning beyond `v1`,
+Out: authentication on the pipeline routes — already in place, see section A —
+a discoverer leaderboard page, sprite regeneration/versioning beyond `v1`,
 UC7 PVP, and any change to the battle engine itself.
 
 ## Decisions
