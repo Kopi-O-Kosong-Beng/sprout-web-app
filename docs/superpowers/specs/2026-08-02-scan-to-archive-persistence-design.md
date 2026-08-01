@@ -9,17 +9,17 @@
 
 `POST /api/pipeline/run-stream` runs the six generation stages and streams the
 finished sprite back to the browser. Nothing persists. A refresh loses the
-result, the Archive page still shows only seeded demo records, and the route
-carries no authentication at all.
+result, and the Archive page still shows only seeded demo records.
 
-Two consequences:
+The consequence: **UC6 cannot be claimed as end-to-end.** The upload-to-archive
+provenance chain the vault has described since 2026-07-20 does not exist in
+code.
 
-1. **UC6 cannot be claimed as end-to-end.** The upload-to-archive provenance
-   chain the vault has described since 2026-07-20 does not exist in code.
-2. **The route is open.** `server/app.ts:89` mounts `/api/pipeline` with no
-   middleware and `pipeline.routes.ts` applies none, so any unauthenticated
-   caller can spend the Plant.id and Gemini quota, and the server cannot
-   attribute a scan to a user even if it wanted to.
+The route itself is already authenticated. `pipeline.routes.ts:39` applies
+`router.use(authMiddleware)`, added with the platform migration in `627c6b0`,
+and `tests/app-config.test.ts:46` asserts the 401. So `req.user.uid` is already
+available to attribute a scan to its caller — what is missing is the writing,
+not the identity.
 
 ## Scope
 
@@ -58,14 +58,18 @@ ScanPage --(photo + Firebase ID token)--> POST /api/pipeline/run-stream
 
 ### A. Authentication
 
-`router.use(authMiddleware)` in `pipeline.routes.ts`, covering `/run-stream` and
-`/run-stage2c`. This is the same guard `routes/avatar.routes.ts:24` already
-applies, so no new mechanism is introduced. `req.user.uid` becomes the record
-owner.
+Already in place; no route change is required. `pipeline.routes.ts:39` applies
+`router.use(authMiddleware)` to both `/run-stream` and `/run-stage2c` — the same
+guard `routes/avatar.routes.ts:24` applies to the archive. `req.user.uid`
+becomes the record owner.
 
-Client: `ScanPage` currently calls `fetch('/api/pipeline/run-stream')` with no
-headers. It must send `Authorization: Bearer <idToken>`, the pattern already
-used throughout `client/src/services/sproutApi.ts`.
+Client: `client/src/services/pipelineStream.ts:26-33` already attaches
+`Authorization: Bearer <idToken>` via `authHeaders()` whenever Firebase is
+configured and a user is signed in, and `streamPipeline` uses it at line 47.
+`ScanPage` calls `streamPipeline`, so no header work is needed either. What does
+change for the client is that a signed-out user's 401 currently surfaces as the
+unhelpful `Pipeline API HTTP 401` (`pipelineStream.ts:52`); that message is
+fixed in the client task.
 
 ### B. Sprite storage
 
@@ -210,7 +214,7 @@ inputs, expected outputs, and mocked pairs.
 
 | Target unit | Scenario | Expected |
 |---|---|---|
-| pipeline route | unauthenticated request | 401, no generation work performed |
+| pipeline route | bearer token that cannot be verified | 401, no generation work performed |
 | SpriteStorage | first save for a species | object written once, URL returned |
 | SpriteStorage | species already stored | existing URL returned, no re-upload |
 | avatar repository | first scan of a species | record created, `created: true` |
