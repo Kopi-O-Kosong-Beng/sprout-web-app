@@ -77,4 +77,32 @@ describe('firebase sprite storage', () => {
     ).rejects.toThrow('speciesKey');
     expect(file.save).not.toHaveBeenCalled();
   });
+
+  it('returns the winning token when a concurrent create-only upload loses the race', async () => {
+    const winnerToken = 'winner-token-from-the-other-request';
+    const preconditionFailed = Object.assign(new Error('Precondition Failed'), { code: 412 });
+    const file = fakeFile({
+      save: jest.fn().mockRejectedValue(preconditionFailed),
+      getMetadata: jest
+        .fn()
+        .mockResolvedValue([{ metadata: { firebaseStorageDownloadTokens: winnerToken } }]),
+    });
+    const url = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
+
+    expect(file.save).toHaveBeenCalledTimes(1);
+    expect(url).toContain(`token=${winnerToken}`);
+    expect(url).not.toContain(`token=${TOKEN}`);
+  });
+
+  it('propagates a non-412 failure from save() instead of swallowing it', async () => {
+    const authFailure = Object.assign(new Error('permission denied'), { code: 403 });
+    const file = fakeFile({
+      save: jest.fn().mockRejectedValue(authFailure),
+    });
+
+    await expect(
+      createFirebaseSpriteStorage(deps(file)).save('fern', PNG)
+    ).rejects.toThrow('permission denied');
+    expect(file.getMetadata).not.toHaveBeenCalled();
+  });
 });

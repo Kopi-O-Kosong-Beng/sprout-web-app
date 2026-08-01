@@ -72,14 +72,31 @@ export function createFirebaseSpriteStorage(
       }
 
       const token = dependencies.createToken();
-      await file.save(png, {
-        resumable: false,
-        contentType: 'image/png',
-        metadata: {
-          cacheControl: 'public, max-age=31536000, immutable',
-          metadata: { firebaseStorageDownloadTokens: token },
-        },
-      });
+      try {
+        await file.save(png, {
+          resumable: false,
+          contentType: 'image/png',
+          metadata: {
+            cacheControl: 'public, max-age=31536000, immutable',
+            metadata: { firebaseStorageDownloadTokens: token },
+          },
+          // Create-only: fail instead of clobbering an object another
+          // concurrent request already created for the same species.
+          ifGenerationMatch: 0,
+        });
+      } catch (err) {
+        if ((err as { code?: number }).code === 412) {
+          // Lost the create race. The other writer's object is now canonical;
+          // re-read it and hand back its token so both callers get a live URL.
+          const [metadata] = await file.getMetadata();
+          const winningToken = metadata.metadata?.firebaseStorageDownloadTokens;
+          if (winningToken) return downloadUrl(bucketName, objectName, winningToken);
+          // Same token-less situation as above: nothing durable to serve, so
+          // fall back to our own token rather than surface a 404 for certain.
+          return downloadUrl(bucketName, objectName, token);
+        }
+        throw err;
+      }
       return downloadUrl(bucketName, objectName, token);
     },
   };
