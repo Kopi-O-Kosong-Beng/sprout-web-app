@@ -14,10 +14,12 @@ import {
   demoAvatarId,
   type DemoAvatarTemplate,
 } from '../data/demo-avatar-templates';
+import { sanitizeSpeciesKey } from '../pipeline/dex';
 import type {
   AvatarRecord,
   AvatarRepository,
   PaginatedAvatars,
+  ScanUpsertInput,
 } from '../models/avatar';
 import {
   invalidFirestoreDocument,
@@ -272,6 +274,51 @@ const firestoreAvatarRepository: AvatarRepository = {
     const rawUserId = doc.data()?.userId;
     if (typeof rawUserId !== 'string' || rawUserId !== userId) return null;
     return toRecord(doc);
+  },
+
+  async upsertFromScan(userId: string, input: ScanUpsertInput) {
+    const db = getDb();
+    const speciesKey = sanitizeSpeciesKey(input.speciesName);
+    if (!speciesKey) {
+      throw new Error('speciesName must contain at least one alphanumeric character');
+    }
+
+    // The repository already filters by userId and works in memory rather than
+    // adding a composite index (see the note at the top of this file). Matching
+    // the sanitized name here follows that same trade-off, and avoids a schema
+    // migration for the seeded demo records, which carry no species key.
+    const existingPage = await this.listByUser(userId, 1, 1000);
+    const match = existingPage.items.find(
+      (candidate) => sanitizeSpeciesKey(candidate.speciesName) === speciesKey
+    );
+
+    const now = new Date().toISOString();
+
+    if (match) {
+      const metadata = { ...(match.metadata ?? {}), lastSeenAt: now };
+      await db.collection('avatar_records').doc(match.id).update({ metadata });
+      return { record: { ...match, metadata }, created: false };
+    }
+
+    const ref = db.collection('avatar_records').doc();
+    const record: AvatarRecord = {
+      id: ref.id,
+      userId,
+      speciesName: input.speciesName,
+      speciesFamily: input.speciesFamily,
+      spriteUrl: input.spriteUrl,
+      discoveredAt: now,
+      source: 'web',
+      // Spec decision D2: web scans are persistent, so nothing expires
+      // mid-showcase and the archive keeps what the user collected.
+      isTemporary: false,
+      expiresAt: null,
+      stats: input.stats,
+      metadata: input.metadata,
+    };
+    const { id, ...document } = record;
+    await ref.create(document);
+    return { record, created: true };
   },
 
   async ensureDemoSet(userId: string): Promise<PaginatedAvatars> {
