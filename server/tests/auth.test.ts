@@ -643,6 +643,63 @@ describe('GET /api/auth/me', () => {
     expect(row.lastLoginAtReadable).toBeUndefined();
   });
 
+  // The frontend routes admins to /admin and shows the nav link off this flag,
+  // so it has to follow the same allowlist the API gate uses — not the user
+  // document, which has no admin field at all.
+  it('reports admin membership from the ADMIN_EMAILS allowlist', async () => {
+    const previous = process.env.ADMIN_EMAILS;
+    const admin = await createLocalUser({
+      email: 'allowlisted@example.com',
+      displayName: 'Allowlisted Admin',
+    });
+    const player = await createLocalUser({
+      email: 'player@example.com',
+      displayName: 'Player One',
+    });
+
+    // Case and padding are the allowlist's problem, not the caller's.
+    process.env.ADMIN_EMAILS = ' ALLOWLISTED@example.com , someone@else.com ';
+    try {
+      mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
+        uid: admin.id,
+        email: admin.email,
+        email_verified: true,
+      });
+      const adminRes = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', 'Bearer admin-token');
+      expect(adminRes.status).toBe(200);
+      expect(adminRes.body.isAdmin).toBe(true);
+
+      mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
+        uid: player.id,
+        email: player.email,
+        email_verified: true,
+      });
+      const playerRes = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', 'Bearer player-token');
+      expect(playerRes.status).toBe(200);
+      expect(playerRes.body.isAdmin).toBe(false);
+
+      // Fail closed: an unset allowlist makes nobody an admin.
+      delete process.env.ADMIN_EMAILS;
+      mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
+        uid: admin.id,
+        email: admin.email,
+        email_verified: true,
+      });
+      const denied = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', 'Bearer admin-token');
+      expect(denied.status).toBe(200);
+      expect(denied.body.isAdmin).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.ADMIN_EMAILS;
+      else process.env.ADMIN_EMAILS = previous;
+    }
+  });
+
   it('rejects missing, invalid, and unverified tokens', async () => {
     expect((await request(app).get('/api/auth/me')).status).toBe(401);
 

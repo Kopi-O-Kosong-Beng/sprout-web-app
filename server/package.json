@@ -15,6 +15,7 @@
     "build": "npm run clean && tsc",
     "seed:firestore": "tsx scripts/seed-firestore.ts",
     "seed:firebase-auth-demo": "tsx scripts/seed-firebase-auth-demo.ts",
+    "seed:admin": "tsx scripts/seed-admin-account.ts",
     "check:email": "tsx scripts/check-email.ts",
     "check:storage": "tsx scripts/check-storage.ts",
     "inspect:firestore": "tsx scripts/inspect-firestore.ts",

@@ -109,6 +109,31 @@ email: demo@sprout.app
 password: Password123!
 ```
 
+To create the admin login that opens the `/admin` account dashboard:
+
+```bash
+npm run seed:admin -w server
+```
+
+It reads `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` from `server/.env`, or takes
+them as arguments (`-- sprout@gmail.com 'the-password'`). The account is created
+with its email already verified, so no verification link has to be collected
+from a shared inbox. Re-running it is safe and is also how you reset a forgotten
+admin password: the uid, PVE stats and history survive.
+
+Creating the account is not what grants access — the address must also be in
+`ADMIN_EMAILS` in `server/.env`. That allowlist is the only authority (it fails
+closed when empty), and the seed warns if the address is missing from it.
+Restart the backend after editing it.
+
+**Where login lands.** Everyone enters at `/`, the public landing page. After a
+successful login an admin goes to `/admin` and everyone else goes to `/home`,
+the in-game hub — unless a protected route bounced them, in which case they
+return to the page they originally asked for. The frontend reads this from the
+`isAdmin` field on `GET /api/auth/me`, which the server computes from
+`ADMIN_EMAILS`; it decides navigation only, and `/api/admin` re-checks the
+allowlist on every request.
+
 ### Step 3: Create frontend env file
 
 Copy the frontend example env:
