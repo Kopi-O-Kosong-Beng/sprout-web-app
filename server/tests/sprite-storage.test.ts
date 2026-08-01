@@ -35,6 +35,10 @@ describe('firebase sprite storage', () => {
       'sprites/monstera_deliciosa/v1.png'
     );
     expect(file.save).toHaveBeenCalledTimes(1);
+    expect(file.save).toHaveBeenCalledWith(
+      PNG,
+      expect.objectContaining({ preconditionOpts: { ifGenerationMatch: 0 } })
+    );
   });
 
   it('returns a download URL carrying the token', async () => {

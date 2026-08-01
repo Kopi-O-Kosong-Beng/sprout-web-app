@@ -82,7 +82,7 @@ export function createFirebaseSpriteStorage(
           },
           // Create-only: fail instead of clobbering an object another
           // concurrent request already created for the same species.
-          ifGenerationMatch: 0,
+          preconditionOpts: { ifGenerationMatch: 0 },
         });
       } catch (err) {
         if ((err as { code?: number }).code === 412) {
