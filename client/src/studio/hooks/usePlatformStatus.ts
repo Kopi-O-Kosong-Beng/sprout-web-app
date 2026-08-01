@@ -1,0 +1,151 @@
+import { useCallback, useEffect, useState } from 'react';
+import { studioFetch } from '../lib/api';
+
+/**
+ * Admin telemetry, lifted out of AdminDashboard so the top bar can show live
+ * system health without issuing a second set of probe requests.
+ */
+
+export interface ConfigStatus {
+  uptimeSeconds: number;
+  environment: string;
+  models: {
+    primaryVision: string;
+    fallbackVision: string;
+    fluxImageGen: string;
+  };
+  keys: Record<string, { configured: boolean; preview: string | null }>;
+  budgets: Record<string, number>;
+}
+
+export interface ProbeResult {
+  status: 'PASS' | 'FAIL' | 'WARN' | 'SKIP';
+  latencyMs?: number;
+  remainingCredits?: number;
+  limit?: number;
+  used?: number;
+  detail: string;
+  model?: string;
+}
+
+export interface HealthCheckData {
+  timestamp: string;
+  overallStatus: 'HEALTHY' | 'DEGRADED';
+  probes: Record<string, ProbeResult>;
+}
+
+export interface LogEntry {
+  timestamp: string;
+  level: 'info' | 'warn' | 'error';
+  hop: string;
+  message: string;
+  signature?: string;
+  latencyMs?: number;
+}
+
+export interface DexEntry {
+  id: string;
+  species: string;
+  commonName: string;
+  status: 'APPROVED' | 'PENDING' | 'REJECTED';
+  cuteScore: number;
+  paletteMatch: string;
+  dimensions: string;
+  craftedPrompt: string;
+  createdAt: string;
+  spriteUrl: string;
+}
+
+export interface PlatformStatus {
+  config: ConfigStatus | null;
+  health: HealthCheckData | null;
+  logs: LogEntry[];
+  dexEntries: DexEntry[];
+  loadingConfig: boolean;
+  loadingHealth: boolean;
+  loadingLogs: boolean;
+  loadingDex: boolean;
+  refreshConfig: () => void;
+  refreshHealth: () => void;
+  refreshLogs: () => void;
+  refreshDex: () => void;
+  refreshAll: () => void;
+}
+
+async function getJson<T>(url: string): Promise<T | null> {
+  try {
+    const res = await studioFetch(url);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch (err) {
+    console.error(`Request failed: ${url}`, err);
+    return null;
+  }
+}
+
+export function usePlatformStatus(): PlatformStatus {
+  const [config, setConfig] = useState<ConfigStatus | null>(null);
+  const [health, setHealth] = useState<HealthCheckData | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [dexEntries, setDexEntries] = useState<DexEntry[]>([]);
+
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [loadingHealth, setLoadingHealth] = useState(true);
+  const [loadingLogs, setLoadingLogs] = useState(true);
+  const [loadingDex, setLoadingDex] = useState(true);
+
+  const refreshConfig = useCallback(async () => {
+    setLoadingConfig(true);
+    const data = await getJson<ConfigStatus>('/api/platform/config-status');
+    if (data) setConfig(data);
+    setLoadingConfig(false);
+  }, []);
+
+  const refreshHealth = useCallback(async () => {
+    setLoadingHealth(true);
+    const data = await getJson<HealthCheckData>('/api/platform/health-check');
+    if (data) setHealth(data);
+    setLoadingHealth(false);
+  }, []);
+
+  const refreshLogs = useCallback(async () => {
+    setLoadingLogs(true);
+    const data = await getJson<{ logs?: LogEntry[] }>('/api/platform/logs');
+    setLogs(data?.logs ?? []);
+    setLoadingLogs(false);
+  }, []);
+
+  const refreshDex = useCallback(async () => {
+    setLoadingDex(true);
+    const data = await getJson<DexEntry[]>('/api/platform/dex-docs');
+    setDexEntries(data ?? []);
+    setLoadingDex(false);
+  }, []);
+
+  const refreshAll = useCallback(() => {
+    refreshConfig();
+    refreshHealth();
+    refreshLogs();
+    refreshDex();
+  }, [refreshConfig, refreshHealth, refreshLogs, refreshDex]);
+
+  useEffect(() => {
+    refreshAll();
+  }, [refreshAll]);
+
+  return {
+    config,
+    health,
+    logs,
+    dexEntries,
+    loadingConfig,
+    loadingHealth,
+    loadingLogs,
+    loadingDex,
+    refreshConfig,
+    refreshHealth,
+    refreshLogs,
+    refreshDex,
+    refreshAll,
+  };
+}

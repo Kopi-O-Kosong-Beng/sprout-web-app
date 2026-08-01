@@ -9,9 +9,27 @@ import { MiniArchive } from '../components/common/PlantVisuals';
 type Mode = 'login' | 'reset-request' | 'reset-verify';
 
 export default function LoginPage() {
-  const { status, login, loginWithGoogle } = useAuth();
+  const { status, profile, login, loginWithGoogle } = useAuth();
   const location = useLocation();
-  const from = (location.state as { from?: string } | null)?.from ?? '/';
+  // Set by ProtectedRoute when it bounced someone off a page they asked for.
+  const bouncedFrom = (location.state as { from?: string } | null)?.from ?? null;
+
+  /** Where a successful login lands.
+   *
+   *  A bounce always wins — being sent back to the page you were trying to
+   *  reach beats any default, admin or not.
+   *
+   *  Otherwise the two audiences split: admins run the account dashboard, and
+   *  players go to the in-game hub rather than back to `/`, the public landing
+   *  page they just came through. Signed-out visitors still enter at `/`; this
+   *  only decides where the door leads once you are through it.
+   *
+   *  profile is null for the moment after a transient /api/auth/me failure, in
+   *  which case this falls to /home and the Admin nav link (same isAdmin flag)
+   *  is how an admin gets across. It is not a security boundary either way —
+   *  the server re-checks ADMIN_EMAILS on every /api/admin call.
+   */
+  const from = bouncedFrom ?? (profile?.isAdmin ? '/admin' : '/home');
 
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('demo@sprout.app');

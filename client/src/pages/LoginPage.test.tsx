@@ -3,9 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthContextValue, AuthStatus } from '../context/AuthContext';
+import type { AuthProfile } from '../services/sproutApi';
 import LoginPage from './LoginPage';
 
-const authState = vi.hoisted(() => ({ status: 'signed-out' as AuthStatus }));
+const authState = vi.hoisted(() => ({
+  status: 'signed-out' as AuthStatus,
+  profile: null as AuthProfile | null,
+}));
 const authMocks = vi.hoisted(() => ({
   login: vi.fn(),
   loginWithGoogle: vi.fn(),
@@ -19,7 +23,7 @@ vi.mock('../hooks/useAuth', () => ({
   useAuth: (): AuthContextValue => ({
     status: authState.status,
     firebaseUser: null,
-    profile: null,
+    profile: authState.profile,
     login: authMocks.login,
     loginWithGoogle: authMocks.loginWithGoogle,
     logout: vi.fn(),
@@ -29,14 +33,40 @@ vi.mock('../hooks/useAuth', () => ({
 
 vi.mock('../services/sproutApi', () => apiMocks);
 
-function renderLogin(status: AuthStatus) {
+function profileFor(isAdmin: boolean): AuthProfile {
+  return {
+    uid: 'user-1',
+    email: isAdmin ? 'sprout@gmail.com' : 'player@example.com',
+    displayName: isAdmin ? 'Sprout Admin' : 'Player',
+    emailVerified: true,
+    isAdmin,
+  };
+}
+
+/** `from` defaults to a bounced destination because that is the case most of
+ *  these tests care about; pass null to exercise a plain visit to /login. */
+function renderLogin(
+  status: AuthStatus,
+  { from = '/archive', profile = null }: {
+    from?: string | null;
+    profile?: AuthProfile | null;
+  } = {}
+) {
   authState.status = status;
+  authState.profile = profile;
   return render(
-    <MemoryRouter initialEntries={[{ pathname: '/login', state: { from: '/archive' } }]}>
+    <MemoryRouter
+      initialEntries={[
+        { pathname: '/login', state: from ? { from } : null },
+      ]}
+    >
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/verify-email" element={<p>Verify your email to continue</p>} />
         <Route path="/archive" element={<p>Private archive</p>} />
+        <Route path="/admin" element={<p>Sprout accounts dashboard</p>} />
+        <Route path="/home" element={<p>In-game hub</p>} />
+        <Route path="/" element={<p>Public landing page</p>} />
       </Routes>
     </MemoryRouter>
   );
@@ -61,6 +91,36 @@ describe('LoginPage auth redirects', () => {
     renderLogin('authenticated');
 
     expect(screen.getByText(/private archive/i)).toBeInTheDocument();
+  });
+
+  it('routes an admin to the account dashboard', () => {
+    renderLogin('authenticated', { from: null, profile: profileFor(true) });
+
+    expect(screen.getByText(/sprout accounts dashboard/i)).toBeInTheDocument();
+  });
+
+  it('routes a player into the game, not back to the landing page', () => {
+    renderLogin('authenticated', { from: null, profile: profileFor(false) });
+
+    expect(screen.getByText(/in-game hub/i)).toBeInTheDocument();
+    expect(screen.queryByText(/public landing page/i)).not.toBeInTheDocument();
+  });
+
+  // A bounce means the user asked for a specific page and was stopped; sending
+  // an admin to the dashboard instead would lose that destination.
+  it('lets a bounced destination win over the admin dashboard', () => {
+    renderLogin('authenticated', { from: '/archive', profile: profileFor(true) });
+
+    expect(screen.getByText(/private archive/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sprout accounts dashboard/i)).not.toBeInTheDocument();
+  });
+
+  // /api/auth/me can fail transiently, leaving status authenticated with no
+  // profile. That must land somewhere usable rather than blank.
+  it('falls back to the game hub when the profile has not loaded', () => {
+    renderLogin('authenticated', { from: null, profile: null });
+
+    expect(screen.getByText(/in-game hub/i)).toBeInTheDocument();
   });
 
   it('shows mode-neutral copy after requesting a reset code', async () => {

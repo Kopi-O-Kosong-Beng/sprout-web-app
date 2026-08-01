@@ -1,0 +1,210 @@
+{
+  "_note": "Regression fixtures for the Sprout sprite pipeline. Every case points at a real photo in ./photos/. Cases marked `stress: true` are deliberately hard inputs (no single hero bloom) and carry relaxed judge minimums — a failure there is a signal, not automatically a regression.",
+  "schemaVersion": 2,
+  "paletteUnderTest": "Florentine24 (Haboo, Lospec) — 24 colours",
+  "cases": [
+    {
+      "id": "melastoma",
+      "photo": "goldenset/photos/melastoma.jpg",
+      "species": "Melastoma malabathricum",
+      "commonName": "Singapore rhododendron",
+      "expect": {
+        "isPlant": true,
+        "identifiedNameIncludes": "Melastoma",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 4, "resemblance": 3, "edges": 4, "style": 4 },
+        "signatureFeature": "five rounded violet petals with curved yellow stamens arcing out of the centre; hairy leaves with three deep longitudinal veins",
+        "expectedTier": "gemini"
+      }
+    },
+    {
+      "id": "vanda_miss_joaquim",
+      "photo": "goldenset/photos/vanda_miss_joaquim.jpg",
+      "species": "Papilionanthe Miss Joaquim",
+      "commonName": "Vanda Miss Joaquim",
+      "expect": {
+        "isPlant": true,
+        "identifiedNameIncludes": "Papilionanthe",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 4, "resemblance": 3, "edges": 4, "style": 4 },
+        "signatureFeature": "flat orchid face — pale lilac wing petals framing a magenta lip with an orange-gold speckled throat; reads as a face already",
+        "expectedTier": "gemini"
+      }
+    },
+    {
+      "id": "crown_imperial",
+      "photo": "goldenset/photos/crown_imperial.jpg",
+      "species": "Fritillaria imperialis",
+      "commonName": "crown imperial",
+      "expect": {
+        "isPlant": true,
+        "identifiedNameIncludes": "Fritillaria",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 4, "resemblance": 3, "edges": 4, "style": 4 },
+        "signatureFeature": "ring of downward-hanging orange bells worn as a skirt, topped by a spiky green leaf crown — the tuft-above-skirt silhouette is the read",
+        "expectedTier": "gemini"
+      }
+    },
+    {
+      "id": "mimosa_tree",
+      "photo": "goldenset/photos/mimosa_tree.jpg",
+      "species": "Albizia julibrissin",
+      "commonName": "mimosa / silk tree",
+      "expect": {
+        "isPlant": true,
+        "identifiedNameIncludes": "Albizia",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 4, "resemblance": 3, "edges": 4, "style": 4 },
+        "signatureFeature": "pink silky powderpuff of fine filaments sitting above feathery bipinnate fern-like foliage",
+        "expectedTier": "gemini"
+      }
+    },
+
+    {
+      "id": "angelina_stonecrop",
+      "photo": "goldenset/photos/angelina_stonecrop.jpg",
+      "species": "Sedum rupestre 'Angelina'",
+      "commonName": "Angelina stonecrop",
+      "stress": true,
+      "expect": {
+        "isPlant": true,
+        "identifiedNameIncludes": "Sedum",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 3, "resemblance": 2, "edges": 3, "style": 3 },
+        "signatureFeature": "dense mat of needle-like succulent rosettes, coral-red tips fading into chartreuse green",
+        "note": "Stress case: a groundcover mat with no single bloom. Tests whether the VLM picks one representative rosette instead of describing undifferentiated texture.",
+        "expectedTier": "gemini"
+      }
+    },
+    {
+      "id": "blue_princess_holly",
+      "photo": "goldenset/photos/blue_princess_holly.jpg",
+      "species": "Ilex x meserveae 'Blue Princess'",
+      "commonName": "Blue Princess holly",
+      "stress": true,
+      "expect": {
+        "isPlant": true,
+        "identifiedNameIncludes": "Ilex",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 3, "resemblance": 2, "edges": 3, "style": 3 },
+        "signatureFeature": "glossy spined blue-green leaves studded with scarlet berries",
+        "note": "Stress case: whole shrub shot wide, with mulch and lawn in frame. Tests subject isolation — the sprite must be one sprig, not a bush.",
+        "expectedTier": "gemini"
+      }
+    },
+    {
+      "id": "purple_fountain_grass",
+      "photo": "goldenset/photos/purple_fountain_grass.jpg",
+      "species": "Pennisetum setaceum 'Rubrum'",
+      "commonName": "purple fountain grass",
+      "stress": true,
+      "expect": {
+        "isPlant": true,
+        "identifiedNameIncludes": "Pennisetum",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 3, "resemblance": 2, "edges": 3, "style": 3 },
+        "signatureFeature": "burgundy arching blades topped with fluffy pink bottlebrush plumes; the plume silhouette carries the read",
+        "note": "Stress case: a clump with no flower and a fuzzy plume edge. Tests whether thick outlines survive against soft, hair-like detail.",
+        "expectedTier": "gemini"
+      }
+    },
+    {
+      "id": "hydrangea",
+      "photo": "goldenset/photos/hydrangea.jpg",
+      "species": "Hydrangea macrophylla",
+      "commonName": "bigleaf hydrangea",
+      "stress": true,
+      "expect": {
+        "isPlant": true,
+        "identifiedNameIncludes": "Hydrangea",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 3, "resemblance": 2, "edges": 3, "style": 3 },
+        "signatureFeature": "dense globe of small four-petal florets in a blue-to-lilac gradient",
+        "note": "Stress case: cut stems in a glass jar on a table. Tests that the vessel and indoor background are discarded rather than becoming part of the creature.",
+        "expectedTier": "gemini"
+      }
+    },
+
+    {
+      "id": "edge_not_a_plant",
+      "photo": "goldenset/photos/lego_plant.jpg",
+      "commonName": "(negative case — not a living plant)",
+      "expect": {
+        "isPlant": false,
+        "result": "needsName",
+        "programmatic": null,
+        "note": "Three Lego potted plants. Deliberately plant-shaped, so this exercises the is_plant reject branch far harder than an unrelated object would. Pipeline should return { needsName: true } and generate NO sprite."
+      }
+    },
+    {
+      "id": "edge_manual_name",
+      "photo": "goldenset/photos/blurred_plants.jpg",
+      "manualName": "Melastoma malabathricum",
+      "commonName": "(manual-name path)",
+      "expect": {
+        "viaManualPath": true,
+        "movesetDefault": true,
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "note": "Heavily out-of-focus foliage. Low-confidence/failed ID -> createManualPlant. Assert default move set."
+      }
+    },
+
+    {
+      "id": "edge_fallback_nvidia",
+      "photo": "goldenset/photos/melastoma.jpg",
+      "species": "Melastoma malabathricum",
+      "commonName": "(tier 2 — NVIDIA fallback)",
+      "inject": { "gemini": "timeout" },
+      "expect": {
+        "isPlant": true,
+        "producedByTier": "gemma",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 4, "resemblance": 3, "edges": 4, "style": 4 },
+        "note": "Simulates Gemini stalling past GEMINI_TIMEOUT_MS (20s). NVIDIA gemma-4-31b-it crafts the prompt instead. Tier order is Gemini first — this is the reverse of the pre-port arrangement."
+      }
+    },
+    {
+      "id": "edge_fallback_nameonly",
+      "photo": "goldenset/photos/melastoma.jpg",
+      "species": "Melastoma malabathricum",
+      "commonName": "(tier 3 — name-only prompt)",
+      "inject": { "gemini": "error", "gemma": "error" },
+      "expect": {
+        "isPlant": true,
+        "producedByTier": "nameOnly",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": true, "notBlank": true },
+        "judgeMin": { "cute": 3, "resemblance": 2, "edges": 4, "style": 4 },
+        "note": "Both vision models down -> species-dictionary prompt built without a photo, sent straight to Flux."
+      }
+    },
+    {
+      "id": "edge_fallback_photocrop",
+      "photo": "goldenset/photos/melastoma.jpg",
+      "species": "Melastoma malabathricum",
+      "commonName": "(tier 4 — photo center-crop)",
+      "inject": { "imageGen": "error" },
+      "expect": {
+        "isPlant": true,
+        "producedByTier": "photoCrop",
+        "programmatic": { "paletteValid": true, "dimsOk": true, "notBlank": true },
+        "autoApprove": false,
+        "note": "Nano Banana fails -> center-cropped photo."
+      }
+    },
+    {
+      "id": "edge_removebg_degraded",
+      "photo": "goldenset/photos/melastoma.jpg",
+      "species": "Melastoma malabathricum",
+      "commonName": "(remove.bg degraded — non-fatal)",
+      "inject": { "removeBg": "error" },
+      "expect": {
+        "isPlant": true,
+        "producedByTier": "gemma",
+        "removeBgOk": false,
+        "programmatic": { "paletteValid": true, "dimsOk": true, "hasAlpha": false, "notBlank": true },
+        "cachedAsApproved": false,
+        "note": "remove.bg down -> white background remains. Must NOT cache as approved."
+      }
+    }
+  ]
+}

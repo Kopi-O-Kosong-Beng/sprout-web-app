@@ -133,6 +133,7 @@ const authValue: AuthContextValue = {
     email: 'owner@example.com',
     displayName: 'Owner',
     emailVerified: true,
+    isAdmin: false,
   },
   login: vi.fn(),
   loginWithGoogle: vi.fn(),

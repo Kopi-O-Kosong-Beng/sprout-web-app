@@ -187,6 +187,10 @@ export interface AuthProfile {
   email: string;
   displayName: string;
   emailVerified: boolean;
+  /** Server-computed from its ADMIN_EMAILS allowlist. Decides where login lands
+   *  and whether the Admin nav link appears — it is not a permission. /api/admin
+   *  re-checks the allowlist on every request and answers 403 regardless. */
+  isAdmin: boolean;
   lastLogin?: string | null;
   lastLogout?: string | null;
 }
