@@ -52,6 +52,23 @@ describe('migrated pipeline and platform routes', () => {
     expect(response.status).toBe(401);
   });
 
+  /** The pipeline router raises the JSON limit to 20 MB for base64 photos, but a
+   *  parser mounted app-wide runs first and would consume the body under its own
+   *  limit. The client sends a 1024px JPEG at q0.85 — 120-230 kB of base64 for an
+   *  ordinary plant photo — so a default 100 kb ceiling rejects a real scan while
+   *  leaving the small fixtures above passing. Sized past that default here so
+   *  the limit is asserted on the path the browser actually takes. */
+  it('accepts a real-sized scan photo rather than rejecting it as too large', async () => {
+    const oneMegabyte = 'A'.repeat(1024 * 1024);
+    const response = await request(app)
+      .post('/api/pipeline/run-stream')
+      .send({ imageBase64: `data:image/jpeg;base64,${oneMegabyte}` });
+
+    expect(response.status).not.toBe(413);
+    // Reached the router's auth gate, which is as far as an anonymous call gets.
+    expect(response.status).toBe(401);
+  });
+
   it('mounts the operations portal behind authentication', async () => {
     const response = await request(app).get('/api/platform/config-status');
     expect(response.status).toBe(401);
