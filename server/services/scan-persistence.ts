@@ -7,13 +7,18 @@
 import { sanitizeSpeciesKey } from '../pipeline/dex';
 import { deriveSpeciesStats } from '../data/species-stats';
 import type { AvatarRepository } from '../models/avatar';
-import type { DexDiscovery, DexRepository } from '../models/dex';
+import type { DexRepository } from '../models/dex';
+import type { DiscoveryResolver, PublicDiscovery } from './discovery';
 import type { SpriteStorage } from './sprite-storage';
 
 export interface ScanPersistenceDependencies {
   storage: SpriteStorage;
   dex: DexRepository;
   avatars: Pick<AvatarRepository, 'upsertFromScan'>;
+  /** Turns the stored dex record into the block the client reads. Injected so
+   *  this service stays testable without Firestore, and so the UID→display-name
+   *  resolution has exactly one implementation (services/discovery.ts). */
+  resolveDiscovery: DiscoveryResolver;
 }
 
 export interface ScanPersistResult {
@@ -21,7 +26,7 @@ export interface ScanPersistResult {
   avatarId: string | null;
   created: boolean;
   saveError?: string;
-  discovery: DexDiscovery | null;
+  discovery: PublicDiscovery | null;
 }
 
 export async function persistScan(
@@ -57,7 +62,7 @@ export async function persistScan(
     const stats = deriveSpeciesStats(speciesKey);
 
     const spriteUrl = await dependencies.storage.save(speciesKey, png);
-    const discovery = await dependencies.dex.recordDiscovery(speciesKey, userId, speciesName);
+    const dex = await dependencies.dex.recordDiscovery(speciesKey, userId, speciesName);
     const { record, created } = await dependencies.avatars.upsertFromScan(userId, {
       speciesName,
       speciesFamily,
@@ -65,6 +70,21 @@ export async function persistScan(
       stats,
       metadata: null,
     });
+
+    // Everything durable is written by this point. Resolving the discoverer's
+    // display name is presentation, so it gets its own boundary: a lookup
+    // failure must degrade to `discovery: null`, never turn a saved scan into
+    // saved: false. (resolveDiscovery already swallows its own errors; this
+    // guards an injected resolver that does not.)
+    let discovery: PublicDiscovery | null = null;
+    try {
+      discovery = await dependencies.resolveDiscovery(dex, userId);
+    } catch (error) {
+      console.error(
+        'Discovery resolution failed after a successful save:',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
 
     return { saved: true, avatarId: record.id, created, discovery };
   } catch (error) {

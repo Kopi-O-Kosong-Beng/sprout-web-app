@@ -33,6 +33,7 @@ import {
 } from '../pipeline/deadline';
 import { serverEnv } from '../platform/env';
 import { persistScan } from '../services/scan-persistence';
+import { resolveDiscovery } from '../services/discovery';
 import createFirebaseSpriteStorage from '../services/sprite-storage';
 import dexRepository from '../repositories/dex';
 import avatarRepository from '../repositories/avatars';
@@ -469,6 +470,7 @@ async function runStage2cOnward(
       storage: createFirebaseSpriteStorage(),
       dex: dexRepository,
       avatars: avatarRepository,
+      resolveDiscovery,
     },
     userId,
     identification.name,

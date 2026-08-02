@@ -24,8 +24,13 @@ import { streamPipeline, type PipelineEvent } from '../services/pipelineStream';
 /** The client-visible stages of a scan, in order. */
 type ScanStep = 'identify' | 'sprite' | 'finish';
 
-/** Who found this species first, and how many explorers have found it since. */
-interface ScanDiscovery {
+/**
+ * The `discovery` block of the pipeline's `complete` event.
+ *
+ * Exported so ScanPage.test.tsx types its fixture against the very shape this
+ * page reads — the two used to be able to drift, and did.
+ */
+export interface ScanDiscovery {
   firstDiscoveredByName: string;
   firstDiscoveredAt: string;
   discoveryCount: number;

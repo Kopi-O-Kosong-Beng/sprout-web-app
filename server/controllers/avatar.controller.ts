@@ -3,57 +3,15 @@ import type { RequestHandler } from 'express';
 import { isAvatarBattleEligible } from '../data/battle-eligibility';
 import type { AvatarRecord, PaginatedAvatars } from '../models/avatar';
 import avatarRepository from '../repositories/avatars';
-import { getDb } from '../firebase';
-import { sanitizeSpeciesKey } from '../pipeline/dex';
-import dexRepository from '../repositories/dex';
+// Shared with the scan pipeline: one implementation resolves the discoverer's
+// UID to a display name, so the avatar detail and the scan `complete` event
+// cannot disagree about the block's shape.
+import { resolveDiscoveryForSpecies } from '../services/discovery';
 
 const DEFAULT_PAGE_SIZE = 20;
 
 interface PublicAvatarRecord extends AvatarRecord {
   battleEligible: boolean;
-}
-
-interface AvatarDiscovery {
-  firstDiscoveredByName: string;
-  firstDiscoveredAt: string;
-  discoveryCount: number;
-  isFirstDiscoverer: boolean;
-}
-
-/** Resolves who found this species first. Degrades to null rather than failing
- *  the detail request — the discoverer is a nice-to-have, the avatar is not.
- *  Only the display name is exposed; the email never leaves the server. */
-async function resolveDiscovery(
-  speciesName: string,
-  callerUid: string
-): Promise<AvatarDiscovery | null> {
-  try {
-    const speciesKey = sanitizeSpeciesKey(speciesName);
-    if (!speciesKey) return null;
-
-    const dex = await dexRepository.get(speciesKey);
-    if (!dex || !dex.firstDiscoveredBy) return null;
-
-    const snapshot = await getDb().collection('users').doc(dex.firstDiscoveredBy).get();
-    const displayName = snapshot.exists ? snapshot.data()?.displayName : undefined;
-    if (typeof displayName !== 'string' || !displayName.trim()) return null;
-
-    return {
-      firstDiscoveredByName: displayName,
-      firstDiscoveredAt: dex.firstDiscoveredAt,
-      discoveryCount: dex.discoveryCount,
-      isFirstDiscoverer: dex.firstDiscoveredBy === callerUid,
-    };
-  } catch (error) {
-    // Still degrade to null — the avatar must render either way. But log it, or
-    // a Firestore misconfiguration is indistinguishable from "nobody has found
-    // this species yet" and stays invisible forever.
-    console.error(
-      'Discovery lookup failed:',
-      error instanceof Error ? error.message : String(error)
-    );
-    return null;
-  }
 }
 
 interface PublicPaginatedAvatars
@@ -104,7 +62,7 @@ export const handleGetAvatar: RequestHandler = async (req, res, next) => {
       res.status(404).json({ error: 'Avatar not found.' });
       return;
     }
-    const discovery = await resolveDiscovery(avatar.speciesName, userId);
+    const discovery = await resolveDiscoveryForSpecies(avatar.speciesName, userId);
     res.status(200).json({ ...serializeAvatar(avatar, new Date()), discovery });
   } catch (err) {
     next(err);

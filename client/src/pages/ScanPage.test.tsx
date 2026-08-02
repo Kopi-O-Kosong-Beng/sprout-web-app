@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PipelineEvent } from '../services/pipelineStream';
-import ScanPage from './ScanPage';
+import ScanPage, { type ScanDiscovery } from './ScanPage';
 
 const streamPipeline = vi.hoisted(() => vi.fn());
 vi.mock('../services/pipelineStream', () => ({ streamPipeline }));
@@ -17,6 +17,30 @@ function scriptStream(events: PipelineEvent[]) {
   );
 }
 
+/**
+ * The `complete` frame as the server actually writes it.
+ *
+ * This fixture once carried a discovery block the server had never sent: the
+ * route put the raw dex record on the wire (`firstDiscoveredBy`, a UID) while
+ * this file asserted against the resolved shape, so both discovery tests passed
+ * green against a payload that did not exist. Two anchors now hold the fixture
+ * to reality, one at each end:
+ *
+ *  - `discovery` is typed as ScanDiscovery, the interface the page itself
+ *    reads, so a field that drifts from the consumer is a typecheck failure
+ *    here rather than a silent pass;
+ *  - server/tests/pipeline-complete-event.test.ts asserts the emitted frame
+ *    carries firstDiscoveredByName/isFirstDiscoverer and no firstDiscoveredBy,
+ *    which is the only place a *server-side* regression can be caught — a
+ *    client test driving a mocked stream cannot see the server at all.
+ */
+const DISCOVERY: ScanDiscovery = {
+  firstDiscoveredByName: 'Justin',
+  firstDiscoveredAt: '2026-08-02T00:00:00.000Z',
+  discoveryCount: 3,
+  isFirstDiscoverer: false,
+};
+
 function completeEvent(overrides: Partial<PipelineEvent> = {}): PipelineEvent {
   return {
     event: 'complete',
@@ -25,12 +49,7 @@ function completeEvent(overrides: Partial<PipelineEvent> = {}): PipelineEvent {
     totalTimeMs: 1200,
     avatarId: 'avatar-1',
     saved: true,
-    discovery: {
-      firstDiscoveredByName: 'Justin',
-      firstDiscoveredAt: '2026-08-02T00:00:00.000Z',
-      discoveryCount: 3,
-      isFirstDiscoverer: false,
-    },
+    discovery: DISCOVERY,
     ...overrides,
   } as PipelineEvent;
 }
@@ -94,16 +113,13 @@ describe('ScanPage save outcome', () => {
   });
 
   it('calls out the caller when they discovered it first', async () => {
-    scriptStream([
-      completeEvent({
-        discovery: {
-          firstDiscoveredByName: 'Zhi Feng',
-          firstDiscoveredAt: '2026-08-02T00:00:00.000Z',
-          discoveryCount: 1,
-          isFirstDiscoverer: true,
-        },
-      } as Partial<PipelineEvent>),
-    ]);
+    const discovery: ScanDiscovery = {
+      firstDiscoveredByName: 'Zhi Feng',
+      firstDiscoveredAt: '2026-08-02T00:00:00.000Z',
+      discoveryCount: 1,
+      isFirstDiscoverer: true,
+    };
+    scriptStream([completeEvent({ discovery } as Partial<PipelineEvent>)]);
     await startScan();
 
     expect(await screen.findByText(/you discovered this first/i)).toBeInTheDocument();
@@ -111,7 +127,11 @@ describe('ScanPage save outcome', () => {
 
   it('tells the user when the scan could not be saved', async () => {
     scriptStream([
-      completeEvent({ saved: false, avatarId: null, saveError: 'bucket unreachable' } as Partial<PipelineEvent>),
+      completeEvent({
+        saved: false,
+        avatarId: null,
+        saveError: 'bucket unreachable',
+      } as Partial<PipelineEvent>),
     ]);
     await startScan();
 
