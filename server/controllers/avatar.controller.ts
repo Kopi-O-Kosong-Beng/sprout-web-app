@@ -44,7 +44,14 @@ async function resolveDiscovery(
       discoveryCount: dex.discoveryCount,
       isFirstDiscoverer: dex.firstDiscoveredBy === callerUid,
     };
-  } catch {
+  } catch (error) {
+    // Still degrade to null — the avatar must render either way. But log it, or
+    // a Firestore misconfiguration is indistinguishable from "nobody has found
+    // this species yet" and stays invisible forever.
+    console.error(
+      'Discovery lookup failed:',
+      error instanceof Error ? error.message : String(error)
+    );
     return null;
   }
 }
