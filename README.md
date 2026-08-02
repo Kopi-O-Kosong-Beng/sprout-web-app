@@ -1,12 +1,12 @@
 # 🌱 Sprout Web App
 
-**Scan. Grow. Battle.** — the web platform for Sprout (50.003 ESC, Cohort 3 Team 2): auth, Pokédex-style plant avatar archive, GenAI sprite pipeline, PVE battles, and a contact/query-ticket system. **Stack: TypeScript everywhere** — React + Vite (frontend) and Node.js + Express (backend), with **Cloud Firestore** as the database (Firebase Auth for login).
+**Scan. Grow. Battle.** — the web platform for Sprout (50.003 ESC, Cohort 3 Team 2): auth, Pokédex-style plant avatar archive, GenAI sprite pipeline, PVE battles, a public almanac of 200 Singapore flowering plants, an admin dashboard (API health, Firestore cleanup, discoveries), and a contact/query-ticket system. **Stack: TypeScript everywhere** — React + Vite (frontend) and Node.js + Express (backend), with **Cloud Firestore** as the database (Firebase Auth for login).
 
-> 👉 **Building the frontend? Read [`FRONTEND_HANDOFF.md`](FRONTEND_HANDOFF.md) first** — it's the fast path: run the backend, call the API, done.
+> 👉 **Building the frontend? Read [`md/FRONTEND_HANDOFF.md`](md/FRONTEND_HANDOFF.md) first** — it's the fast path: run the backend, call the API, done.
 
 This README assumes **zero prior setup** — follow it top to bottom and you'll have the backend running locally in ~10 minutes. If something breaks, check [Common problems](#common-problems) before pinging the chat.
 
-> **Deploying or explaining hosting? Read [`DEPLOYMENT.md`](DEPLOYMENT.md)** for the simple Vercel + Render setup, env vars, CORS, and demo auth bypass.
+> **Deploying or explaining hosting? Read [`md/DEPLOYMENT.md`](md/DEPLOYMENT.md)** for the simple Vercel + Render setup, env vars, CORS, and demo auth bypass.
 
 ---
 
@@ -14,19 +14,23 @@ This README assumes **zero prior setup** — follow it top to bottom and you'll 
 
 ```
 sprout-app/
-├── SPECS.md           ← START HERE: how the 3 spec docs work + ground rules
-├── requirements.md    ← WHAT to build (exact endpoints, status codes, error strings)
-├── process.md         ← WHY (product context, priorities, prof feedback decisions §14)
-├── tasks.md           ← ORDER (22 tasks with checkboxes + suggested owners)
-├── FRONTEND_HANDOFF.md ← frontend teammates: your fast-start guide
-├── DEPLOYMENT.md       ← production hosting guide (Vercel + Render)
+├── md/                 ← every spec and guide lives here
+│   ├── SPECS.md            ← START HERE: how the 3 spec docs work + ground rules
+│   ├── requirements.md     ← WHAT to build (exact endpoints, status codes, error strings)
+│   ├── process.md          ← WHY (product context, priorities, prof feedback decisions §14)
+│   ├── tasks.md            ← ORDER (22 tasks with checkboxes + suggested owners)
+│   ├── FRONTEND_HANDOFF.md ← frontend teammates: your fast-start guide
+│   ├── DEPLOYMENT.md       ← production hosting guide (Vercel + Render)
+│   ├── DESIGN.md           ← visual design source of truth
+│   └── checkoff.md         ← flow-by-flow walkthrough with file:line refs
 ├── firestore.rules     ← Firestore security rules (deny-all; backend-only access)
-├── test.html          ← throwaway browser form for poking the API by hand
-├── server/            ← the Express + TypeScript backend (working — see below)
-└── client/            ← the React + Vite frontend
+├── scripts/            ← one-off tooling (the flora checklist extractor)
+├── test.html           ← throwaway browser form for poking the API by hand
+├── server/             ← the Express + TypeScript backend (working — see below)
+└── client/             ← the React + Vite frontend
 ```
 
-**Read `SPECS.md` first.** It explains which document wins when they disagree and the rules for working in parallel without stepping on each other.
+**Read `md/SPECS.md` first.** It explains which document wins when they disagree and the rules for working in parallel without stepping on each other.
 
 **Everything is TypeScript.** The backend runs directly from `.ts` files via `tsx` (no build step in dev); tests use `ts-jest`. `npm run typecheck` in `server/` checks types without running.
 
@@ -293,7 +297,7 @@ curl -X POST http://localhost:3001/api/query/submit \
 curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 ```
 
-→ returns the 5 seeded avatars. (This dev shortcut needs `AUTH_DEV_BYPASS=true` in `server/.env`; it's off in production. See [`FRONTEND_HANDOFF.md`](FRONTEND_HANDOFF.md) §3.)
+→ returns the 5 seeded avatars. (This dev shortcut needs `AUTH_DEV_BYPASS=true` in `server/.env`; it's off in production. See [`md/FRONTEND_HANDOFF.md`](md/FRONTEND_HANDOFF.md) §3.)
 
 **Run the tests:** `npm test`. Backend integration tests run against the local
 `sprout-test` Firestore Emulator and never your live Firebase project.
@@ -308,11 +312,28 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 | POST | `/api/auth/request-reset` | — | send 6-digit OTP via email log/SMTP |
 | POST | `/api/auth/verify-reset` | — | verify OTP and update password |
 | POST | `/api/query/submit` | — | create query ticket → `{refNumber}` |
-| GET | `/api/avatar` | yes | list caller's avatars (paginated) |
-| GET | `/api/avatar/:id` | yes | one avatar (ownership-checked) |
-| *(next)* | `/api/upload/plant`, `/api/battle/*` | Bearer token | per `requirements.md` |
+| GET | `/api/avatar` | Bearer token | list caller's avatars (paginated) |
+| GET | `/api/avatar/:id` | Bearer token | one avatar (ownership-checked) |
+| POST | `/api/avatar` | Bearer token | save a scanned plant into the archive |
+| GET | `/api/almanac` | **—** | the 200-species almanac: found / not found + tallies |
+| GET | `/api/almanac/:speciesId` | optional | one species; a login adds the finder, date and photo |
+| POST | `/api/battle/pve/start` | Bearer token | start a PVE battle with one of your avatars |
+| GET/POST | `/api/battle/pve/:sessionId`(`/action`, `/abandon`) | Bearer token | read a session, take a turn, concede |
+| POST | `/api/pipeline/run-stream` | Bearer token | the 4-hop sprite pipeline, streamed as SSE |
+| GET | `/api/admin/users`, `/api/admin/almanac` | Bearer + `ADMIN_EMAILS` | accounts; taxonomy with finders |
+| POST | `/api/admin/cleanup` | Bearer + `ADMIN_EMAILS` | dry-run / delete expired web uploads |
+| GET | `/api/platform/*` | Bearer + `ADMIN_EMAILS` | pipeline portal: config, live provider health, tests |
 
-The **exact** request/response contracts (status codes, error strings, limits like "5 MB", "10 attempts / 15 min") live in `requirements.md` — the tests assert those exact values, so code against the doc, not from memory. Frontend integration details: [`FRONTEND_HANDOFF.md`](FRONTEND_HANDOFF.md).
+Two of these are deliberately unlike the rest. `GET /api/almanac` takes no auth
+at all — it is the landing page's centrepiece and is shown to visitors who have
+never signed up, so it carries the taxonomy and a found/not-found flag and
+nothing a player contributed. `GET /api/almanac/:speciesId` takes *optional*
+auth: anyone may see a species, the sprite the game made of it and its battle
+stats, while the finder's display name, the discovery date and their own
+photograph need a login. That split is the privacy model, and
+[`md/FRONTEND_HANDOFF.md`](md/FRONTEND_HANDOFF.md) documents the exact shapes.
+
+The **exact** request/response contracts (status codes, error strings, limits like "5 MB", "10 attempts / 15 min") live in `md/requirements.md` — the tests assert those exact values, so code against the doc, not from memory. Frontend integration details: [`md/FRONTEND_HANDOFF.md`](md/FRONTEND_HANDOFF.md).
 
 ## 5. The database story (IMPORTANT — read once)
 
@@ -354,9 +375,9 @@ Rule of thumb: routes stay thin → controllers translate HTTP → services do t
 
 ## 7. Team workflow
 
-1. Claim your task in `tasks.md` (suggested owners are at the top) — put your name
+1. Claim your task in `md/tasks.md` (suggested owners are at the top) — put your name
 2. Branch: `git checkout -b feat/task-<n>-<slug>` (e.g. `feat/task-14-avatar-archive-ui`)
-3. Code against `requirements.md`; mock external APIs (`USE_MOCK_APIS=true` — never call real plant.id/Gemma/FLUX in dev)
+3. Code against `md/requirements.md`; mock external APIs (`USE_MOCK_APIS=true` — never call real plant.id/Gemma/FLUX in dev)
 4. Done = happy path + error paths work, your module's tests pass, `npm run dev` still boots
 5. Push your branch → open a Pull Request on GitHub → someone else eyeballs it → merge
 6. `git pull` main regularly so integration stays boring
@@ -379,4 +400,5 @@ Still stuck? Share only the minimal relevant, sanitized error lines. Redact toke
 
 ## Related repos
 
+- 🎨 **[Sprout_Dev_Platform](https://github.com/Neonat/Sprout_Dev_Platform)** — where the GenAI sprite pipeline and its operations portal come from. Both were migrated into this repo (`server/pipeline/`, `server/platform/`, `client/src/studio/`) rather than kept as a third app, and changes made there since are ported across periodically. The two copies are intentionally not identical: this one keeps its verified-login + `ADMIN_EMAILS` gate on the portal, accepts either spelling of each provider key, and adapts a handful of lines to this repo's stricter tsconfig. Commit messages on the ports record every deliberate divergence.
 - 📚 **[sprout-knowledge-base](https://github.com/Kopi-O-Kosong-Beng/sprout-knowledge-base)** — the team's Obsidian vault: rubrics, use cases, design decisions, prof feedback, Q&As. When you wonder "why is it built this way?", the answer is there.
