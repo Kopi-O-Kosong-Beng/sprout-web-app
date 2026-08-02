@@ -68,11 +68,11 @@ jobs:
       # jest 30's runtime with the server's jest 29 test environment
       # ("clearMocksOnScope is not a function"). `node node_modules/jest/...`
       # is unambiguous and works under both sh (CI) and cmd (local Windows).
-      - name: 'Group 1: eligibility + catalog unit suites (no emulator)'
-        run: node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/battle-eligibility.test.ts tests/battle-catalog.test.ts
+      - name: 'Group 1: eligibility + catalog + species/sprite/scan/pipeline-auth unit suites (no emulator)'
+        run: node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/battle-eligibility.test.ts tests/battle-catalog.test.ts tests/species-stats.test.ts tests/sprite-storage.test.ts tests/scan-persistence.test.ts tests/pipeline-auth.test.ts
 
-      - name: 'Group 2: Firestore battle repository + avatar HTTP API'
-        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/battle-repository.test.ts tests/avatar-api.test.ts"
+      - name: 'Group 2: Firestore battle repository + avatar HTTP API + avatar upsert/discovery + dex repository'
+        run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/battle-repository.test.ts tests/avatar-api.test.ts tests/avatar-upsert.test.ts tests/dex-repository.test.ts tests/avatar-discovery-api.test.ts"
 
       - name: 'Group 3: PVE HTTP API'
         run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/battle-api.test.ts"
@@ -106,8 +106,8 @@ jobs:
       - name: 'Group 5: BattlePage + AppHeader navigation lock'
         run: npm exec -- vitest run src/pages/BattlePage.test.tsx src/components/common/AppHeader.navigation-lock.test.tsx
 
-      - name: 'Group 6: ArchivePage'
-        run: npm exec -- vitest run src/pages/ArchivePage.test.tsx
+      - name: 'Group 6: ArchivePage + ScanPage'
+        run: npm exec -- vitest run src/pages/ArchivePage.test.tsx src/pages/ScanPage.test.tsx
 
       - name: 'Group 8: auth pages (incl. Google sign-in) + admin dashboard'
         run: npm exec -- vitest run src/pages/LoginPage.test.tsx src/pages/SignupPage.test.tsx src/pages/AdminPage.test.tsx
