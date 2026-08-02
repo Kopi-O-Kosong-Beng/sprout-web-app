@@ -24,11 +24,26 @@ import { streamPipeline, type PipelineEvent } from '../services/pipelineStream';
 /** The client-visible stages of a scan, in order. */
 type ScanStep = 'identify' | 'sprite' | 'finish';
 
+/** Who found this species first, and how many explorers have found it since. */
+interface ScanDiscovery {
+  firstDiscoveredByName: string;
+  firstDiscoveredAt: string;
+  discoveryCount: number;
+  isFirstDiscoverer: boolean;
+}
+
 type Status =
   | { kind: 'idle' }
   | { kind: 'busy'; step: ScanStep; plantName?: string; detail?: string }
   | { kind: 'naming'; photo: string }
-  | { kind: 'done'; sprite: string; name: string }
+  | {
+      kind: 'done';
+      sprite: string;
+      name: string;
+      saved: boolean;
+      saveError?: string;
+      discovery: ScanDiscovery | null;
+    }
   | { kind: 'error'; message: string };
 
 /** Maps a pipeline hop id onto the three stages the player is shown. */
@@ -147,6 +162,10 @@ export default function ScanPage() {
     abortRef.current = controller;
     let finalSprite: string | null = null;
     let finalName = customName ?? '';
+    let savedOutcome: { saved: boolean; saveError?: string; discovery: ScanDiscovery | null } = {
+      saved: true,
+      discovery: null,
+    };
 
     try {
       setStatus({ kind: 'busy', step: 'identify' });
@@ -189,6 +208,11 @@ export default function ScanPage() {
             const plant = event.finalPlant as { name?: string } | undefined;
             finalName = plant?.name ?? finalName;
             finalSprite = `data:image/png;base64,${String(event.finalSpriteB64)}`;
+            savedOutcome = {
+              saved: event.saved !== false,
+              saveError: event.saveError ? String(event.saveError) : undefined,
+              discovery: (event.discovery ?? null) as ScanDiscovery | null,
+            };
           }
 
           if (event.event === 'pipeline_error' || event.event === 'error') {
@@ -206,11 +230,15 @@ export default function ScanPage() {
         kind: 'done',
         sprite: finalSprite,
         name: finalName || 'Unknown Plant',
+        saved: savedOutcome.saved,
+        saveError: savedOutcome.saveError,
+        discovery: savedOutcome.discovery,
       });
     } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : 'Something went wrong.';
       setStatus({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Something went wrong.',
+        message: rawMessage.includes('401') ? 'Please sign in to scan a plant.' : rawMessage,
       });
     } finally {
       processingRef.current = false;
@@ -383,6 +411,9 @@ export default function ScanPage() {
         <ResultDialog
           sprite={status.sprite}
           name={status.name}
+          saved={status.saved}
+          saveError={status.saveError}
+          discovery={status.discovery}
           onScanAnother={() => setStatus({ kind: 'idle' })}
         />
       )}
@@ -513,10 +544,16 @@ function NameDialog({
 function ResultDialog({
   sprite,
   name,
+  saved,
+  saveError,
+  discovery,
   onScanAnother,
 }: {
   sprite: string;
   name: string;
+  saved: boolean;
+  saveError?: string;
+  discovery: ScanDiscovery | null;
   onScanAnother: () => void;
 }) {
   return (
@@ -527,6 +564,24 @@ function ResultDialog({
       <p className="mt-1 text-center text-[8px] leading-relaxed opacity-70">
         Rendered at 192×192 and snapped to the Florentine24 palette.
       </p>
+
+      {!saved && (
+        <p className="pixel-panel mt-3 px-3 py-2 text-center text-[9px] leading-relaxed text-red-700">
+          Your plant was generated, but it could not be saved.{saveError ? ` ${saveError}` : ''}
+        </p>
+      )}
+
+      {discovery &&
+        (discovery.isFirstDiscoverer ? (
+          <p className="mt-3 text-center text-[9px] leading-relaxed">
+            You discovered this first!
+          </p>
+        ) : (
+          <div className="mt-3 text-center text-[9px] leading-relaxed">
+            <p>First discovered by {discovery.firstDiscoveredByName}</p>
+            <p>Found by {discovery.discoveryCount} explorers</p>
+          </div>
+        ))}
 
       <a
         href={sprite}
