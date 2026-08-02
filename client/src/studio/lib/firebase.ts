@@ -36,18 +36,40 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
+import type { Auth } from 'firebase/auth';
+import type { Firestore } from 'firebase/firestore';
 import {
   getSproutFirebaseApp,
   getSproutFirebaseAuth,
+  isFirebaseConfigured,
 } from '../../services/firebaseClient';
 
 /**
- * Lazily resolved, unlike the module-level `getAuth(app)` the platform used.
- * The env-driven config can be absent in a local checkout, and throwing at
- * import time would take down every route that merely imports this module — not
- * just the studio.
+ * Stand-in for a handle that cannot be built because VITE_FIREBASE_* is absent.
+ *
+ * Both exports below used to be resolved eagerly, which threw during module
+ * evaluation in a checkout with no Firebase config — and because App.tsx routes
+ * to the studio, that import chain took down the entire SPA. Every page went
+ * blank, including the landing page, which needs no Firebase at all. The
+ * comment on `auth` even said this was the thing to avoid.
+ *
+ * Importing is safe now, and only *using* a handle fails, with a message that
+ * names the missing config instead of "cannot read properties of undefined".
+ * The studio is sign-in-gated anyway, so it was never usable without this
+ * config — the difference is that the rest of the app no longer cares.
  */
-export const auth = getSproutFirebaseAuth();
+function unconfigured<T extends object>(handle: string): T {
+  const explain = () => {
+    throw new Error(
+      `The studio's ${handle} needs VITE_FIREBASE_* in client/.env.local.`
+    );
+  };
+  return new Proxy({} as T, { get: explain, has: explain, set: explain });
+}
+
+export const auth: Auth = isFirebaseConfigured()
+  ? getSproutFirebaseAuth()
+  : unconfigured<Auth>('auth handle');
 
 /**
  * Firestore database id. The studio's dex and user_profiles collections live in
@@ -56,7 +78,9 @@ export const auth = getSproutFirebaseAuth();
  */
 const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || '(default)';
 
-export const db = getFirestore(getSproutFirebaseApp(), databaseId);
+export const db: Firestore = isFirebaseConfigured()
+  ? getFirestore(getSproutFirebaseApp(), databaseId)
+  : unconfigured<Firestore>('Firestore handle');
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
