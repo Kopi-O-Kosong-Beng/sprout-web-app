@@ -165,7 +165,14 @@ export default function LandingPage() {
           <div className="mt-12 grid gap-5 sm:grid-cols-2">
             {FEATURES.map((feature) => (
               <div key={feature.title} className="pixel-panel-dark p-6">
-                <h3 className="text-base font-semibold">{feature.title}</h3>
+                {/*
+                  text-white is not redundant. `--color-base` is declared in
+                  @theme (index.css), so Tailwind generates a `text-base`
+                  *colour* utility that collides with the built-in `text-base`
+                  font size — and this heading was being painted #0c082a,
+                  near-black on the dark green panel. Stating the colour wins.
+                */}
+                <h3 className="text-base font-semibold text-white">{feature.title}</h3>
                 <p className="mt-2.5 text-sm leading-relaxed text-white/70">{feature.body}</p>
               </div>
             ))}
