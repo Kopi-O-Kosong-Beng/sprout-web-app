@@ -6,11 +6,55 @@ import {
   deleteAccount,
   listAccounts,
 } from '../services/admin.service';
+import { getAdminAlmanac } from '../services/almanac.service';
+import { CLEANUP_TARGETS, runCleanup } from '../services/cleanup.service';
 
 export const handleListAccounts: RequestHandler = async (_req, res, next) => {
   try {
     const accounts = await listAccounts();
     res.json({ items: accounts, total: accounts.length });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** The whole taxonomy with discovery detail, plus anything found off-list. */
+export const handleAdminAlmanac: RequestHandler = async (_req, res, next) => {
+  try {
+    res.json(await getAdminAlmanac());
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Firestore cleanup. Dry run unless the caller explicitly asks otherwise, and a
+ * destructive run must also re-state the target in `confirmTarget` — a stray
+ * `{"dryRun":false}` from a curl session should not empty a collection.
+ */
+export const handleAdminCleanup: RequestHandler = async (req, res, next) => {
+  try {
+    const { target, dryRun = true, confirmTarget } = req.body ?? {};
+    if (!CLEANUP_TARGETS.includes(target)) {
+      res.status(400).json({
+        error: `Unknown cleanup target. Expected one of: ${CLEANUP_TARGETS.join(', ')}.`,
+      });
+      return;
+    }
+    if (dryRun !== true && confirmTarget !== target) {
+      res.status(400).json({
+        error: 'Deleting requires confirmTarget to match the target.',
+      });
+      return;
+    }
+
+    const report = await runCleanup(target, { dryRun: dryRun !== false });
+    if (!report.dryRun) {
+      console.warn(
+        `[admin] cleanup ${report.target} deleted=${report.deleted} by=${req.user!.uid}`
+      );
+    }
+    res.json(report);
   } catch (err) {
     next(err);
   }
