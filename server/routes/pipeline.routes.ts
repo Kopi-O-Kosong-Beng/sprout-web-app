@@ -424,7 +424,12 @@ async function runStage2cOnward(
   const judgeScores = await geminiJudgeEval(
     finishedPngBuffer,
     plant.name,
-    serverEnv.geminiKey ?? ''
+    serverEnv.geminiKey ?? '',
+    // Without this the judge is the one hop with no ceiling, so a slow or
+    // hanging Gemini call runs past the whole route budget after every other
+    // hop has respected it. The parameter is optional, which is why nothing
+    // failed when the bounded judge was ported and this call site was not.
+    deadline
   );
 
   const combinedScores = { ...pScores, ...judgeScores };
