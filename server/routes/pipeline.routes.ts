@@ -367,7 +367,7 @@ async function runStage2cOnward(
     step: '2d',
     title: '2d. Finisher & Palette Quantization',
     details:
-      'Resizing to 192x192 (nearest-neighbor) & snapping to Florentine24 palette...',
+      'Resizing to 192x192 (nearest-neighbor) & snapping to Spica72 palette...',
   });
 
   const startTime2d = Date.now();
@@ -382,7 +382,7 @@ async function runStage2cOnward(
     status: 'success',
     icon: 'tick',
     latencyMs: lat2d,
-    details: 'Finished 192x192px PNG sprite with Florentine24 palette colors.',
+    details: 'Finished 192x192px PNG sprite with Spica72 palette colors.',
     finishedSpriteB64: finishedB64,
   });
 

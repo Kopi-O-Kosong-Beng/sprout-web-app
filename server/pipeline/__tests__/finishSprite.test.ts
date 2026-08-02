@@ -21,7 +21,7 @@ async function createSolidPng(hexColor: string, width = 300, height = 300, alpha
 }
 
 describe("finishSprite", () => {
-  it("snaps every opaque pixel into SPROUT_PALETTE and sets dimensions to 192x192", async () => {
+  it("[black-box: equivalence] snaps every opaque pixel into SPROUT_PALETTE and sets dimensions to 192x192", async () => {
     // Near bloom pink #E9487F (slightly off palette)
     const nearColor = "#E9487F";
     const input = await createSolidPng(nearColor, 256, 256, 1);
@@ -49,7 +49,7 @@ describe("finishSprite", () => {
     expect(info.height).toBe(SPRITE_SIZE);
   });
 
-  it("preserves transparent pixels", async () => {
+  it("[black-box: equivalence] preserves transparent pixels", async () => {
     const transparentInput = await sharp({
       create: {
         width: 300,
@@ -77,7 +77,7 @@ describe("finishSprite", () => {
     expect(hasTransparent).toBe(true);
   });
 
-  it("drops stray islands that are disconnected from the main subject", async () => {
+  it("[black-box: equivalence] drops stray islands that are disconnected from the main subject", async () => {
     // A big opaque block plus a small detached one, on transparency — the shape
     // withoutBG leaves when it fails to trim a corner.
     const W = 256;
@@ -117,7 +117,7 @@ describe("finishSprite", () => {
    * two values either side of that comparison, so this pins the branch itself
    * rather than a comfortably-opaque or comfortably-clear pixel.
    */
-  it("[BVA-robust] alpha 127 is left alone, 128 is snapped to the palette", async () => {
+  it("[white-box: boundary] alpha 127 is left alone, 128 is snapped to the palette", async () => {
     const W = 8;
     const raw = Buffer.alloc(W * W * 4, 0);
     // An off-palette colour so a snap is observable if it happens.
@@ -167,7 +167,7 @@ describe("finishSprite", () => {
     expect(sawUntouched).toBe(true);
   });
 
-  it("crops photo to 192x192 PNG buffer for Tier 4 fallback", async () => {
+  it("[black-box: equivalence] crops photo to 192x192 PNG buffer for Tier 4 fallback", async () => {
     const photoB64 = (await createSolidPng("#51B341", 400, 300)).toString("base64");
     const cropped = await cropPhoto(photoB64);
     

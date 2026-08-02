@@ -110,7 +110,7 @@ export const handleCreateAvatar: RequestHandler = async (req, res, next) => {
         speciesName: body.speciesName,
         speciesFamily,
         // The sprite travels with the record. There is no object store wired up
-        // (FIREBASE_STORAGE_BUCKET is unset), and a finished 192x192 Florentine24
+        // (FIREBASE_STORAGE_BUCKET is unset), and a finished 192x192 Spica72
         // PNG is tens of kilobytes — comfortably inside Firestore's 1 MB
         // document ceiling, which the route's schema enforces up front.
         spriteUrl: body.spriteDataUrl,

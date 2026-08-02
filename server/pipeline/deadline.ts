@@ -20,9 +20,9 @@ export const TOTAL_BUDGET_MS = 110_000;
  * the sooner we give up the more budget the NVIDIA fallback inherits.
  */
 /**
- * Plant.id. Previously unbounded — the only hop with no ceiling — so a hanging
- * identification quietly consumed the whole budget and the failure surfaced
- * later as "Flux render failed", pointing at the wrong provider entirely.
+ * Plant.id. Previously unbounded, so a hanging identification quietly consumed
+ * the whole budget and the failure surfaced later as "Flux render failed",
+ * pointing at the wrong provider entirely.
  */
 export const IDENTIFY_TIMEOUT_MS = 20_000;
 
@@ -40,6 +40,18 @@ export const VISION_TIMEOUT_MS = 75_000;
  */
 export const FLUX_TIMEOUT_MS = 45_000;
 export const WITHOUTBG_TIMEOUT_MS = 15_000;
+
+/**
+ * LLM-as-judge ceiling.
+ *
+ * The judge was unbounded for the same reason Plant.id once was — it is the last
+ * hop, so nothing downstream ever noticed it hanging. That position is what made
+ * it the worst place to lack a ceiling: a hung judge burns the request *after*
+ * identification, vision, render and cutout have all been paid for, and the
+ * route gets killed at the function limit holding a finished sprite it never
+ * returned. Scoring is polish; it must never cost the sprite.
+ */
+export const JUDGE_TIMEOUT_MS = 15_000;
 
 /**
  * Below this there isn't time for a withoutBG call plus the sharp pass that

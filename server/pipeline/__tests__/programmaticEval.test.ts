@@ -4,7 +4,7 @@ import { programmaticEval } from "../eval/programmatic";
 import { SPROUT_PALETTE, SPRITE_SIZE } from "../config";
 
 describe("programmaticEval", () => {
-  it("passes a clean on-palette sprite with transparency", async () => {
+  it("[black-box: equivalence] passes a clean on-palette sprite with transparency", async () => {
     // Create an image where center is opaque and outer border is transparent
     const width = 192;
     const height = 192;
@@ -51,7 +51,7 @@ describe("programmaticEval", () => {
    * The other three flags are asserted true on purpose: dimsOk has to fail on
    * its own, not as a side effect of an otherwise broken sprite.
    */
-  it("[EP] off-size sprite fails dimsOk while every other check still passes", async () => {
+  it("[black-box: equivalence] off-size sprite fails dimsOk while every other check still passes", async () => {
     const size = 128; // on-palette and well-formed, just not 192x192
     const buffer = Buffer.alloc(size * size * 4);
 
@@ -87,7 +87,7 @@ describe("programmaticEval", () => {
     expect(result.notBlank).toBe(true);
   });
 
-  it("fails a blank (all transparent) sprite", async () => {
+  it("[black-box: equivalence] fails a blank (all transparent) sprite", async () => {
     const blankPng = await sharp({
       create: {
         width: SPRITE_SIZE,

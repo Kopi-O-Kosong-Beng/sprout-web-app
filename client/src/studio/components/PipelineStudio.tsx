@@ -88,7 +88,7 @@ const STAGES: Omit<StepState, 'status' | 'icon'>[] = [
     id: '2d',
     short: 'Quantise',
     title: 'Finisher & palette snap',
-    description: 'Nearest-neighbour 192×192 & Florentine24 snap',
+    description: 'Nearest-neighbour 192×192 & Spica72 snap',
   },
   {
     id: '3',
@@ -467,7 +467,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
     updateStep('2d', {
       status: 'processing',
       icon: 'spinner',
-      details: 'Snapping to Florentine24…',
+      details: 'Snapping to Spica72…',
     });
     await delay(600);
     updateStep('2d', {
@@ -577,7 +577,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
             <div className="space-y-1.5 border-t border-line-soft px-3 py-2.5">
               <Row label="Discovered by" value={entry.firstDiscoveredBy || 'Trainer'} />
               <Row label="Tier" value={entry.producedByTier || 'gemma'} tone="info" />
-              <Row label="Palette" value={entry.paletteVersion || 'Florentine24'} />
+              <Row label="Palette" value={entry.paletteVersion || 'Spica72'} />
             </div>
           </Panel>
         ))}
@@ -792,7 +792,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
 
           {/* Thin palette strip: the gamut the finished sprite is snapped to. */}
           <div className="flex items-center gap-2 border-t border-line-soft px-4 py-2">
-            <span className="pixel-label shrink-0 text-txt-5">Florentine24</span>
+            <span className="pixel-label shrink-0 text-txt-5">Spica72</span>
             <div className="flex h-2.5 flex-1 overflow-hidden rounded-full border border-line">
               {SPROUT_PALETTE.map((hex) => (
                 <div key={hex} className="flex-1" style={{ backgroundColor: hex }} title={hex} />
@@ -854,7 +854,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
                   }
                 />
                 <div className="flex items-center justify-between font-mono text-[10px] text-txt-4">
-                  <span>{finishedSpriteB64 ? 'Florentine24 quantised' : 'Raw generator output'}</span>
+                  <span>{finishedSpriteB64 ? 'Spica72 quantised' : 'Raw generator output'}</span>
                   {craftedTier && <span className="text-info">tier: {craftedTier}</span>}
                 </div>
 

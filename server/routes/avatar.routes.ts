@@ -37,7 +37,7 @@ const requireDemoTools: RequestHandler = (_req, res, next) => {
 };
 
 /**
- * A finished sprite is a 192x192 Florentine24 PNG — a few tens of kB of base64.
+ * A finished sprite is a 192x192 Spica72 PNG — a few tens of kB of base64.
  * 512 kB leaves generous room for a noisier render while keeping the document
  * (sprite plus metadata) inside Firestore's 1 MB limit, which a write past it
  * would fail on with a far less helpful message.

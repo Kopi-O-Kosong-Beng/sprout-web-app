@@ -1,6 +1,7 @@
 import sharp from "sharp";
-import { SPROUT_PALETTE, SPRITE_SIZE } from "../config";
+import { SPRITE_SIZE, nearestPaletteHex } from "../config";
 import { Deadline, FLUX_TIMEOUT_MS } from "../deadline";
+import { applyStyleScaffold } from "../promptStyle";
 
 const FLUX_ENDPOINT =
   "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b";
@@ -20,6 +21,10 @@ export interface RenderResult {
   fromModel: boolean;
   /** Exact model that produced the bytes, for honest Dex stamping. */
   model: string;
+  /** Prompt actually sent, after scrubbing and style scaffolding. */
+  finalPrompt: string;
+  /** Style-contradicting terms cut from the crafted prompt, for the studio. */
+  strippedTerms: string[];
 }
 
 /** Renders via NVIDIA Flux.2 Klein 4B. Answers with JPEG despite the field name. */
@@ -43,14 +48,31 @@ async function renderWithFlux(
     throw new Error(`Flux API error ${response.status}: ${raw.slice(0, 300)}`);
   }
 
-  const artifact = JSON.parse(raw)?.artifacts?.[0]?.base64;
-  if (typeof artifact !== "string" || artifact.length === 0) {
-    throw new Error("Flux returned no image.");
+  /*
+   * A 200 here does not mean an image. NVIDIA answers with
+   * { artifacts: [{ base64, finishReason, seed }] }, and on a safety-filter trip
+   * or a post-acceptance rejection it returns the envelope with finishReason set
+   * to something other than SUCCESS and no usable base64.
+   *
+   * This used to throw a bare "Flux returned no image", which is why an
+   * intermittent filter trip was indistinguishable from a broken integration:
+   * the one field that says which had been parsed past and dropped. Surface it.
+   */
+  const artifact = JSON.parse(raw)?.artifacts?.[0];
+  const base64 = artifact?.base64;
+
+  if (typeof base64 !== "string" || base64.length === 0) {
+    const reason = artifact?.finishReason ?? "no finishReason returned";
+    throw new Error(
+      `Flux returned no image (finishReason=${reason}). ` +
+        `This is usually an intermittent content-filter trip rather than a config problem — ` +
+        `the same prompt often succeeds on a retry with a different seed.`,
+    );
   }
 
   // Strip a data URL prefix if one is present.
-  const comma = artifact.indexOf(",");
-  return Buffer.from(comma === -1 ? artifact : artifact.slice(comma + 1), "base64");
+  const comma = base64.indexOf(",");
+  return Buffer.from(comma === -1 ? base64 : base64.slice(comma + 1), "base64");
 }
 
 /** Renders via a Gemini image model ("Nano Banana"). Returns JPEG or PNG. */
@@ -78,10 +100,24 @@ async function renderWithGemini(
     throw new Error(`Gemini image API error ${response.status}: ${raw.slice(0, 300)}`);
   }
 
-  const parts = JSON.parse(raw)?.candidates?.[0]?.content?.parts ?? [];
+  /*
+   * Same shape of trap as the Flux path above: 200 OK is not an image. A safety
+   * block returns a candidate carrying finishReason and no inline data, and a
+   * prompt-level block returns promptFeedback.blockReason with no candidate at
+   * all. Reporting only "returned no image" makes an intermittent block
+   * indistinguishable from a broken integration.
+   */
+  const body = JSON.parse(raw);
+  const candidate = body?.candidates?.[0];
+  const parts = candidate?.content?.parts ?? [];
   const inline = parts.map((p: any) => p.inlineData ?? p.inline_data).find(Boolean);
+
   if (!inline?.data) {
-    throw new Error("Gemini image model returned no image.");
+    const blocked = body?.promptFeedback?.blockReason;
+    const reason = blocked
+      ? `prompt blocked (${blocked})`
+      : `finishReason=${candidate?.finishReason ?? "absent"}`;
+    throw new Error(`Gemini image model returned no image (${reason}).`);
   }
   return Buffer.from(inline.data, "base64");
 }
@@ -105,12 +141,37 @@ export async function generateSprite(
 ): Promise<RenderResult> {
   const usable = (k?: string | null) => !!k && k !== "MOCK_KEY";
 
-  const attempts: { model: string; run: () => Promise<Buffer> }[] = [];
+  /*
+   * The scaffold is built per provider, not once: both get the same scrubbed
+   * description and the same positive style targets, but only Gemini gets an
+   * avoid-clause. Flux is guidance-distilled and reads a negative list as a
+   * request — see pipeline/promptStyle.ts.
+   */
+  const fluxScaffold = applyStyleScaffold(prompt, "flux");
+  const geminiScaffold = applyStyleScaffold(prompt, "gemini");
+
+  if (fluxScaffold.removed.length > 0) {
+    console.info(
+      `Stripped style-contradicting terms from the crafted prompt: ${fluxScaffold.removed.join(", ")}`,
+    );
+  }
+
+  // Say so rather than letting a quietly shortened description look intentional.
+  if (fluxScaffold.truncated) {
+    console.warn(
+      `Crafted description trimmed to fit Flux's 800-character prompt limit ` +
+        `(final prompt ${fluxScaffold.prompt.length} chars). The style clause is intact; ` +
+        `the tail of the creature description was dropped.`,
+    );
+  }
+
+  const attempts: { model: string; prompt: string; run: () => Promise<Buffer> }[] = [];
   const addFlux = () => {
     if (usable(keys.flux)) {
       attempts.push({
         model: "black-forest-labs/flux.2-klein-4b",
-        run: () => renderWithFlux(prompt, keys.flux!, deadline),
+        prompt: fluxScaffold.prompt,
+        run: () => renderWithFlux(fluxScaffold.prompt, keys.flux!, deadline),
       });
     }
   };
@@ -118,7 +179,9 @@ export async function generateSprite(
     if (usable(keys.gemini)) {
       attempts.push({
         model: keys.geminiModel,
-        run: () => renderWithGemini(prompt, keys.gemini!, keys.geminiModel, deadline),
+        prompt: geminiScaffold.prompt,
+        run: () =>
+          renderWithGemini(geminiScaffold.prompt, keys.gemini!, keys.geminiModel, deadline),
       });
     }
   };
@@ -135,13 +198,27 @@ export async function generateSprite(
     console.warn(
       "No image-model key configured — returning a placeholder drawing, not a generated sprite.",
     );
-    return { png: await generateProceduralPixelArt(prompt), fromModel: false, model: "procedural-placeholder" };
+    return {
+      png: await generateProceduralPixelArt(prompt),
+      fromModel: false,
+      model: "procedural-placeholder",
+      // The placeholder matches on species keywords in the crafted text, so it
+      // gets the unscaffolded prompt — style tokens would only add noise.
+      finalPrompt: prompt,
+      strippedTerms: fluxScaffold.removed,
+    };
   }
 
   let lastError: unknown;
   for (const [i, attempt] of attempts.entries()) {
     try {
-      return { png: await attempt.run(), fromModel: true, model: attempt.model };
+      return {
+        png: await attempt.run(),
+        fromModel: true,
+        model: attempt.model,
+        finalPrompt: attempt.prompt,
+        strippedTerms: fluxScaffold.removed,
+      };
     } catch (err: any) {
       lastError = err;
       const more = i < attempts.length - 1;
@@ -168,14 +245,24 @@ async function generateProceduralPixelArt(prompt: string): Promise<Buffer> {
 
   const promptLower = prompt.toLowerCase();
 
-  const cLeafGreen = SPROUT_PALETTE[2];   // #51B341 green feet/leaves
-  const cLeafLight = SPROUT_PALETTE[3];   // #9BD547 bright green
-  const cStamenGold = SPROUT_PALETTE[8];  // #FFA93C golden yellow
-  const cStamenLight = SPROUT_PALETTE[9]; // #FDF762 light yellow
-  const cOutline = SPROUT_PALETTE[12];    // #0C082A dark navy
-  const cEyeWhite = SPROUT_PALETTE[18];   // #FFFFFF white
-  const cPupil = SPROUT_PALETTE[12];      // dark navy
-  const cTongue = SPROUT_PALETTE[6];      // #FF4F4F pink/red
+  /*
+   * Asked for by hue, resolved to whatever the active palette has nearest.
+   *
+   * These were bare indices with the hex written in the comment, and the two
+   * had already parted company: index 8 was commented "#FFA93C golden yellow"
+   * while Florentine24's entry 8 is #DF426E, a magenta — so the golden stamens
+   * drawn below came out pink. That is the same drift the block further down
+   * documents, still live in this one because only the lower half was fixed.
+   * Naming the colour instead of its position removes the failure mode.
+   */
+  const cLeafGreen = nearestPaletteHex("#51B341");   // green feet/leaves
+  const cLeafLight = nearestPaletteHex("#9BD547");   // bright green
+  const cStamenGold = nearestPaletteHex("#FFA93C");  // golden yellow
+  const cStamenLight = nearestPaletteHex("#FDF762"); // light yellow
+  const cOutline = nearestPaletteHex("#0C082A");     // near-black outline
+  const cEyeWhite = nearestPaletteHex("#FFFFFF");    // white
+  const cPupil = cOutline;
+  const cTongue = nearestPaletteHex("#FF4F4F");      // pink/red
 
   const hexToRgb = (hex: string) => {
     const num = parseInt(hex.replace("#", ""), 16);
@@ -217,26 +304,29 @@ async function generateProceduralPixelArt(prompt: string): Promise<Buffer> {
   const centerY = 100;
 
   /*
-   * Colours are named rather than indexed. The previous version used bare
-   * SPROUT_PALETTE indices carried over from an older palette, so after the
-   * switch to Florentine24 the numbers no longer matched their own comments:
-   * melastoma resolved to #621B52 (near-black purple) instead of magenta, and
-   * trumpet/sunflower resolved to #A62654 (magenta) instead of yellow.
+   * Named by hue, resolved against the active palette.
+   *
+   * These were bare indices carried over from an older palette, so after a
+   * palette switch the numbers no longer matched their own comments: melastoma
+   * resolved to a near-black purple instead of magenta, and trumpet/sunflower
+   * to magenta instead of yellow. Naming the target hue and letting
+   * nearestPaletteHex find it means a palette swap re-resolves rather than
+   * silently re-points.
    */
-  const LIME = SPROUT_PALETTE[3]; // #9BD547
-  const GREEN = SPROUT_PALETTE[2]; // #51B341
-  const TEAL = SPROUT_PALETTE[1]; // #2E8065
-  const TEAL_DEEP = SPROUT_PALETTE[0]; // #175145
-  const YELLOW = SPROUT_PALETTE[4]; // #FFF971
-  const ORANGE = SPROUT_PALETTE[5]; // #FF7F4F
-  const RED = SPROUT_PALETTE[6]; // #FF4F4F
-  const RED_DEEP = SPROUT_PALETTE[7]; // #EE3046
-  const MAGENTA = SPROUT_PALETTE[8]; // #DF426E
-  const MAGENTA_DEEP = SPROUT_PALETTE[9]; // #A62654
-  const BLUE = SPROUT_PALETTE[15]; // #4876BB
-  const CYAN = SPROUT_PALETTE[16]; // #7FD3E6
-  const BRICK = SPROUT_PALETTE[20]; // #9E4D4D
-  const BRICK_DEEP = SPROUT_PALETTE[21]; // #712835
+  const LIME = nearestPaletteHex("#9BD547");
+  const GREEN = nearestPaletteHex("#51B341");
+  const TEAL = nearestPaletteHex("#2E8065");
+  const TEAL_DEEP = nearestPaletteHex("#175145");
+  const YELLOW = nearestPaletteHex("#FFF971");
+  const ORANGE = nearestPaletteHex("#FF7F4F");
+  const RED = nearestPaletteHex("#FF4F4F");
+  const RED_DEEP = nearestPaletteHex("#EE3046");
+  const MAGENTA = nearestPaletteHex("#DF426E");
+  const MAGENTA_DEEP = nearestPaletteHex("#A62654");
+  const BLUE = nearestPaletteHex("#4876BB");
+  const CYAN = nearestPaletteHex("#7FD3E6");
+  const BRICK = nearestPaletteHex("#9E4D4D");
+  const BRICK_DEEP = nearestPaletteHex("#712835");
 
   /** First keyword match wins, so order from most to least specific. */
   const SPECIES_COLOURS: { match: string[]; primary: string; dark: string }[] = [

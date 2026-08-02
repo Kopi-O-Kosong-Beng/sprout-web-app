@@ -53,7 +53,7 @@ const keys = {
 };
 
 describe("generateSprite provider fallback", () => {
-  it("[fault] primary render provider 402 -> falls through to the other provider", async () => {
+  it("[fault-injection] primary render provider 402 -> falls through to the other provider", async () => {
     const fetchSpy = vi
       .fn()
       .mockResolvedValueOnce(failing(402, "Payment Required"))
@@ -68,7 +68,7 @@ describe("generateSprite provider fallback", () => {
     expect(result.png.toString()).toBe("gemini-bytes");
   });
 
-  it("[decision-table R1] primary succeeds -> secondary never called", async () => {
+  it("[black-box: decision-table] primary succeeds -> secondary never called", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(fluxOk());
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -79,7 +79,39 @@ describe("generateSprite provider fallback", () => {
     expect(result.png.toString()).toBe("flux-bytes");
   });
 
-  it("[fault] every configured provider fails -> throws so the caller can crop", async () => {
+  /**
+   * NVIDIA answers a filtered request with HTTP 200 and the artifact envelope
+   * intact — finishReason set, base64 empty. The old code read only base64 and
+   * threw a fixed string, so an intermittent filter trip and a broken
+   * integration produced identical, unactionable output.
+   */
+  it("[fault-injection] flux 200 with no image -> reports finishReason and falls through", async () => {
+    const filtered = () => ({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({ artifacts: [{ base64: "", finishReason: "CONTENT_FILTERED" }] }),
+        ),
+    });
+
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(filtered())
+      .mockResolvedValueOnce(geminiOk());
+    vi.stubGlobal("fetch", fetchSpy);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await generateSprite("a plant creature", keys);
+
+    // The run survives on the other provider...
+    expect(result.model).toBe("gemini-3.1-flash-image");
+    // ...and the reason Flux dropped out is in the log, not swallowed.
+    expect(warn.mock.calls.flat().join(" ")).toContain("CONTENT_FILTERED");
+
+    warn.mockRestore();
+  });
+
+  it("[fault-injection] every configured provider fails -> throws so the caller can crop", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(failing(500, "upstream down")));
 
     await expect(generateSprite("a plant creature", keys)).rejects.toThrow();

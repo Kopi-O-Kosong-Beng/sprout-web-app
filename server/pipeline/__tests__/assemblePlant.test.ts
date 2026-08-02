@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { assemblePlant } from "../stages/assemble";
 
 describe("assemblePlant", () => {
-  it("creates a plant with maxHealth = 100, speed in range 5-20, and 4 moves", () => {
+  it("[black-box: equivalence] creates a plant with maxHealth = 100, speed in range 5-20, and 4 moves", () => {
     const identification = {
       name: "Polygala calcarea",
       probability: 0.95,
@@ -21,7 +21,7 @@ describe("assemblePlant", () => {
     expect(plant.spriteUrl).toBe("https://example.com/sprite.png");
   });
 
-  it("uses default move set on manual name or unknown taxonomy path", () => {
+  it("[black-box: equivalence] uses default move set on manual name or unknown taxonomy path", () => {
     const identification = {
       name: "Unknown Plant",
     };

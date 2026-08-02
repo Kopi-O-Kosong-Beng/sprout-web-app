@@ -11,7 +11,7 @@
  * tier-3 entry point: `nameOnlyPrompt` builds the render prompt from the name
  * and its botanical traits, exactly as a scan would when the vision hop is
  * unavailable. From there it is the same path the Scan screen runs — render,
- * cutout, Florentine24 finish — so it sits in the same style as anything a
+ * cutout, Spica72 finish — so it sits in the same style as anything a
  * player generates.
  *
  * It refuses to write a procedural placeholder. Committing placeholder art is

@@ -276,7 +276,7 @@ describe('verified avatar archive API', () => {
 });
 
 describe('saving a scanned avatar', () => {
-  // A real sprite is a 192x192 Florentine24 PNG; a 1x1 stands in for the bytes,
+  // A real sprite is a 192x192 Spica72 PNG; a 1x1 stands in for the bytes,
   // since nothing on this path decodes the image.
   const SPRITE_DATA_URL =
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';

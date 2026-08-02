@@ -24,9 +24,24 @@ const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models
  *     petal maw, "squat chunky beast" — removed the humanoid but overshot into
  *     something too animal, and an earlier pass of it overshot the other way
  *     into botanical illustration.
+ *   • Stating the anatomy as fact ("its leaves sprout from the sides like wings
+ *     ... its stems trail into a curling vine tail") made every species converge
+ *     on the same body: two side wings and a tail, whether or not the plant had
+ *     anything vine-like or wing-like about it. A VLM transcribes a clause like
+ *     that rather than choosing from it, so the anatomy line has to be phrased
+ *     as a selection with an explicit "only what the plant supports" bound, and
+ *     the default features it drifts back toward have to be named and refused.
  *
  * The reference wording sits between those: soft, round, cute, plant-first.
  * Prefer tuning a single clause over reaching for a new body plan.
+ *
+ * The child-appeal clause is stated as design rules — oversized head on a small
+ * body, thumbnail-readable silhouette, saturated palette, nothing menacing —
+ * rather than by naming the genre's famous examples. Naming a franchise here is
+ * a dead end in both directions: image models often refuse the request outright,
+ * and when they don't they return designs close enough to the originals to be an
+ * IP problem in a shipped product. The rules survive either way, which is why
+ * the "never name any existing game, brand, or character" line below stays.
  *
  * Two things in the reference look are deliberately dropped, because they'd
  * break the rest of the pipeline: the graph-paper backdrop (withoutBG needs a
@@ -39,10 +54,17 @@ export function buildInstruction(plantName: string): string {
   return (
     `This is a photo of ${plantName}. Write an image-generation prompt for an original ` +
     "pixel-art creature design in the style of a retro monster-collecting video game: a " +
-    "chubby, big-eyed plant/nature-themed monster drawn from this exact plant. Carry the " +
-    "real plant's colours, leaf shapes, and flowers into the creature — its leaves sprout " +
-    "from the sides like wings or curl up like horns, its flowers cluster on its head and " +
-    "body, its stems trail into a curling vine tail — on a round, soft-proportioned body " +
+    "chubby, big-eyed plant/nature-themed monster drawn from this exact plant. It must read " +
+    "instantly to a young child as a friendly collectible creature — toy-like and huggable, " +
+    "never scary or menacing, with an oversized head on a small rounded body, a simple bold " +
+    "silhouette that stays readable at thumbnail size, and bright saturated colours. Carry the " +
+    "real plant's colours, leaf shapes, and flowers into the creature, and let this plant's " +
+    "own growth habit decide its body plan: pick only the two or three features the plant " +
+    "actually has — a trailing stem can become a tail, a broad opposite leaf pair can become " +
+    "wings, a low rosette can become a ruff or mane, a bulb or berry cluster can become the " +
+    "body itself, an upright spike or plume can become a crest, horns, or a topknot. Do not " +
+    "give it wings, a tail, or any other feature this plant's form does not suggest. Build it " +
+    "on a round, soft-proportioned body " +
     "with large expressive eyes, a small friendly face, and tiny clawed or root-like feet. " +
     "Style: clean bold black outlines, flat cel-shaded colouring, retro 16-bit pixel art, " +
     "grid-aligned pixels, even lighting, no shadows. Describe only the creature's own " +
@@ -157,10 +179,13 @@ export function nameOnlyPrompt(plantName: string): string {
   // vision models would otherwise have read.
   return (
     `An original pixel-art creature design in the style of a retro monster-collecting ` +
-    `video game: a chubby, big-eyed plant/nature-themed monster drawn from ${plantName} — ` +
-    `${traitsString}its leaves sprouting from the sides like wings or curling up like ` +
-    `horns, its flowers clustered on its head and body, its stems trailing into a curling ` +
-    `vine tail, on a round, soft-proportioned body with large expressive eyes, a small ` +
+    `video game: a chubby, big-eyed plant/nature-themed monster drawn from ${plantName}, ` +
+    `reading instantly to a young child as a friendly collectible creature — toy-like and ` +
+    `huggable, never scary, with an oversized head on a small rounded body, a simple bold ` +
+    `silhouette readable at thumbnail size, and bright saturated colours — ` +
+    `${traitsString}with only the two or three creature features those traits actually ` +
+    `support, and no wings, tail, or other feature the plant's form does not suggest, ` +
+    `on a round, soft-proportioned body with large expressive eyes, a small ` +
     `friendly face, and tiny clawed or root-like feet. Clean bold black outlines, flat ` +
     `cel-shaded colouring, retro 16-bit pixel art, grid-aligned pixels, even lighting, ` +
     `no shadows. One single creature, front-facing and centered, shown whole with a clear ` +
@@ -169,8 +194,8 @@ export function nameOnlyPrompt(plantName: string): string {
   );
 }
 
-/** Timeout helper used to bound an injected caller that has no abort signal. */
-export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+/** Internal: bounds an injected caller that has no abort signal of its own. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error("vision timeout")), ms);

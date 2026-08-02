@@ -122,7 +122,7 @@ const PROBES: ProbeDef[] = [
     rows: () => [
       { label: 'Execution', value: 'Local libsharp', tone: 'gold' },
       { label: 'Target', value: '192×192 PNG' },
-      { label: 'Palette', value: 'Florentine24 NN' },
+      { label: 'Palette', value: 'Spica72 NN' },
     ],
   },
 ];
