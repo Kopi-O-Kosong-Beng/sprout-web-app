@@ -24,6 +24,7 @@ async function seedAvatar() {
   const { record } = await avatarRepository.upsertFromScan(OWNER, {
     speciesName: 'Fern',
     speciesFamily: 'Polypodiaceae',
+    source: 'mobile',
     spriteUrl: 'https://cdn.test/fern.png',
     stats: { hp: 120, attack: 55, defense: 60, speed: 40 },
     metadata: null,

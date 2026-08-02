@@ -51,10 +51,12 @@ const themeCases = [
 ] as const;
 
 describe('battle move catalog', () => {
-  it('preserves the original stored sprite contract for Thornback', () => {
-    expect(createThornback().spriteUrl).toBe(
-      '/static/sprites/thornback.png'
-    );
+  // The URL is part of the stored session contract, so it is pinned here rather
+  // than derived from the catalogue — a silent change would leave every new
+  // battle pointing at a file the client does not serve, which is exactly what
+  // the old /static/sprites path did.
+  it('points Thornback at the pre-made sprite the client serves', () => {
+    expect(createThornback().spriteUrl).toBe('/sprites/thornback.png');
   });
 
   it.each(themeCases)(

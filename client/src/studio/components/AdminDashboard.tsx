@@ -61,8 +61,15 @@ const PROBES: ProbeDef[] = [
     // present placeholder balances as if they were measured.
     credits: (h) => {
       const p = h?.probes?.plantId;
-      if (!p || p.remainingCredits === undefined || p.limit === undefined) return null;
-      return { used: p.used ?? p.limit - p.remainingCredits, remaining: p.remainingCredits, limit: p.limit };
+      // The endpoint now returns null rather than inventing a balance when the
+      // response carries no usage block, so null is a real answer here, not an
+      // absent field — hence == null rather than === undefined.
+      if (!p || p.remainingCredits == null || p.limit == null) return null;
+      return {
+        used: p.used ?? p.limit - p.remainingCredits,
+        remaining: p.remainingCredits,
+        limit: p.limit,
+      };
     },
   },
   {
@@ -122,7 +129,7 @@ const PROBES: ProbeDef[] = [
     rows: () => [
       { label: 'Execution', value: 'Local libsharp', tone: 'gold' },
       { label: 'Target', value: '192×192 PNG' },
-      { label: 'Palette', value: 'Florentine24 NN' },
+      { label: 'Palette', value: 'Spica72 NN' },
     ],
   },
 ];
@@ -355,8 +362,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
 
                   <Row
                     label="Measured latency"
-                    value={p?.latencyMs !== undefined ? `${p.latencyMs}ms` : 'not measured'}
-                    tone={p?.latencyMs !== undefined ? 'info' : 'neutral'}
+                    value={p?.latencyMs != null ? `${p.latencyMs}ms` : 'not measured'}
+                    tone={p?.latencyMs != null ? 'info' : 'neutral'}
                   />
                   {p?.detail && <p className="text-label text-txt-4">{p.detail}</p>}
                 </div>

@@ -96,6 +96,40 @@ function createAuthMiddleware(options: AuthMiddlewareOptions = {}): RequestHandl
 
 const authMiddleware = createAuthMiddleware();
 
+/**
+ * Attaches req.user when the caller happens to be signed in, and continues
+ * anonymously when they are not.
+ *
+ * For routes that answer everyone but answer signed-in callers with more: the
+ * almanac shows a species and its sprite to anybody, and names the player who
+ * found it only to someone with an account. Two routes would mean two URLs for
+ * one card; rejecting anonymous callers would mean the landing page cannot use
+ * it at all.
+ *
+ * It delegates to the real middleware and treats any rejection as "anonymous",
+ * so the token rules stay in one place. The response is never written to: the
+ * stub below captures the middleware's 401/403 and discards it.
+ */
+export const optionalAuthMiddleware: RequestHandler = (req, res, next) => {
+  let answered = false;
+  const swallow = {
+    status() {
+      answered = true;
+      return swallow;
+    },
+    json() {
+      return swallow;
+    },
+  };
+
+  void Promise.resolve(
+    authMiddleware(req, swallow as unknown as typeof res, () => {})
+  ).finally(() => {
+    if (answered) delete req.user;
+    next();
+  });
+};
+
 export const unverifiedAuthMiddleware = createAuthMiddleware({
   allowUnverifiedEmail: true,
 });

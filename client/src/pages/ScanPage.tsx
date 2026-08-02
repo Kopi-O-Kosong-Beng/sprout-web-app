@@ -21,6 +21,18 @@ import { streamPipeline, type PipelineEvent } from '../services/pipelineStream';
  * be exercised without a real plant to hand.
  */
 
+/**
+ * How the photo reached the pipeline, which is what decides whether the saved
+ * plant is kept or expires.
+ *
+ * The camera — live preview or the OS camera app — means someone stood in front
+ * of a real plant, so it is an IRL scan and the record is permanent. A file off
+ * disk could be any picture of anything, so it is a web upload: playable and
+ * battleable, but gone in 24 hours. The server enforces this; the two values
+ * here are just the two buttons.
+ */
+type CaptureSource = 'mobile' | 'web';
+
 /** The client-visible stages of a scan, in order. */
 type ScanStep = 'identify' | 'sprite' | 'finish';
 
@@ -45,7 +57,7 @@ export interface ScanDiscovery {
 type Status =
   | { kind: 'idle' }
   | { kind: 'busy'; step: ScanStep; plantName?: string; detail?: string }
-  | { kind: 'naming'; photo: string }
+  | { kind: 'naming'; photo: string; source: CaptureSource }
   | {
       kind: 'done';
       sprite: string;
@@ -164,7 +176,8 @@ export default function ScanPage() {
   }, [cameraReady]);
 
   /** The shared tail of every input path. */
-  const runPipeline = useCallback(async (jpegDataUrl: string, customName?: string) => {
+  const runPipeline = useCallback(
+    async (jpegDataUrl: string, source: CaptureSource, customName?: string) => {
     if (processingRef.current) return;
     processingRef.current = true;
 
@@ -185,6 +198,9 @@ export default function ScanPage() {
         {
           imageBase64: jpegDataUrl,
           customName: customName || undefined,
+          // Decides the saved record's lifetime; the server defaults an
+          // undeclared caller to 'web', the expiring one.
+          source,
           // The pause after the render hop is a studio affordance — it exists so
           // an operator can inspect the raw sprite before the cutout runs. A
           // player just wants the finished creature, so run straight through.
@@ -259,17 +275,17 @@ export default function ScanPage() {
   const onCapture = useCallback(() => {
     // Live preview available: grab a frame. Otherwise open the native camera.
     if (cameraReady && videoRef.current) {
-      void runPipeline(captureFrame(videoRef.current));
+      void runPipeline(captureFrame(videoRef.current), 'mobile');
     } else {
       cameraInputRef.current?.click();
     }
   }, [cameraReady, runPipeline]);
 
   const onFilePicked = useCallback(
-    async (file: File | undefined) => {
+    async (file: File | undefined, source: CaptureSource) => {
       if (!file) return;
       try {
-        void runPipeline(await fileToJpegDataUrl(file));
+        void runPipeline(await fileToJpegDataUrl(file), source);
       } catch (error) {
         setStatus({
           kind: 'error',
@@ -282,7 +298,8 @@ export default function ScanPage() {
 
   const onTestImage = useCallback(async () => {
     const response = await fetch('/img/test_plant.jpg');
-    void runPipeline(await fileToJpegDataUrl(await response.blob()));
+    // The bundled photo is a file like any other, so it saves as a web upload.
+    void runPipeline(await fileToJpegDataUrl(await response.blob()), 'web');
   }, [runPipeline]);
 
   const busy = status.kind === 'busy';
@@ -388,7 +405,7 @@ export default function ScanPage() {
         accept="image/*"
         hidden
         onChange={(event) => {
-          void onFilePicked(event.target.files?.[0]);
+          void onFilePicked(event.target.files?.[0], 'web');
           event.target.value = '';
         }}
       />
@@ -405,7 +422,7 @@ export default function ScanPage() {
         capture="environment"
         hidden
         onChange={(event) => {
-          void onFilePicked(event.target.files?.[0]);
+          void onFilePicked(event.target.files?.[0], 'mobile');
           event.target.value = '';
         }}
       />
@@ -413,7 +430,7 @@ export default function ScanPage() {
       {status.kind === 'naming' && (
         <NameDialog
           onCancel={() => setStatus({ kind: 'idle' })}
-          onSubmit={(name) => void runPipeline(status.photo, name)}
+          onSubmit={(name) => void runPipeline(status.photo, status.source, name)}
         />
       )}
 

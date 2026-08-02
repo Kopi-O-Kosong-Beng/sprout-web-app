@@ -6,6 +6,8 @@
  */
 import { createHash } from 'crypto';
 import type { AvatarStats } from '../models/avatar';
+import { retentionForSource, type CaptureSource } from './capture-source';
+import { plantAssetUrl } from './sprite-catalog';
 
 export const DEMO_USER_ID = 'demo-user-0001';
 export const DEMO_EMAIL = 'demo@sprout.app';
@@ -22,9 +24,18 @@ export interface DemoAvatarTemplate {
   id: string;
   speciesName: string;
   speciesFamily: string;
-  source: 'mobile' | 'web';
-  isTemporary: boolean;
+  /** 'mobile' is an IRL scan and is kept; 'web' is an upload and expires in 24h.
+   *  Retention follows from this — see data/capture-source.ts. */
+  source: CaptureSource;
   stats: AvatarStats;
+  /**
+   * The hand-made art, as filenames in `client/public/plants/`: the creature
+   * that stands in the pot, and the photograph it was drawn from, which the
+   * specimen card shows beside it. Change these strings if the files you drop
+   * in use a different extension — they are matched exactly, not guessed at.
+   */
+  spriteFile: string;
+  photoFile: string;
   metadata: Record<string, unknown>;
 }
 
@@ -34,7 +45,8 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     speciesName: 'Helianthus annuus',
     speciesFamily: 'Asteraceae',
     source: 'mobile',
-    isTemporary: false,
+    spriteFile: 'SPRITE_Helianthus.png',
+    photoFile: 'IMG_Helianthus.jpg',
     stats: { hp: 96, attack: 72, defense: 41, speed: 68 },
     metadata: {
       taxonomy: 'flower',
@@ -49,7 +61,8 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     speciesName: 'Quercus robur',
     speciesFamily: 'Fagaceae',
     source: 'mobile',
-    isTemporary: false,
+    spriteFile: 'SPRITE_Quercus.png',
+    photoFile: 'IMG_Quercus.jpg',
     stats: { hp: 168, attack: 44, defense: 88, speed: 22 },
     metadata: {
       taxonomy: 'tree',
@@ -64,7 +77,8 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     speciesName: 'Monstera deliciosa',
     speciesFamily: 'Araceae',
     source: 'mobile',
-    isTemporary: false,
+    spriteFile: 'SPRITE_Monstera.png',
+    photoFile: 'IMG_Monstera.jpg',
     stats: { hp: 112, attack: 58, defense: 63, speed: 47 },
     metadata: {
       taxonomy: 'plant',
@@ -78,7 +92,8 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     speciesName: 'Ficus lyrata',
     speciesFamily: 'Moraceae',
     source: 'mobile',
-    isTemporary: false,
+    spriteFile: 'SPRITE_Ficus.png',
+    photoFile: 'IMG_Ficus.jpg',
     stats: { hp: 134, attack: 39, defense: 74, speed: 33 },
     metadata: {
       taxonomy: 'tree',
@@ -92,7 +107,8 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     speciesName: 'Amanita muscaria',
     speciesFamily: 'Amanitaceae',
     source: 'web',
-    isTemporary: true, // TempAvatar from a web upload — 24h TTL
+    spriteFile: 'SPRITE_Amanita.png',
+    photoFile: 'IMG_Amanita.jpg',
     stats: { hp: 74, attack: 91, defense: 28, speed: 55 },
     metadata: {
       taxonomy: 'fungus',
@@ -121,7 +137,7 @@ export interface SeedAvatarRow {
   speciesFamily: string;
   spriteUrl: string;
   discoveredAt: string;
-  source: 'mobile' | 'web';
+  source: CaptureSource;
   isTemporary: boolean;
   expiresAt: string | null;
   stats: AvatarStats;
@@ -136,14 +152,13 @@ export function buildAvatarRows(now: Date = new Date()): SeedAvatarRow[] {
     userId: DEMO_USER_ID,
     speciesName: a.speciesName,
     speciesFamily: a.speciesFamily,
-    spriteUrl: `/static/sprites/${a.speciesName.toLowerCase().replace(/\s+/g, '-')}.png`,
+    spriteUrl: plantAssetUrl(a.spriteFile),
     discoveredAt,
     source: a.source,
-    isTemporary: a.isTemporary,
-    expiresAt: a.isTemporary
-      ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
-      : null,
+    ...retentionForSource(a.source, now),
     stats: a.stats,
-    metadata: a.metadata,
+    // photoUrl rides in metadata rather than on the record: it is presentation,
+    // like displayName, and AvatarRecord has no column for it.
+    metadata: { ...a.metadata, photoUrl: plantAssetUrl(a.photoFile) },
   }));
 }

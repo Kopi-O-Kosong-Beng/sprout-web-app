@@ -754,7 +754,7 @@ const malformedBattleCases: Array<{
   {
     name: 'changed bot sprite contract',
     mutate: (document) =>
-      (document.bot.spriteUrl = '/static/sprites/thornback-v2.png'),
+      (document.bot.spriteUrl = '/sprites/thornback-v2.png'),
   },
   {
     name: 'blank player sprite URL',
@@ -1117,14 +1117,14 @@ describe('battle document decoder invariants', () => {
   it('decodes the original stored thornback-v1 sprite snapshot', async () => {
     const document = cloneDocument();
     expect(document.npcPresetVersion).toBe('thornback-v1');
-    expect(document.bot.spriteUrl).toBe('/static/sprites/thornback.png');
+    expect(document.bot.spriteUrl).toBe('/sprites/thornback.png');
     await getDb().collection('battle_sessions').doc(SESSION_ID).set(document);
 
     await expect(
       repositoryAt(ACTION_AT).repository.getOwned(USER_ID, SESSION_ID)
     ).resolves.toMatchObject({
       npcPresetVersion: 'thornback-v1',
-      bot: { spriteUrl: '/static/sprites/thornback.png' },
+      bot: { spriteUrl: '/sprites/thornback.png' },
     });
   });
 

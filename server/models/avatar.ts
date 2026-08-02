@@ -1,4 +1,5 @@
 /** Avatar domain model — Req 5/6/10. */
+import type { CaptureSource } from '../data/capture-source';
 
 export interface AvatarStats {
   hp: number;
@@ -37,6 +38,11 @@ export interface ScanUpsertInput {
   spriteUrl: string;
   stats: AvatarStats;
   metadata: Record<string, unknown> | null;
+  /** How the photo reached the pipeline, which decides the record's lifetime:
+   *  a camera scan is kept, a file upload expires in 24h (Req 6.12). See
+   *  data/capture-source.ts — the badge the archive shows and the lifetime the
+   *  record has both come from this one field, so they cannot disagree. */
+  source: CaptureSource;
 }
 
 export interface AvatarRepository {

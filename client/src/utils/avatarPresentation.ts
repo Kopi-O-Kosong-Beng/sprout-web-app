@@ -44,10 +44,18 @@ export function toPlantAvatarData(record: AvatarRecord): PlantAvatarData {
     speed: record.stats.speed,
     color: stablePaletteClass(presentationKey ?? record.id),
     spriteUrl: record.spriteUrl.trim() || undefined,
+    // The photograph the sprite was drawn from, for records that have one.
+    photoUrl: metadataString(record.metadata, 'photoUrl') ?? undefined,
+    // How it was captured, and what that costs it. battleEligible is the
+    // server's call, not a comparison we redo against the browser's clock.
+    source: record.source,
+    expiresAt: record.expiresAt,
+    battleEligible: record.battleEligible,
     isDemo: record.metadata?.isDemo === true,
     // UC4 step 3 lists habitat and conservation status among the details.
     // Absent for records whose species metadata predates those fields.
     habitat: metadataString(record.metadata, 'habitat') ?? undefined,
+    description: metadataString(record.metadata, 'description') ?? undefined,
     conservationStatus:
       metadataString(record.metadata, 'conservationStatus') ?? undefined,
   };

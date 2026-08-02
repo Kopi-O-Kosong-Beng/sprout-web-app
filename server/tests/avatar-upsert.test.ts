@@ -9,6 +9,8 @@ function input(overrides: Partial<ScanUpsertInput> = {}): ScanUpsertInput {
   return {
     speciesName: 'Monstera deliciosa',
     speciesFamily: 'Araceae',
+    // A camera scan by default; the retention tests below pass 'web' instead.
+    source: 'mobile',
     spriteUrl: 'https://example.test/sprites/monstera_deliciosa/v1.png',
     stats: { hp: 120, attack: 55, defense: 60, speed: 40 },
     metadata: null,
@@ -21,17 +23,54 @@ describe('avatar upsertFromScan', () => {
     await clearFirestore();
   });
 
-  it('creates a persistent web record on the first scan', async () => {
+  it('keeps a camera scan on the first scan', async () => {
     const { record, created } = await avatarRepository.upsertFromScan(USER, input());
 
     expect(created).toBe(true);
     expect(record.userId).toBe(USER);
     expect(record.speciesName).toBe('Monstera deliciosa');
     expect(record.speciesFamily).toBe('Araceae');
-    expect(record.source).toBe('web');
+    expect(record.source).toBe('mobile');
     expect(record.isTemporary).toBe(false);
     expect(record.expiresAt).toBeNull();
     expect(record.stats).toEqual({ hp: 120, attack: 55, defense: 60, speed: 40 });
+  });
+
+  // Req 6.12: a file off disk could be any picture of anything, so it is a
+  // trial run rather than a discovery.
+  it('expires an upload 24 hours after it is scanned', async () => {
+    const { record } = await avatarRepository.upsertFromScan(
+      USER,
+      input({ source: 'web' })
+    );
+
+    expect(record.source).toBe('web');
+    expect(record.isTemporary).toBe(true);
+    expect(
+      Date.parse(record.expiresAt!) - Date.parse(record.discoveredAt)
+    ).toBe(24 * 60 * 60 * 1000);
+  });
+
+  // Re-scanning must never shorten a plant's life: uploading a photo of
+  // something you already caught with the camera cannot put it on a clock.
+  it('upgrades a temporary record on a camera re-scan and never downgrades', async () => {
+    const upload = await avatarRepository.upsertFromScan(
+      USER,
+      input({ source: 'web' })
+    );
+    expect(upload.record.isTemporary).toBe(true);
+
+    const scan = await avatarRepository.upsertFromScan(USER, input());
+    expect(scan.created).toBe(false);
+    expect(scan.record.isTemporary).toBe(false);
+    expect(scan.record.expiresAt).toBeNull();
+
+    const reupload = await avatarRepository.upsertFromScan(
+      USER,
+      input({ source: 'web' })
+    );
+    expect(reupload.record.isTemporary).toBe(false);
+    expect(reupload.record.expiresAt).toBeNull();
   });
 
   it('does not duplicate when the same species is scanned again', async () => {

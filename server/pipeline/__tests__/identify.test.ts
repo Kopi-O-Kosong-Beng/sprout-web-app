@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe("identifyPlant input classes", () => {
-  it("[EP] valid plant photo -> identified with taxonomy", async () => {
+  it("[black-box: equivalence] valid plant photo -> identified with taxonomy", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(plantIdResponse()));
 
     const result = await identifyPlant("data:image/jpeg;base64,AAAA", KEY);
@@ -53,7 +53,7 @@ describe("identifyPlant input classes", () => {
     expect(result.taxonomy.genus).toBe("Melastoma");
   });
 
-  it("[EP] non-plant photo -> needsName, no classification returned", async () => {
+  it("[black-box: equivalence] non-plant photo -> needsName, no classification returned", async () => {
     // The Lego-plant class: plant-shaped, but is_plant says no.
     vi.stubGlobal(
       "fetch",

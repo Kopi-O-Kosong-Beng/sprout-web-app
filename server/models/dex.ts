@@ -8,6 +8,9 @@ export interface DexDiscovery {
   firstDiscoveredBy: string;
   firstDiscoveredAt: string;
   discoveryCount: number;
+  /** The canonical sprite for the species, as stored by sprite-storage.
+   *  Empty on records written before the almanac needed it. */
+  spriteUrl: string;
 }
 
 export interface DexRepository {
@@ -15,7 +18,11 @@ export interface DexRepository {
   recordDiscovery(
     speciesKey: string,
     userId: string,
-    speciesName: string
+    speciesName: string,
+    spriteUrl?: string
   ): Promise<DexDiscovery>;
   get(speciesKey: string): Promise<DexDiscovery | null>;
+  /** Every species found so far. The almanac renders 200 cards in one pass, so
+   *  it reads the collection rather than calling get() per species. */
+  list(): Promise<DexDiscovery[]>;
 }

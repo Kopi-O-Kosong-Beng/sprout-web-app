@@ -14,7 +14,7 @@ const deadlineWith = (remainingMs: number) =>
   }) as any;
 
 describe("removeBackgroundSafe", () => {
-  it("degrades gracefully to original buffer and sets removeBgOk = false when key is missing or call fails", async () => {
+  it("[fault-injection] degrades gracefully to original buffer and sets removeBgOk = false when key is missing or call fails", async () => {
     const inputBuffer = Buffer.from("dummy_png_bytes");
 
     // Call without key
@@ -43,7 +43,7 @@ describe("removeBackgroundSafe", () => {
    * The floor exists so we never start a call that cannot finish. Below it the
    * hop is skipped without spending a request; above it the call is attempted.
    */
-  it("[BVA] budget just below the 8s floor skips the call entirely", async () => {
+  it("[white-box: boundary] budget just below the 8s floor skips the call entirely", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -58,7 +58,7 @@ describe("removeBackgroundSafe", () => {
     expect(result.png.toString()).toBe("raw_render");
   });
 
-  it("[BVA] budget just above the 8s floor still attempts the call", async () => {
+  it("[white-box: boundary] budget just above the 8s floor still attempts the call", async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -87,7 +87,7 @@ describe("removeBackgroundSafe", () => {
    * against a dead key, and nothing above would have noticed. The call count is
    * the only observable that distinguishes them.
    */
-  it("[fault] 402 out-of-credit is permanent — one attempt, no retries", async () => {
+  it("[fault-injection] 402 out-of-credit is permanent — one attempt, no retries", async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: false,
       status: 402,
@@ -106,7 +106,7 @@ describe("removeBackgroundSafe", () => {
    * 429 is transient, unlike the 402 above — it must exhaust all three attempts
    * before giving up, and still hand back the raw render rather than throwing.
    */
-  it("[fault] 429 rate-limit retries three times then keeps the raw render", async () => {
+  it("[fault-injection] 429 rate-limit retries three times then keeps the raw render", async () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: false,
       status: 429,

@@ -152,7 +152,7 @@ export default function StudioPage() {
 
         <footer className="border-line border-t px-4 py-3 sm:px-6 lg:px-8">
           <div className="text-txt-5 mx-auto flex w-full max-w-[1400px] flex-col gap-1 font-mono text-[10px] sm:flex-row sm:items-center sm:justify-between">
-            <span>Sprites quantised to Florentine24 · 192×192 · {projectId}</span>
+            <span>Sprites quantised to Spica72 · 192×192 · {projectId}</span>
             <span>Auth &amp; Firestore rules active</span>
           </div>
         </footer>

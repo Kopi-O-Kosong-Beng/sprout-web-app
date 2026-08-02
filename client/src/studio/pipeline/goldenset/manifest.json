@@ -1,7 +1,7 @@
 {
   "_note": "Regression fixtures for the Sprout sprite pipeline. Every case points at a real photo in ./photos/. Cases marked `stress: true` are deliberately hard inputs (no single hero bloom) and carry relaxed judge minimums — a failure there is a signal, not automatically a regression.",
   "schemaVersion": 2,
-  "paletteUnderTest": "Florentine24 (Haboo, Lospec) — 24 colours",
+  "paletteUnderTest": "Spica 72 (A Blurby Sir, Lospec) — 72 colours",
   "cases": [
     {
       "id": "melastoma",

@@ -1,16 +1,30 @@
 import { EvalScores } from "../config";
 import { serverEnv } from "../../platform/env";
+import { Deadline, JUDGE_TIMEOUT_MS } from "../deadline";
 
 /**
- * Layer 2: Gemini VLM LLM-as-judge scoring
+ * Layer 2: Gemini VLM LLM-as-judge scoring.
+ *
+ * Every failure here returns {} — "not scored" — rather than a grade. Scoring is
+ * the last hop and the sprite is already finished by the time it runs, so a
+ * judge problem must never be able to cost the sprite.
  */
 export async function geminiJudgeEval(
   spritePng: Buffer,
   plantName: string,
-  geminiApiKey: string
+  geminiApiKey: string,
+  deadline?: Deadline
 ): Promise<Partial<EvalScores>> {
   if (!geminiApiKey || geminiApiKey === "MOCK_KEY") {
     // No key: report "not scored" rather than inventing a passing grade.
+    return {};
+  }
+
+  // Don't start a call the budget can't cover. deadline.signal() would throw
+  // here anyway, but the catch below turns any throw into a silent {}, and
+  // "skipped, no budget" and "Gemini refused" deserve different log lines.
+  if (deadline && deadline.remainingMs() <= 0) {
+    console.warn("No budget left for the judge; sprite returned unscored.");
     return {};
   }
 
@@ -40,6 +54,7 @@ export async function geminiJudgeEval(
           },
         ],
       }),
+      signal: deadline?.signal(JUDGE_TIMEOUT_MS, "the judge"),
     });
 
     if (!response.ok) {
@@ -49,12 +64,33 @@ export async function geminiJudgeEval(
     }
 
     const json = (await response.json()) as any;
-    const parts = json.candidates?.[0]?.content?.parts || [];
+    const candidate = json.candidates?.[0];
+    const parts = candidate?.content?.parts || [];
     const text = parts.map((p: any) => p.text || "").join("");
-    
+
+    /*
+     * A 200 from Gemini does not mean an answer. A safety block returns a
+     * candidate with finishReason set and no parts at all, and a prompt-level
+     * block returns promptFeedback.blockReason with no candidate whatsoever.
+     * Both used to land on "returned no JSON object", which reads as a
+     * formatting quirk and sent you looking at the prompt's JSON instruction
+     * instead of at the block. promptCraft.ts already reports finishReason on
+     * its own Gemini call; this is the same check its sibling was missing.
+     */
+    if (text.trim().length === 0) {
+      const blocked = json.promptFeedback?.blockReason;
+      const reason = blocked
+        ? `prompt blocked (${blocked})`
+        : `finishReason=${candidate?.finishReason ?? "absent"}`;
+      console.warn(`Gemini judge returned no text — ${reason}. Sprite returned unscored.`);
+      return {};
+    }
+
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
-      console.warn("Gemini judge returned no JSON object; treating as not scored.");
+      console.warn(
+        `Gemini judge returned prose rather than JSON; treating as not scored. Got: ${text.replace(/\s+/g, " ").slice(0, 120)}`,
+      );
       return {};
     }
 

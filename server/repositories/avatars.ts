@@ -14,7 +14,9 @@ import {
   demoAvatarId,
   type DemoAvatarTemplate,
 } from '../data/demo-avatar-templates';
+import { retentionForSource } from '../data/capture-source';
 import { sanitizeSpeciesKey } from '../pipeline/dex';
+import { plantAssetUrl } from '../data/sprite-catalog';
 import type {
   AvatarRecord,
   AvatarRepository,
@@ -127,7 +129,12 @@ function toRecord(snapshot: FirestoreSnapshotLike): AvatarRecord {
 }
 
 function demoSpriteUrl(template: DemoAvatarTemplate): string {
-  return `/static/sprites/${template.speciesName.toLowerCase().replace(/\s+/g, '-')}.png`;
+  return plantAssetUrl(template.spriteFile);
+}
+
+/** The photograph the sprite was drawn from, shown on the specimen card. */
+function demoPhotoUrl(template: DemoAvatarTemplate): string {
+  return plantAssetUrl(template.photoFile);
 }
 
 function buildDemoAvatarRecord(
@@ -143,10 +150,7 @@ function buildDemoAvatarRecord(
     spriteUrl: demoSpriteUrl(template),
     discoveredAt: now.toISOString(),
     source: template.source,
-    isTemporary: template.isTemporary,
-    expiresAt: template.isTemporary
-      ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
-      : null,
+    ...retentionForSource(template.source, now),
     stats: template.stats,
     metadata: {
       ...template.metadata,
@@ -155,6 +159,7 @@ function buildDemoAvatarRecord(
       templateId: template.id,
       displayName: template.speciesName,
       presentationKey: `demo:${template.id}`,
+      photoUrl: demoPhotoUrl(template),
     },
   };
 }
@@ -222,10 +227,11 @@ function isExactDemoRecord(
     data!.speciesFamily === template.speciesFamily &&
     data!.spriteUrl === demoSpriteUrl(template) &&
     data!.source === template.source &&
-    data!.isTemporary === template.isTemporary &&
+    data!.isTemporary === retentionForSource(template.source).isTemporary &&
     hasMatchingValue(data!.stats, template.stats) &&
     metadata.displayName === template.speciesName &&
     metadata.presentationKey === `demo:${template.id}` &&
+    metadata.photoUrl === demoPhotoUrl(template) &&
     Object.entries(template.metadata).every(([key, value]) =>
       hasMatchingValue(metadata[key], value)
     )
@@ -313,19 +319,25 @@ const firestoreAvatarRepository: AvatarRepository = {
     const now = new Date().toISOString();
 
     if (match) {
-      // Spec decision D2 applies here too: a match means the user has now
-      // genuinely scanned this species themselves, even if the matched
-      // record started out as a temporary (e.g. seeded) one. Upgrade it to
-      // persistent so it doesn't expire mid-showcase, exactly like a
-      // brand-new scan would be.
+      // A match means the user has now genuinely scanned this species, so a
+      // camera scan upgrades a temporary record to permanent — spec decision
+      // D2's intent, kept.
+      //
+      // A re-scan never *downgrades*, though: uploading a file of a plant you
+      // already caught with the camera must not put your kept record on a
+      // 24-hour clock. So an upload leaves an existing permanent record alone
+      // and only refreshes lastSeenAt.
       const metadata = { ...(match.metadata ?? {}), lastSeenAt: now };
-      await db.collection('avatar_records').doc(match.id).update({
-        metadata,
-        isTemporary: false,
-        expiresAt: null,
-      });
+      const retention =
+        input.source === 'mobile' || !match.isTemporary
+          ? { isTemporary: false, expiresAt: null }
+          : retentionForSource(input.source, new Date(now));
+      await db
+        .collection('avatar_records')
+        .doc(match.id)
+        .update({ metadata, ...retention });
       return {
-        record: { ...match, metadata, isTemporary: false, expiresAt: null },
+        record: { ...match, metadata, ...retention },
         created: false,
       };
     }
@@ -338,11 +350,12 @@ const firestoreAvatarRepository: AvatarRepository = {
       speciesFamily: input.speciesFamily,
       spriteUrl: input.spriteUrl,
       discoveredAt: now,
-      source: 'web',
-      // Spec decision D2: web scans are persistent, so nothing expires
-      // mid-showcase and the archive keeps what the user collected.
-      isTemporary: false,
-      expiresAt: null,
+      source: input.source,
+      // A camera scan is a discovery and is kept; a file upload is a trial run
+      // and expires in 24h (Req 6.12). One rule, in data/capture-source.ts.
+      // This reverses spec decision D2, which made every scan permanent so
+      // nothing could expire mid-showcase — raised with the change.
+      ...retentionForSource(input.source, new Date(now)),
       stats: input.stats,
       metadata: input.metadata,
     };
@@ -366,8 +379,20 @@ const firestoreAvatarRepository: AvatarRepository = {
           transaction.create(document.ref, buildDemoAvatarRecord(userId, template, now));
           return;
         }
-        if (!isExactDemoRecord(document.data(), userId, template)) {
+        // Anything that is not this user's demo record for this template is
+        // someone else's data at the same id — never overwrite it.
+        if (!isVerifiedDemoRecord(document.data(), userId, template)) {
           throw demoAvatarConflictError();
+        }
+        // It is a demo record, but the template moved under it — the sprite URL
+        // changed when the hand-made art landed, for instance. Every field here
+        // is ours to own, so refresh it rather than making the user toggle the
+        // set off and on to pick the new one up.
+        if (!isExactDemoRecord(document.data(), userId, template)) {
+          transaction.set(
+            document.ref,
+            buildDemoAvatarRecord(userId, template, now)
+          );
         }
       });
     });

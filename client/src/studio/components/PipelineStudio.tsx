@@ -88,7 +88,7 @@ const STAGES: Omit<StepState, 'status' | 'icon'>[] = [
     id: '2d',
     short: 'Quantise',
     title: 'Finisher & palette snap',
-    description: 'Nearest-neighbour 192×192 & Florentine24 snap',
+    description: 'Nearest-neighbour 192×192 & Spica72 snap',
   },
   {
     id: '3',
@@ -152,6 +152,15 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
 
   // Stage 2c human gate
   const [awaitingStage2cPermission, setAwaitingStage2cPermission] = useState(false);
+  /*
+   * Values accumulated across a run's SSE events, for the Dex write at step 4.
+   *
+   * A ref rather than the state above because each event arrives in its own
+   * handler invocation: reading React state there risks a stale closure, and
+   * the write needs the current values regardless of when the last render
+   * landed.
+   */
+  const runRef = useRef<{ plant?: any; spriteB64?: string; tier?: string }>({});
   const stage2cResolverRef = useRef<((continueTo2c: boolean) => void) | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -226,6 +235,9 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
     setIdentifiedName(null);
     setIdentifiedSpecies(null);
     setSteps(freshSteps());
+    // Cleared with the rest of the run state, or a re-run would write the
+    // previous plant's sprite when the new one fails before step 2d.
+    runRef.current = {};
   };
 
   const consumeStream = async (response: Response) => {
@@ -319,25 +331,50 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
         setCraftedTier(data.tier || 'gemma');
       }
       if (data.rawSpriteB64) setRawSpriteB64(`data:image/png;base64,${data.rawSpriteB64}`);
-      if (data.finishedSpriteB64)
+      if (data.finishedSpriteB64) {
         setFinishedSpriteB64(`data:image/png;base64,${data.finishedSpriteB64}`);
-      if (data.plant) setAssembledPlant(data.plant);
+        runRef.current.spriteB64 = data.finishedSpriteB64;
+      }
+      if (data.plant) {
+        setAssembledPlant(data.plant);
+        runRef.current.plant = data.plant;
+      }
+      if (data.tier) runRef.current.tier = data.tier;
 
       if (data.evalScores) {
         setEvalScores(data.evalScores);
         setDexStatus(data.autoApproved ? 'approved' : 'pending');
 
-        if (data.autoApproved && user && data.plant) {
-          const key = data.plant.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        /*
+         * Persist every finished sprite, approved or pending, and read the
+         * values from runRef rather than from `data`.
+         *
+         * The step-4 event carries only evalScores and autoApproved — `plant`
+         * arrives on step 3 and `finishedSpriteB64` on 2d — so the previous
+         * guard, `data.autoApproved && user && data.plant`, was never true and
+         * this write never ran. Had it run, spriteUrl would have been the
+         * string "data:image/png;base64,undefined". Gating on autoApproved was
+         * wrong besides: a pending sprite is exactly what the Dex Gate exists
+         * to review.
+         *
+         * A ref rather than component state because each SSE event lands in its
+         * own handler invocation, where reading state risks a stale closure.
+         */
+        const plant = runRef.current.plant;
+        const spriteB64 = runRef.current.spriteB64;
+        if (plant && user) {
+          const key = plant.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
           setDoc(doc(db, 'dex', key), {
             speciesKey: key,
-            canonicalName: data.plant.name,
-            commonNames: data.plant.common_names || [],
-            spriteUrl: `data:image/png;base64,${data.finishedSpriteB64}`,
+            canonicalName: plant.name,
+            commonNames: plant.common_names || [],
+            // Empty rather than the literal "undefined" when the sprite is
+            // missing, so a malformed record is rejected instead of stored.
+            spriteUrl: spriteB64 ? `data:image/png;base64,${spriteB64}` : '',
             firstDiscoveredBy: user.email || 'Anonymous Trainer',
             firstDiscoveredAt: new Date().toISOString(),
-            producedByTier: 'gemma',
-            status: 'approved',
+            producedByTier: runRef.current.tier || 'gemma',
+            status: data.autoApproved ? 'approved' : 'pending',
             evalScores: data.evalScores,
           }).catch(console.error);
         }
@@ -486,7 +523,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
     updateStep('2d', {
       status: 'processing',
       icon: 'spinner',
-      details: 'Snapping to Florentine24…',
+      details: 'Snapping to Spica72…',
     });
     await delay(600);
     updateStep('2d', {
@@ -596,7 +633,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
             <div className="space-y-1.5 border-t border-line-soft px-3 py-2.5">
               <Row label="Discovered by" value={entry.firstDiscoveredBy || 'Trainer'} />
               <Row label="Tier" value={entry.producedByTier || 'gemma'} tone="info" />
-              <Row label="Palette" value={entry.paletteVersion || 'Florentine24'} />
+              <Row label="Palette" value={entry.paletteVersion || 'Spica72'} />
             </div>
           </Panel>
         ))}
@@ -811,7 +848,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
 
           {/* Thin palette strip: the gamut the finished sprite is snapped to. */}
           <div className="flex items-center gap-2 border-t border-line-soft px-4 py-2">
-            <span className="pixel-label shrink-0 text-txt-5">Florentine24</span>
+            <span className="pixel-label shrink-0 text-txt-5">Spica72</span>
             <div className="flex h-2.5 flex-1 overflow-hidden rounded-full border border-line">
               {SPROUT_PALETTE.map((hex) => (
                 <div key={hex} className="flex-1" style={{ backgroundColor: hex }} title={hex} />
@@ -873,7 +910,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
                   }
                 />
                 <div className="flex items-center justify-between font-mono text-[10px] text-txt-4">
-                  <span>{finishedSpriteB64 ? 'Florentine24 quantised' : 'Raw generator output'}</span>
+                  <span>{finishedSpriteB64 ? 'Spica72 quantised' : 'Raw generator output'}</span>
                   {craftedTier && <span className="text-info">tier: {craftedTier}</span>}
                 </div>
 

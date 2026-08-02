@@ -6,6 +6,7 @@
  */
 import { sanitizeSpeciesKey } from '../pipeline/dex';
 import { deriveSpeciesStats } from '../data/species-stats';
+import type { CaptureSource } from '../data/capture-source';
 import type { AvatarRepository } from '../models/avatar';
 import type { DexRepository } from '../models/dex';
 import type { DiscoveryResolver, PublicDiscovery } from './discovery';
@@ -22,6 +23,9 @@ export interface ScanPersistenceDependencies {
 }
 
 export interface ScanPersistOptions {
+  /** How the photo reached the pipeline. Decides the archive record's lifetime
+   *  — camera scans are kept, uploads expire in 24h (Req 6.12). */
+  source: CaptureSource;
   /** False when the species name is a placeholder rather than a real
    *  identification — a failed Plant.id call, or the keyless mock path. Those
    *  scans get a per-user species key so they never share the canonical sprite
@@ -106,13 +110,21 @@ export async function persistScan(
     const stats = deriveSpeciesStats(speciesKey);
 
     const spriteUrl = await dependencies.storage.save(speciesKey, png);
-    const dex = await dependencies.dex.recordDiscovery(speciesKey, userId, speciesName);
+    // The sprite goes on the dex record too: it is canonical per species, and
+    // the almanac needs it without reading any player's avatar document.
+    const dex = await dependencies.dex.recordDiscovery(
+      speciesKey,
+      userId,
+      speciesName,
+      spriteUrl
+    );
     const { record, created } = await dependencies.avatars.upsertFromScan(userId, {
       speciesName,
       speciesFamily,
       spriteUrl,
       stats,
       metadata: null,
+      source: options.source,
     });
 
     // Everything durable is written by this point. Resolving the discoverer's

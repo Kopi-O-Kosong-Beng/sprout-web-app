@@ -7,9 +7,49 @@ import AdminPage from './AdminPage';
 const apiMocks = vi.hoisted(() => ({
   listAdminAccounts: vi.fn(),
   deleteAdminAccount: vi.fn(),
+  getAdminAlmanac: vi.fn(),
+  getApiHealth: vi.fn(),
+  runAdminCleanup: vi.fn(),
 }));
 
 vi.mock('../services/sproutApi', () => apiMocks);
+
+const ALMANAC = {
+  source: 'Chong, Tan & Corlett (2009)',
+  total: 200,
+  discovered: 1,
+  species: [
+    {
+      id: 'fagraea-fragrans',
+      speciesName: 'Fagraea fragrans',
+      commonName: 'Tembusu',
+      family: 'Gentianaceae',
+      status: 'common' as const,
+      origin: 'native',
+      growthForm: 'tree',
+      discovered: true,
+      discoveryCount: 3,
+      discoveredByName: 'NatTheBotanist',
+      discoveredAt: '2026-08-01T00:00:00.000Z',
+      photoUrl: null,
+    },
+    {
+      id: 'acanthus-ilicifolius',
+      speciesName: 'Acanthus ilicifolius',
+      commonName: 'Sea holly',
+      family: 'Acanthaceae',
+      status: 'common' as const,
+      origin: 'native',
+      growthForm: 'shrub',
+      discovered: false,
+      discoveryCount: 0,
+      discoveredByName: null,
+      discoveredAt: null,
+      photoUrl: null,
+    },
+  ],
+  offTaxonomy: [],
+};
 
 const ACCOUNTS = {
   items: [
@@ -53,10 +93,26 @@ function rowFor(email: string): HTMLElement {
   return screen.getByRole('row', { name: new RegExp(email, 'i') });
 }
 
+/** The happy-path API stubs both suites start from. */
+function stubApiDefaults() {
+  vi.clearAllMocks();
+  apiMocks.listAdminAccounts.mockResolvedValue(ACCOUNTS);
+  apiMocks.getAdminAlmanac.mockResolvedValue(ALMANAC);
+  apiMocks.getApiHealth.mockResolvedValue({
+    timestamp: '2026-08-02T10:00:00.000Z',
+    overallStatus: 'DEGRADED',
+    probes: {
+      plantId: { status: 'PASS', latencyMs: 412, detail: '460 credits left' },
+      // Flux is billed per render, so the endpoint reports it unprobed with an
+      // explicit null latency rather than a number nobody measured.
+      flux: { status: 'SKIP', latencyMs: null, detail: 'key present — not probed' },
+    },
+  });
+}
+
 describe('AdminPage', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    apiMocks.listAdminAccounts.mockResolvedValue(ACCOUNTS);
+    stubApiDefaults();
     apiMocks.deleteAdminAccount.mockResolvedValue({
       id: 'uid-member',
       firebaseIdentityDeleted: true,
@@ -161,5 +217,93 @@ describe('AdminPage', () => {
     renderAdmin();
 
     expect(await screen.findByText(/no accounts yet/i)).toBeInTheDocument();
+  });
+});
+
+describe('AdminPage operations panels', () => {
+  beforeEach(stubApiDefaults);
+
+  it('probes API health on request rather than on load', async () => {
+    const user = userEvent.setup();
+    renderAdmin();
+    await screen.findByText('member@example.com');
+
+    // Each probe is a live upstream call, so opening the page must not fire them.
+    expect(apiMocks.getApiHealth).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /run health check/i }));
+
+    expect(await screen.findByText('plantId')).toBeInTheDocument();
+    expect(screen.getByText('460 credits left')).toBeInTheDocument();
+    expect(screen.getByText('412 ms')).toBeInTheDocument();
+    // SKIP is not a failure — an unprobed or unconfigured hop degrades, and the
+    // page says which rather than showing green for something it never called.
+    expect(screen.getByText('key present — not probed')).toBeInTheDocument();
+    // null latency must read as "not measured", never as "null ms" or 0.
+    expect(screen.getByText('—')).toBeInTheDocument();
+  });
+
+  it('will not delete on a single press', async () => {
+    apiMocks.runAdminCleanup.mockResolvedValue({
+      target: 'expired-temp-avatars',
+      dryRun: true,
+      matched: 2,
+      deleted: 0,
+      sample: [{ id: 'a1', label: 'Lantana camara', detail: 'expired yesterday' }],
+      ranAt: '2026-08-02T10:00:00.000Z',
+    });
+    const user = userEvent.setup();
+    renderAdmin();
+    await screen.findByText('member@example.com');
+
+    await user.click(screen.getByRole('button', { name: /check what would be deleted/i }));
+
+    expect(apiMocks.runAdminCleanup).toHaveBeenCalledWith('expired-temp-avatars', {
+      dryRun: true,
+    });
+    expect(
+      await screen.findByText(/2 expired uploads match\. Nothing has been deleted\./i)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Lantana camara/)).toBeInTheDocument();
+  });
+
+  it('deletes only after the second, explicit press', async () => {
+    apiMocks.runAdminCleanup
+      .mockResolvedValueOnce({
+        target: 'expired-temp-avatars',
+        dryRun: true,
+        matched: 2,
+        deleted: 0,
+        sample: [],
+        ranAt: '2026-08-02T10:00:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        target: 'expired-temp-avatars',
+        dryRun: false,
+        matched: 2,
+        deleted: 2,
+        sample: [],
+        ranAt: '2026-08-02T10:00:01.000Z',
+      });
+    const user = userEvent.setup();
+    renderAdmin();
+    await screen.findByText('member@example.com');
+
+    await user.click(screen.getByRole('button', { name: /check what would be deleted/i }));
+    await user.click(await screen.findByRole('button', { name: /delete 2 expired uploads/i }));
+
+    expect(apiMocks.runAdminCleanup).toHaveBeenLastCalledWith('expired-temp-avatars', {
+      dryRun: false,
+    });
+    expect(await screen.findByText(/Deleted 2 expired uploads\./i)).toBeInTheDocument();
+  });
+
+  it('shows the taxonomy with who found what', async () => {
+    renderAdmin();
+
+    expect(await screen.findByText(/1 of 200 species discovered/i)).toBeInTheDocument();
+    expect(screen.getByText('NatTheBotanist')).toBeInTheDocument();
+    expect(screen.getAllByText('Fagraea fragrans').length).toBeGreaterThan(0);
+    expect(screen.getByText('Not yet found')).toBeInTheDocument();
   });
 });

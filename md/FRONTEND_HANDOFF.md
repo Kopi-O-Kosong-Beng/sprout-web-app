@@ -141,7 +141,77 @@ http://localhost:3001
 | `POST` | `/api/auth/request-reset` | none | Send OTP to email/log |
 | `POST` | `/api/auth/verify-reset` | none | Verify OTP and update password |
 | `GET` | `/api/avatar` | Bearer token | Fetch current user's avatars |
+| `POST` | `/api/avatar` | Bearer token | Save a scanned plant into the archive |
 | `POST` | `/api/query/submit` | none | Submit contact/query ticket |
+| `GET` | `/api/almanac` | **none** | 200-species almanac: taxonomy + found/not-found + counts |
+| `GET` | `/api/almanac/:speciesId` | Bearer token | Adds the first finder, the date and their photo |
+| `GET` | `/api/admin/almanac` | Bearer token + ADMIN_EMAILS | Full taxonomy with finders, plus off-list discoveries |
+| `POST` | `/api/admin/cleanup` | Bearer token + ADMIN_EMAILS | Dry-run/delete expired web uploads |
+| `GET` | `/api/platform/health-check` | Bearer token + ADMIN_EMAILS | Live upstream provider probes |
+
+## Saving A Scan (`POST /api/avatar`)
+
+What the Scan screen sends after a pipeline run finishes, via
+`createAvatar()` in `client/src/services/sproutApi.ts`:
+
+```json
+{
+  "speciesName": "Monstera deliciosa",
+  "speciesFamily": "Araceae",
+  "spriteDataUrl": "data:image/png;base64,...",
+  "photoDataUrl": "data:image/jpeg;base64,...",
+  "source": "mobile",
+  "metadata": {
+    "taxonomy": { "Family": "Araceae" },
+    "commonNames": ["Swiss cheese plant"],
+    "description": "...",
+    "confidence": 0.91
+  }
+}
+```
+
+- **`source` decides how long the record lives**, and is required — there is no
+  default, because a mislabelled client must not be able to quietly grant an
+  upload permanence. `mobile` is an IRL camera scan and is kept; `web` is a file
+  upload and becomes the 24 h `TempAvatar` of requirements.md 6.12. The single
+  rule lives in `server/data/capture-source.ts`; the archive shows it as an
+  "IRL Scan" / "Web Upload" badge.
+- The finished 192×192 PNG travels on the record itself — there is no object
+  store wired up — so the sprite must be a `data:image/png;base64,` URL under
+  512 000 characters. Anything else is a 400.
+- `photoDataUrl` is optional: a downscaled JPEG of the original photo, under
+  300 000 characters, stored as `metadata.photoUrl` and shown on the specimen
+  card. The demo plants use the same slot, pointing at files in
+  `client/public/plants/` instead.
+- Battle stats are **not** accepted from the client: the server derives them
+  from the species name and family (`services/avatar-stats.ts`), so the same
+  species always yields the same creature.
+- Unlisted `metadata` keys are stripped.
+- Responds `201` with the created `AvatarRecord` (plus `battleEligible`), the
+  same shape `GET /api/avatar` returns. Capped at 30 saves per account per hour.
+
+## The Almanac (`GET /api/almanac`)
+
+200 Singapore flowering plants, and which of them players have brought in.
+
+- **The list endpoint is public and deliberately anonymous.** It is the landing
+  page's centrepiece, shown to visitors who have never signed up, so it returns
+  the taxonomy plus `discovered` and `discoveryCount` and *nothing a player
+  contributed* — no uid, no display name, no photograph.
+- **`GET /api/almanac/:speciesId` requires a login**, and is the only place the
+  finder's name, the discovery date and their original photo appear. That split
+  is the privacy model: anyone can see Tembusu has been found three times; you
+  have to sign in to see who found it and what they photographed.
+- Discoveries are recorded as a side effect of `POST /api/avatar`. The response
+  carries an `almanac` object — `{ speciesId, commonName, firstDiscovery }` —
+  when the scanned species is one of the 200, and `null` when it is not. A
+  failure to record never fails the save.
+- First discovery is claimed in a Firestore transaction keyed on the species, so
+  two simultaneous scans cannot both claim it. The finder's display name is
+  snapshotted at discovery time and does not follow a later rename.
+- The taxonomy is fixed data (`server/data/almanac-taxonomy.json`) from the
+  published Chong, Tan & Corlett (2009) checklist. `scripts/extract-flora-checklist.py`
+  regenerates it and documents the selection rules.
 
 ## Password Reset Flow
 

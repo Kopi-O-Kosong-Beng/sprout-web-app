@@ -1,9 +1,56 @@
 import { describe, it, expect, vi } from "vitest";
-import { craftPromptTiered, cleanVlmPromptText } from "../stages/promptCraft";
+import {
+  craftPromptTiered,
+  cleanVlmPromptText,
+  buildInstruction,
+  nameOnlyPrompt,
+} from "../stages/promptCraft";
 import { GEMINI_TIMEOUT_MS } from "../deadline";
 
+/**
+ * Guards the anatomy clause. Stating the body plan as fact ("its stems trail
+ * into a curling vine tail") made every species come out with the same two
+ * wings and tail, because a VLM transcribes such a clause rather than choosing
+ * from it. Both tiers must offer the anatomy as a selection and must name the
+ * defaults they are refusing.
+ */
+describe("prompt anatomy is selected, not prescribed", () => {
+  const prescriptive = [
+    /its stems trail\w* into a curling vine tail/i,
+    /its leaves sprout\w* from the sides like wings/i,
+  ];
+
+  for (const [label, text] of [
+    ["buildInstruction", buildInstruction("Melastoma")],
+    ["nameOnlyPrompt", nameOnlyPrompt("Melastoma")],
+  ] as const) {
+    it(`[black-box: spec] ${label} does not assert wings and a tail as given`, () => {
+      for (const pattern of prescriptive) {
+        expect(text).not.toMatch(pattern);
+      }
+    });
+
+    it(`[black-box: spec] ${label} bounds features to what the plant supports`, () => {
+      expect(text).toMatch(/two or three/i);
+      expect(text).toMatch(/does not suggest|no wings, tail/i);
+    });
+
+    /**
+     * Child appeal is carried by design rules, not by naming the genre's famous
+     * examples. A named franchise gets the request refused by some image models
+     * and gets designs too close to the originals out of the rest.
+     */
+    it(`[black-box: spec] ${label} states child appeal without naming a franchise`, () => {
+      expect(text).toMatch(/young child/i);
+      expect(text).toMatch(/oversized head/i);
+      expect(text).toMatch(/thumbnail size/i);
+      expect(text).not.toMatch(/pok[eé]mon|nintendo|digimon|game freak/i);
+    });
+  }
+});
+
 describe("cleanVlmPromptText", () => {
-  it("strips conversational refusal headers and extracts pure prompt instruction", () => {
+  it("[black-box: equivalence] strips conversational refusal headers and extracts pure prompt instruction", () => {
     const rawRefusal = `I'm unable to generate an image from this text-based prompt. However, here is the prompt translated into an image generation instruction: Create a chibi-style, 192x192 pixel, pixel-art plant monster sprite with a flat solid white background, using the plant's real colors.`;
     
     const cleaned = cleanVlmPromptText(rawRefusal);
@@ -25,7 +72,7 @@ describe("promptCraft tier routing", () => {
     nameOnly: over.nameOnly ?? vi.fn().mockReturnValue("NameOnly prompt output"),
   });
 
-  it("returns Tier 1 Gemini when the Gemini call succeeds", async () => {
+  it("[black-box: decision-table] returns Tier 1 Gemini when the Gemini call succeeds", async () => {
     const callers = mocks();
 
     const result = await craftPromptTiered("fake_photo", "Melastoma", "nvidia_key", "gemini_key", callers);
@@ -37,7 +84,7 @@ describe("promptCraft tier routing", () => {
     expect(callers.gemma).not.toHaveBeenCalled();
   });
 
-  it("falls back to Tier 2 NVIDIA when Gemini times out", async () => {
+  it("[fault-injection] falls back to Tier 2 NVIDIA when Gemini times out", async () => {
     vi.useFakeTimers();
 
     const callers = mocks({ gemini: vi.fn().mockImplementation(() => new Promise(() => {})) });
@@ -53,7 +100,7 @@ describe("promptCraft tier routing", () => {
     vi.useRealTimers();
   });
 
-  it("falls back to Tier 2 NVIDIA when Gemini throws immediately", async () => {
+  it("[fault-injection] falls back to Tier 2 NVIDIA when Gemini throws immediately", async () => {
     const callers = mocks({ gemini: vi.fn().mockRejectedValue(new Error("Gemini 429 out of credit")) });
 
     const result = await craftPromptTiered("fake_photo", "Melastoma", "nvidia_key", "gemini_key", callers);
@@ -62,7 +109,7 @@ describe("promptCraft tier routing", () => {
     expect(result.prompt).toBe("Gemma prompt output");
   });
 
-  it("skips Tier 1 entirely when no Gemini key is configured", async () => {
+  it("[white-box: branch] skips Tier 1 entirely when no Gemini key is configured", async () => {
     const callers = mocks();
 
     const result = await craftPromptTiered("fake_photo", "Melastoma", "nvidia_key", undefined, callers);
@@ -76,7 +123,7 @@ describe("promptCraft tier routing", () => {
    * cap and asserts the fallback fires; this one stops just short and asserts
    * it does not, which is what pins the boundary rather than merely crossing it.
    */
-  it("[BVA] Gemini answering just under the 20s cap -> no fallback", async () => {
+  it("[white-box: boundary] Gemini answering just under the 20s cap -> no fallback", async () => {
     vi.useFakeTimers();
 
     const callers = mocks({
@@ -99,7 +146,7 @@ describe("promptCraft tier routing", () => {
   });
 
   /** Neither key present — both tier guards are skipped, not merely failed. */
-  it("[path] craftPromptTiered: no keys configured -> straight to name-only", async () => {
+  it("[white-box: branch] craftPromptTiered: no keys configured -> straight to name-only", async () => {
     const callers = mocks({
       nameOnly: vi.fn().mockReturnValue("An original pixel-art creature drawn from Melastoma"),
     });
@@ -112,7 +159,7 @@ describe("promptCraft tier routing", () => {
     expect(callers.nameOnly).toHaveBeenCalledWith("Melastoma");
   });
 
-  it("falls back to Tier 3 nameOnly when both vision models fail", async () => {
+  it("[fault-injection] falls back to Tier 3 nameOnly when both vision models fail", async () => {
     const callers = mocks({
       gemini: vi.fn().mockRejectedValue(new Error("Google down")),
       gemma: vi.fn().mockRejectedValue(new Error("NVIDIA down")),

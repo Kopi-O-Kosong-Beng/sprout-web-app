@@ -4,6 +4,7 @@ import {
   DEMO_SET_VERSION,
   demoAvatarId,
 } from '../data/demo-avatar-templates';
+import { plantAssetUrl } from '../data/sprite-catalog';
 import { getDb } from '../firebase';
 import avatarRepository from '../repositories/avatars';
 import { clearFirestore } from './firestore-test-utils';
@@ -147,6 +148,28 @@ describe('per-user demo avatar set', () => {
     const completed = await avatarRepository.ensureDemoSet(USER_ID);
 
     await expectExactDemoSet(completed);
+  });
+
+  // The pre-made sprite set moved every demo record's spriteUrl. Accounts that
+  // had already enabled the set were left holding the old, unserved path, and a
+  // 409 on re-enable would have meant toggling the set off to pick the new one
+  // up — losing nothing, but for no reason a player could see.
+  it('refreshes a demo record whose template has moved under it', async () => {
+    await avatarRepository.ensureDemoSet(USER_ID);
+    const template = DEMO_AVATAR_TEMPLATES[0];
+    const ref = demoRef(template);
+    await ref.set(
+      { spriteUrl: '/static/sprites/helianthus-annuus.png', stats: { hp: 1, attack: 1, defense: 1, speed: 1 } },
+      { merge: true }
+    );
+
+    const refreshed = await avatarRepository.ensureDemoSet(USER_ID);
+
+    await expectExactDemoSet(refreshed);
+    expect((await ref.get()).data()).toMatchObject({
+      spriteUrl: plantAssetUrl(template.spriteFile),
+      stats: template.stats,
+    });
   });
 
   it('accepts an equivalent demo record when Firestore map keys are reordered', async () => {

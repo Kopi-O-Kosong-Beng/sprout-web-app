@@ -3,8 +3,26 @@ import { cleanVlmPromptText } from "../pipeline/stages/promptCraft";
 import { serverStartTime, adminLogBuffer, logAdminEvent, adminDexStore } from "./adminStore";
 import { AUDITED_KEYS, serverEnv } from "./env";
 import { isTestRunInFlight, runTests } from "./testRunner";
+import {
+  FLUX_TIMEOUT_MS,
+  GEMINI_TIMEOUT_MS,
+  IDENTIFY_TIMEOUT_MS,
+  JUDGE_TIMEOUT_MS,
+  MIN_USEFUL_CUTOUT_MS,
+  TOTAL_BUDGET_MS,
+  VISION_TIMEOUT_MS,
+  WITHOUTBG_TIMEOUT_MS,
+} from "../pipeline/deadline";
 
 export const adminRouter = Router();
+
+/**
+ * Ceiling for a single reachability probe.
+ *
+ * These ran unbounded and in series, so one hanging provider hung the whole
+ * health endpoint — the page you open precisely when a provider is misbehaving.
+ */
+const PROBE_TIMEOUT_MS = 10_000;
 
 // Admin Config Status
 adminRouter.get("/config-status", (req, res) => {
@@ -29,12 +47,22 @@ adminRouter.get("/config-status", (req, res) => {
         { configured: !!process.env[name], preview: maskKey(process.env[name]) },
       ]),
     ),
+    /*
+     * Read from deadline.ts, never restated. These were hardcoded here and had
+     * already drifted: this endpoint reported FLUX_TIMEOUT_MS as 30s long after
+     * the pipeline moved to 45s — and 30s is the exact value that was abandoned
+     * for aborting mid-render about as often as it finished. A budgets panel
+     * that disagrees with the budget is worse than no panel.
+     */
     budgets: {
-      TOTAL_BUDGET_MS: 110000,
-      GEMINI_TIMEOUT_MS: 20000,
-      VISION_TIMEOUT_MS: 75000,
-      FLUX_TIMEOUT_MS: 30000,
-      WITHOUTBG_TIMEOUT_MS: 15000,
+      TOTAL_BUDGET_MS,
+      IDENTIFY_TIMEOUT_MS,
+      GEMINI_TIMEOUT_MS,
+      VISION_TIMEOUT_MS,
+      FLUX_TIMEOUT_MS,
+      WITHOUTBG_TIMEOUT_MS,
+      JUDGE_TIMEOUT_MS,
+      MIN_USEFUL_CUTOUT_MS,
     }
   });
 });
@@ -50,18 +78,32 @@ adminRouter.get("/health-check", async (req, res) => {
     try {
       const resp = await fetch("https://api.plant.id/v3/usage_info", {
         headers: { "Api-Key": plantKey },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
       const ms = Date.now() - t0;
       if (resp.ok) {
         const data = (await resp.json()) as any;
+        /*
+         * Report only what the API actually returned. These fields used to fall
+         * back to `?? 460`, `?? 500`, `?? 40`, `?? true` — so a response missing
+         * the usage block rendered as the confident line "460 of 500 credits
+         * remaining", a number nobody measured. A credit readout that invents
+         * its own figures is worse than one that admits it has none.
+         */
+        const remaining = data.remaining?.total;
+        const limit = data.credit_limits?.total;
+        const known = typeof remaining === "number" && typeof limit === "number";
+
         probes.plantId = {
           status: "PASS",
           latencyMs: ms,
-          remainingCredits: data.remaining?.total ?? 460,
-          limit: data.credit_limits?.total ?? 500,
-          used: data.used?.total ?? 40,
-          active: data.active ?? true,
-          detail: `${data.remaining?.total ?? 460} of ${data.credit_limits?.total ?? 500} credits remaining`,
+          remainingCredits: remaining ?? null,
+          limit: limit ?? null,
+          used: data.used?.total ?? null,
+          active: data.active ?? null,
+          detail: known
+            ? `${remaining} of ${limit} credits remaining`
+            : "Reachable; usage figures not present in the response",
         };
       } else {
         probes.plantId = { status: "FAIL", latencyMs: ms, detail: `HTTP ${resp.status}` };
@@ -80,7 +122,8 @@ adminRouter.get("/health-check", async (req, res) => {
     try {
       const geminiModel = serverEnv.geminiVisionModel;
       const resp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}?key=${encodeURIComponent(geminiKey)}`
+        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}?key=${encodeURIComponent(geminiKey)}`,
+        { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) }
       );
       const ms = Date.now() - t0;
       if (resp.ok) {
@@ -107,6 +150,7 @@ adminRouter.get("/health-check", async (req, res) => {
     try {
       const resp = await fetch("https://integrate.api.nvidia.com/v1/models", {
         headers: { Authorization: `Bearer ${nvidiaKey}` },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
       const ms = Date.now() - t0;
       if (resp.ok) {
@@ -126,19 +170,35 @@ adminRouter.get("/health-check", async (req, res) => {
     probes.nvidiaVision = { status: "SKIP", detail: "GEMMA_API_KEY / NVIDIA_API_KEY not configured" };
   }
 
-  // 4. Flux Render
+  /*
+   * 4 & 5: config checks, not probes — and labelled as such.
+   *
+   * Both of these reported status PASS with a hardcoded latency (1488ms and
+   * 2358ms) whenever a key was present, without contacting anything. So the
+   * health page showed Flux green at 1488ms while Flux was in fact refusing
+   * every render — the single most misleading thing this endpoint could do,
+   * since it is the page you open to find out whether Flux is working.
+   *
+   * They stay unprobed deliberately: both are billed per call, and a health
+   * check that spends a credit every time you load the page is its own problem.
+   * SKIP renders neutral rather than green, which is the honest reading — key
+   * present, liveness unknown.
+   */
   probes.fluxRender = {
-    status: nvidiaKey ? "PASS" : "SKIP",
-    latencyMs: 1488,
-    detail: nvidiaKey ? "black-forest-labs/flux.2-klein-4b configured" : "FLUX_API_KEY / NVIDIA_API_KEY missing",
+    status: "SKIP",
+    latencyMs: null,
+    detail: serverEnv.fluxApiKey
+      ? "black-forest-labs/flux.2-klein-4b key present — not probed (a render is billed)"
+      : "FLUX_API_KEY / NVIDIA_API_KEY missing",
   };
 
-  // 5. withoutBG Cutout
   const bgKey = serverEnv.withoutbgKey;
   probes.withoutBg = {
-    status: bgKey ? "PASS" : "SKIP",
-    latencyMs: 2358,
-    detail: bgKey ? "withoutBG endpoint active (1 credit per successful cutout)" : "WITHOUTBG_KEY missing",
+    status: "SKIP",
+    latencyMs: null,
+    detail: bgKey
+      ? "withoutBG key present — not probed (1 credit per successful cutout)"
+      : "WITHOUTBG_KEY missing",
   };
 
   res.json({
@@ -180,6 +240,8 @@ adminRouter.post("/clean-prompt", (req, res) => {
     });
   }
 });
+
+
 
 // Admin Dex Document Manager Routes
 adminRouter.get("/dex-docs", (req, res) => {

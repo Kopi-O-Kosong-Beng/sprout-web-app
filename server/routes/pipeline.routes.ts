@@ -32,6 +32,7 @@ import {
   TOTAL_BUDGET_MS,
 } from '../pipeline/deadline';
 import { serverEnv } from '../platform/env';
+import { CAPTURE_SOURCES, type CaptureSource } from '../data/capture-source';
 import { persistScan } from '../services/scan-persistence';
 import { resolveDiscovery } from '../services/discovery';
 import createFirebaseSpriteStorage from '../services/sprite-storage';
@@ -42,6 +43,21 @@ const router = Router();
 
 router.use(json({ limit: '20mb' }));
 router.use(authMiddleware);
+
+/**
+ * How the photo reached the pipeline, as declared by the caller.
+ *
+ * Defaults to 'web', the conservative reading: a caller that says nothing is
+ * most likely the studio, where an operator is uploading a file, and an upload
+ * is a trial run that expires. The Scan screen always declares, so a real
+ * camera scan is never mislabelled by this default.
+ */
+function readCaptureSource(body: unknown): CaptureSource {
+  const declared = (body as { source?: unknown })?.source;
+  return CAPTURE_SOURCES.includes(declared as CaptureSource)
+    ? (declared as CaptureSource)
+    : 'web';
+}
 
 /** Opens a server-sent-event stream and returns its writer. */
 function openEventStream(res: Response) {
@@ -280,7 +296,8 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       identification,
       deadline,
       req.user!.uid,
-      identifiedSpecies
+      identifiedSpecies,
+      readCaptureSource(req.body)
     );
 
     sendEvent({
@@ -349,7 +366,8 @@ router.post('/run-stage2c', async (req: Request, res: Response) => {
       identification,
       deadline,
       req.user!.uid,
-      identifiedSpecies
+      identifiedSpecies,
+      readCaptureSource(req.body)
     );
 
     sendEvent({
@@ -385,7 +403,9 @@ async function runStage2cOnward(
   deadline: ReturnType<typeof createDeadline>,
   userId: string,
   /** False when identification.name is a placeholder — see persistScan. */
-  identifiedSpecies: boolean
+  identifiedSpecies: boolean,
+  /** How the photo reached us, which decides the saved record's lifetime. */
+  captureSource: CaptureSource
 ) {
   // Step 2c: Background Removal
   sendEvent({
@@ -423,7 +443,7 @@ async function runStage2cOnward(
     step: '2d',
     title: '2d. Finisher & Palette Quantization',
     details:
-      'Resizing to 192x192 (nearest-neighbor) & snapping to Florentine24 palette...',
+      'Resizing to 192x192 (nearest-neighbor) & snapping to Spica72 palette...',
   });
 
   const startTime2d = Date.now();
@@ -438,7 +458,7 @@ async function runStage2cOnward(
     status: 'success',
     icon: 'tick',
     latencyMs: lat2d,
-    details: 'Finished 192x192px PNG sprite with Florentine24 palette colors.',
+    details: 'Finished 192x192px PNG sprite with Spica72 palette colors.',
     finishedSpriteB64: finishedB64,
   });
 
@@ -480,7 +500,12 @@ async function runStage2cOnward(
   const judgeScores = await geminiJudgeEval(
     finishedPngBuffer,
     plant.name,
-    serverEnv.geminiKey ?? ''
+    serverEnv.geminiKey ?? '',
+    // Without this the judge is the one hop with no ceiling, so a slow or
+    // hanging Gemini call runs past the whole route budget after every other
+    // hop has respected it. The parameter is optional, which is why nothing
+    // failed when the bounded judge was ported and this call site was not.
+    deadline
   );
 
   const combinedScores = { ...pScores, ...judgeScores };
@@ -516,7 +541,7 @@ async function runStage2cOnward(
     identification.name,
     identification.taxonomy?.family ?? null,
     finishedPngBuffer,
-    { identified: identifiedSpecies }
+    { identified: identifiedSpecies, source: captureSource }
   );
 
   return {

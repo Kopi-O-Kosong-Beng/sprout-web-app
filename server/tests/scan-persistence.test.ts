@@ -31,6 +31,7 @@ function deps(overrides: Partial<ScanPersistenceDependencies> = {}): ScanPersist
     dex: {
       recordDiscovery: jest.fn().mockResolvedValue(DEX),
       get: jest.fn(),
+      list: jest.fn(),
     },
     avatars: { upsertFromScan: jest.fn().mockResolvedValue({ record: RECORD, created: true }) },
     resolveDiscovery: jest.fn().mockResolvedValue(RESOLVED),
@@ -39,7 +40,7 @@ function deps(overrides: Partial<ScanPersistenceDependencies> = {}): ScanPersist
 }
 
 /** Identification succeeded and named a real species — the canonical case. */
-const IDENTIFIED = { identified: true };
+const IDENTIFIED = { identified: true, source: 'mobile' as const };
 
 describe('persistScan', () => {
   it('stores the sprite, records the discovery, and writes the archive row', async () => {
@@ -54,7 +55,12 @@ describe('persistScan', () => {
     );
 
     expect(dependencies.storage.save).toHaveBeenCalledWith('fern', PNG);
-    expect(dependencies.dex.recordDiscovery).toHaveBeenCalledWith('fern', 'user-a', 'Fern');
+    expect(dependencies.dex.recordDiscovery).toHaveBeenCalledWith(
+      'fern',
+      'user-a',
+      'Fern',
+      'https://cdn.test/fern.png'
+    );
     expect(result.saved).toBe(true);
     expect(result.avatarId).toBe('avatar-1');
   });
@@ -85,6 +91,7 @@ describe('persistScan', () => {
       dex: {
         recordDiscovery: jest.fn().mockRejectedValue(new Error('dex write conflict')),
         get: jest.fn(),
+        list: jest.fn(),
       },
     });
     const result = await persistScan(dependencies, 'user-a', 'Fern', null, PNG, IDENTIFIED);
@@ -219,7 +226,7 @@ describe('persistScan discovery block', () => {
 
 /** A failed identification, or the keyless mock, is not a real species. */
 describe('persistScan unidentified scans', () => {
-  const UNIDENTIFIED = { identified: false };
+  const UNIDENTIFIED = { identified: false, source: 'mobile' as const };
 
   it('scopes the species key to the scanning user', async () => {
     const dependencies = deps();
@@ -237,7 +244,8 @@ describe('persistScan unidentified scans', () => {
     expect(dependencies.dex.recordDiscovery).toHaveBeenCalledWith(
       scoped,
       'user-a',
-      'Unknown Plant Species'
+      'Unknown Plant Species',
+      'https://cdn.test/fern.png'
     );
   });
 

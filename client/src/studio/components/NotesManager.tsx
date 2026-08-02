@@ -35,7 +35,7 @@ type CategoryType = 'General' | 'Work' | 'Personal' | 'Ideas' | 'Urgent';
 
 const CATEGORIES: CategoryType[] = ['General', 'Work', 'Personal', 'Ideas', 'Urgent'];
 
-/** Categories map onto Florentine24 semantic tones. */
+/** Categories map onto Spica72 semantic tones. */
 const CATEGORY_TONE: Record<CategoryType, Tone> = {
   General: 'neutral',
   Work: 'info',

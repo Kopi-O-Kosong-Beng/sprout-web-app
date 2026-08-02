@@ -4,6 +4,7 @@ import type {
   BattleParticipant,
 } from '../models/battle';
 import { MAX_BATTLE_ENERGY } from './battle-rules';
+import { spriteUrlForSlug } from './sprite-catalog';
 
 export const MOVE_CATALOG_VERSION = 'v1' as const;
 export const NPC_PRESET_VERSION = 'thornback-v1' as const;
@@ -175,7 +176,7 @@ export function createThornback(): BattleParticipant {
   return {
     id: 'thornback',
     name: 'Thornback',
-    spriteUrl: '/static/sprites/thornback.png',
+    spriteUrl: spriteUrlForSlug('thornback'),
     stats: { hp: 124, attack: 58, defense: 55, speed: 46 },
     currentHp: 124,
     maxHp: 124,
