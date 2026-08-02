@@ -3,6 +3,10 @@ import type { RequestHandler } from 'express';
 import { isAvatarBattleEligible } from '../data/battle-eligibility';
 import type { AvatarRecord, PaginatedAvatars } from '../models/avatar';
 import avatarRepository from '../repositories/avatars';
+// Shared with the scan pipeline: one implementation resolves the discoverer's
+// UID to a display name, so the avatar detail and the scan `complete` event
+// cannot disagree about the block's shape.
+import { resolveDiscoveryForSpecies } from '../services/discovery';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -58,7 +62,8 @@ export const handleGetAvatar: RequestHandler = async (req, res, next) => {
       res.status(404).json({ error: 'Avatar not found.' });
       return;
     }
-    res.status(200).json(serializeAvatar(avatar, new Date()));
+    const discovery = await resolveDiscoveryForSpecies(avatar.speciesName, userId);
+    res.status(200).json({ ...serializeAvatar(avatar, new Date()), discovery });
   } catch (err) {
     next(err);
   }

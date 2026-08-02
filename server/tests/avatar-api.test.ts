@@ -205,6 +205,7 @@ describe('verified avatar archive API', () => {
       battleEligible: true,
       stats: { hp: 100, attack: 52, defense: 61, speed: 48 },
       metadata: { displayName: 'Detail Fern' },
+      discovery: null,
     });
   });
 

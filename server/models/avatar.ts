@@ -30,11 +30,26 @@ export interface PaginatedAvatars {
   total: number;
 }
 
+/** What a completed scan contributes to the archive — spec 2026-08-02 section C. */
+export interface ScanUpsertInput {
+  speciesName: string;
+  speciesFamily: string | null;
+  spriteUrl: string;
+  stats: AvatarStats;
+  metadata: Record<string, unknown> | null;
+}
+
 export interface AvatarRepository {
   /** Returns the caller's avatars only (Req 5.5 ownership). Paginated (Req 5.1). */
   listByUser(userId: string, page: number, pageSize: number): Promise<PaginatedAvatars>;
   /** Returns a single avatar iff it belongs to the caller, else null. */
   getOwned(userId: string, avatarId: string): Promise<AvatarRecord | null>;
+  /** Creates the caller's record for a species, or returns the existing one.
+   *  De-duplicates on the sanitized species name (Req UC4 collection rules). */
+  upsertFromScan(
+    userId: string,
+    input: ScanUpsertInput
+  ): Promise<{ record: AvatarRecord; created: boolean }>;
   /** Creates any missing, caller-owned records in the fixed demo set. */
   ensureDemoSet(userId: string): Promise<PaginatedAvatars>;
   /** Removes only verified caller-owned records in the fixed demo set. */
