@@ -44,10 +44,20 @@ export default function ArchivePage() {
 
   return (
     <main className="screen screen-scrollable flex flex-col">
+      {/*
+        Pinned to the viewport, not to the screen box. `.screen` sets only
+        min-height, so on a scrollable screen its used height grows with the
+        content — and `h-full` grew with it, handing object-fit: cover a box
+        taller than the viewport to fill. Measured on the archive: a 500x813
+        viewport gave the image a 500x1288 box, magnifying the painted art
+        1.26x and more as plants are added, which reads as a stretched
+        background. A fixed backdrop also stays put while the shelves scroll
+        over it, instead of scrolling away and leaving bare colour.
+      */}
       <img
         src="/img/bg_garden.jpeg"
         alt=""
-        className="absolute inset-0 -z-10 h-full w-full object-cover"
+        className="fixed inset-0 -z-10 h-[100dvh] w-full object-cover"
       />
 
       <div className="safe-top flex items-center justify-between gap-2 px-3">
