@@ -141,7 +141,49 @@ http://localhost:3001
 | `POST` | `/api/auth/request-reset` | none | Send OTP to email/log |
 | `POST` | `/api/auth/verify-reset` | none | Verify OTP and update password |
 | `GET` | `/api/avatar` | Bearer token | Fetch current user's avatars |
+| `POST` | `/api/avatar` | Bearer token | Save a scanned plant into the archive |
 | `POST` | `/api/query/submit` | none | Submit contact/query ticket |
+
+## Saving A Scan (`POST /api/avatar`)
+
+What the Scan screen sends after a pipeline run finishes, via
+`createAvatar()` in `client/src/services/sproutApi.ts`:
+
+```json
+{
+  "speciesName": "Monstera deliciosa",
+  "speciesFamily": "Araceae",
+  "spriteDataUrl": "data:image/png;base64,...",
+  "photoDataUrl": "data:image/jpeg;base64,...",
+  "source": "mobile",
+  "metadata": {
+    "taxonomy": { "Family": "Araceae" },
+    "commonNames": ["Swiss cheese plant"],
+    "description": "...",
+    "confidence": 0.91
+  }
+}
+```
+
+- **`source` decides how long the record lives**, and is required — there is no
+  default, because a mislabelled client must not be able to quietly grant an
+  upload permanence. `mobile` is an IRL camera scan and is kept; `web` is a file
+  upload and becomes the 24 h `TempAvatar` of requirements.md 6.12. The single
+  rule lives in `server/data/capture-source.ts`; the archive shows it as an
+  "IRL Scan" / "Web Upload" badge.
+- The finished 192×192 PNG travels on the record itself — there is no object
+  store wired up — so the sprite must be a `data:image/png;base64,` URL under
+  512 000 characters. Anything else is a 400.
+- `photoDataUrl` is optional: a downscaled JPEG of the original photo, under
+  300 000 characters, stored as `metadata.photoUrl` and shown on the specimen
+  card. The demo plants use the same slot, pointing at files in
+  `client/public/plants/` instead.
+- Battle stats are **not** accepted from the client: the server derives them
+  from the species name and family (`services/avatar-stats.ts`), so the same
+  species always yields the same creature.
+- Unlisted `metadata` keys are stripped.
+- Responds `201` with the created `AvatarRecord` (plus `battleEligible`), the
+  same shape `GET /api/avatar` returns. Capped at 30 saves per account per hour.
 
 ## Password Reset Flow
 

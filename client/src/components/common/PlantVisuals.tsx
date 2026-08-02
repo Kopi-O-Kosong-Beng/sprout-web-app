@@ -26,6 +26,14 @@ export interface PlantAvatarData {
   speed: number;
   color: string;
   spriteUrl?: string;
+  /** The photograph the sprite was drawn from, when the record carries one. */
+  photoUrl?: string;
+  /** 'mobile' is an IRL camera scan and is kept; 'web' is an upload, 24h TTL. */
+  source?: 'mobile' | 'web';
+  /** When a web upload runs out, ISO-8601. Null on anything that is kept. */
+  expiresAt?: string | null;
+  /** False once a temporary record has expired — the server's own verdict. */
+  battleEligible?: boolean;
   isDemo?: boolean;
   /** UC4 detail fields; optional because older records may not carry them. */
   habitat?: string;
@@ -161,6 +169,37 @@ export function BotAvatar({
       aria-label={`${name} avatar`}
     >
       <PottedSprite spriteUrl={spriteUrl} />
+    </span>
+  );
+}
+
+/**
+ * How a plant was captured, said plainly.
+ *
+ * The record has carried `source` since the archive existed, but nothing ever
+ * showed it, so the one visible consequence — a web upload quietly dropping out
+ * of the battle picker a day later — looked like a bug. The badge and the
+ * lifetime come from the same field, so what this says is what will happen.
+ */
+export function CaptureBadge({
+  source,
+  className = '',
+}: {
+  source?: 'mobile' | 'web';
+  className?: string;
+}) {
+  if (!source) return null;
+  const isUpload = source === 'web';
+
+  return (
+    <span
+      className={`font-pixel inline-block border-2 border-black px-1 text-[7px] ${className}`}
+      style={{
+        background: isUpload ? 'var(--color-hp-mid)' : 'var(--color-hp-high)',
+        color: isUpload ? '#1a1a1a' : '#fff',
+      }}
+    >
+      {isUpload ? 'Web Upload' : 'IRL Scan'}
     </span>
   );
 }

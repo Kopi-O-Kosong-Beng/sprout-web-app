@@ -417,6 +417,96 @@ describe('ArchivePage species detail (UC4 step 3)', () => {
     expect(screen.getByText('Least Concern')).toBeInTheDocument();
   });
 
+  it('labels an IRL scan and says nothing about expiry', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      ...collectedPage,
+      items: [avatar({ source: 'mobile', isTemporary: false, expiresAt: null })],
+      total: 1,
+    });
+    renderArchive();
+
+    expect(await screen.findAllByText('IRL Scan')).not.toHaveLength(0);
+    expect(screen.queryByText('Web Upload')).not.toBeInTheDocument();
+    expect(screen.queryByText(/expires in/i)).not.toBeInTheDocument();
+  });
+
+  it('labels a live web upload with the time it has left', async () => {
+    const expiresAt = new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString();
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      ...collectedPage,
+      items: [
+        avatar({
+          source: 'web',
+          isTemporary: true,
+          expiresAt,
+          battleEligible: true,
+        }),
+      ],
+      total: 1,
+    });
+    renderArchive();
+
+    expect(await screen.findAllByText('Web Upload')).not.toHaveLength(0);
+    expect(screen.getByText('Expires in 5 hours')).toBeInTheDocument();
+  });
+
+  // Expiry is the server's call: an expired upload drops out of the battle
+  // picker, and the card has to say why rather than leaving it a mystery.
+  it('marks an expired web upload as unbattleable', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      ...collectedPage,
+      items: [
+        avatar({
+          source: 'web',
+          isTemporary: true,
+          expiresAt: '2020-01-01T00:00:00.000Z',
+          battleEligible: false,
+        }),
+      ],
+      total: 1,
+    });
+    renderArchive();
+
+    expect(
+      await screen.findByText('Expired — can no longer battle')
+    ).toBeInTheDocument();
+  });
+
+  it('shows the photograph a hand-drawn sprite came from', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      ...collectedPage,
+      items: [
+        avatar({
+          speciesName: 'Monstera deliciosa',
+          spriteUrl: '/plants/SPRITE_Monstera.png',
+          metadata: {
+            displayName: 'Monstera deliciosa',
+            photoUrl: '/plants/IMG_Monstera.jpg',
+          },
+        }),
+      ],
+      total: 1,
+    });
+    renderArchive();
+
+    const photo = await screen.findByAltText('Photograph of Monstera deliciosa');
+    expect(photo).toHaveAttribute('src', '/plants/IMG_Monstera.jpg');
+  });
+
+  // A scanned plant keeps no photo, and a demo plant whose art has not been
+  // added yet must not leave a broken image on the card.
+  it('omits the photograph for records without one', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      ...collectedPage,
+      items: [avatar()],
+      total: 1,
+    });
+    renderArchive();
+
+    await screen.findByRole('button', { name: /battle with fern ward/i });
+    expect(screen.queryByText('Photographed')).not.toBeInTheDocument();
+  });
+
   it('omits the facts list entirely for records without those fields', async () => {
     apiMocks.listOwnedAvatars.mockResolvedValue({
       ...collectedPage,

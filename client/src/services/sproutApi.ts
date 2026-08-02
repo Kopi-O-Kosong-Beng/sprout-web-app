@@ -238,6 +238,36 @@ export async function listOwnedAvatars(
   return data;
 }
 
+/** What the Scan screen banks after a run: the identification, the finished
+ *  sprite, and the details worth keeping. Stats are the server's to derive. */
+export interface NewAvatarInput {
+  speciesName: string;
+  speciesFamily?: string | null;
+  /** The finished 192x192 PNG, as `data:image/png;base64,...`. */
+  spriteDataUrl: string;
+  /** The photo it was made from, downscaled, as `data:image/jpeg;base64,...`. */
+  photoDataUrl?: string;
+  /**
+   * How it was captured, which decides how long it lives: `mobile` is an IRL
+   * camera scan and is kept, `web` is a file upload and expires in 24 hours.
+   */
+  source: 'mobile' | 'web';
+  metadata?: {
+    taxonomy?: Record<string, string>;
+    commonNames?: string[];
+    description?: string;
+    confidence?: number;
+  };
+}
+
+/** Saves a scanned plant into the caller's archive (POST /api/avatar → 201). */
+export async function createAvatar(
+  input: NewAvatarInput
+): Promise<AvatarRecord> {
+  const { data } = await apiClient.post<AvatarRecord>('/api/avatar', input);
+  return data;
+}
+
 export async function setDemoAvatars(
   enabled: boolean
 ): Promise<PaginatedAvatars> {
