@@ -1,0 +1,29 @@
+# Demo plant art
+
+Hand-made art for the five demo plants, served by the client at `/plants/`.
+Each plant is a pair: the sprite that stands in the pot on the shelf, and the
+photograph it was drawn from, which the archive shows on the specimen card.
+
+| Plant | Sprite | Photo |
+| --- | --- | --- |
+| Helianthus annuus (sunflower) | `SPRITE_Helianthus.png` | `IMG_Helianthus.jpg` |
+| Quercus robur (English oak) | `SPRITE_Quercus.png` | `IMG_Quercus.jpg` |
+| Monstera deliciosa (swiss cheese plant) | `SPRITE_Monstera.png` | `IMG_Monstera.jpg` |
+| Ficus lyrata (fiddle-leaf fig) | `SPRITE_Ficus.png` | `IMG_Ficus.jpg` |
+| Amanita muscaria (fly agaric) | `SPRITE_Amanita.png` | `IMG_Amanita.jpg` |
+
+The filenames are matched exactly, not guessed at. If a file you add uses a
+different extension — or you swap in a different species for one of the five —
+edit that template's `spriteFile` / `photoFile` in
+`server/data/demo-avatar-templates.ts`, which is the only place they are named.
+
+Sprites should be PNG with a transparent background so the pot shows through
+behind the feet; 192×192 matches what the scan pipeline produces, and the
+archive scales whatever it gets. A missing file is not fatal: the plant renders
+as an empty pot, and the specimen card simply omits the photo.
+
+The stats, species and habitat text for each plant live beside the filenames in
+`demo-avatar-templates.ts` — art here, numbers there.
+
+Thornback, the battle opponent, is not hand-made: it is rendered by
+`npm run sprites:generate -w server` into `client/public/sprites/`.

@@ -14,9 +14,12 @@ import {
   demoAvatarId,
   type DemoAvatarTemplate,
 } from '../data/demo-avatar-templates';
+import { retentionForSource } from '../data/capture-source';
+import { plantAssetUrl } from '../data/sprite-catalog';
 import type {
   AvatarRecord,
   AvatarRepository,
+  NewAvatarInput,
   PaginatedAvatars,
 } from '../models/avatar';
 import {
@@ -125,7 +128,12 @@ function toRecord(snapshot: FirestoreSnapshotLike): AvatarRecord {
 }
 
 function demoSpriteUrl(template: DemoAvatarTemplate): string {
-  return `/static/sprites/${template.speciesName.toLowerCase().replace(/\s+/g, '-')}.png`;
+  return plantAssetUrl(template.spriteFile);
+}
+
+/** The photograph the sprite was drawn from, shown on the specimen card. */
+function demoPhotoUrl(template: DemoAvatarTemplate): string {
+  return plantAssetUrl(template.photoFile);
 }
 
 function buildDemoAvatarRecord(
@@ -141,10 +149,7 @@ function buildDemoAvatarRecord(
     spriteUrl: demoSpriteUrl(template),
     discoveredAt: now.toISOString(),
     source: template.source,
-    isTemporary: template.isTemporary,
-    expiresAt: template.isTemporary
-      ? new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()
-      : null,
+    ...retentionForSource(template.source, now),
     stats: template.stats,
     metadata: {
       ...template.metadata,
@@ -153,6 +158,7 @@ function buildDemoAvatarRecord(
       templateId: template.id,
       displayName: template.speciesName,
       presentationKey: `demo:${template.id}`,
+      photoUrl: demoPhotoUrl(template),
     },
   };
 }
@@ -220,10 +226,11 @@ function isExactDemoRecord(
     data!.speciesFamily === template.speciesFamily &&
     data!.spriteUrl === demoSpriteUrl(template) &&
     data!.source === template.source &&
-    data!.isTemporary === template.isTemporary &&
+    data!.isTemporary === retentionForSource(template.source).isTemporary &&
     hasMatchingValue(data!.stats, template.stats) &&
     metadata.displayName === template.speciesName &&
     metadata.presentationKey === `demo:${template.id}` &&
+    metadata.photoUrl === demoPhotoUrl(template) &&
     Object.entries(template.metadata).every(([key, value]) =>
       hasMatchingValue(metadata[key], value)
     )
@@ -274,6 +281,34 @@ const firestoreAvatarRepository: AvatarRepository = {
     return toRecord(doc);
   },
 
+  async createForUser(
+    userId: string,
+    input: NewAvatarInput,
+    now: Date = new Date()
+  ): Promise<AvatarRecord> {
+    const db = getDb();
+    const ref = db.collection('avatar_records').doc();
+    const record: AvatarRecord = {
+      id: ref.id,
+      userId,
+      speciesName: input.speciesName,
+      speciesFamily: input.speciesFamily,
+      spriteUrl: input.spriteUrl,
+      discoveredAt: now.toISOString(),
+      source: input.source,
+      isTemporary: input.isTemporary,
+      expiresAt: input.expiresAt,
+      stats: { ...input.stats },
+      metadata: input.metadata,
+    };
+
+    // The document stores everything but the id, which is the document key —
+    // toRecord() reads it back off the snapshot.
+    const { id: _id, ...document } = record;
+    await ref.create(document);
+    return record;
+  },
+
   async ensureDemoSet(userId: string): Promise<PaginatedAvatars> {
     const db = getDb();
     const refs = DEMO_AVATAR_TEMPLATES.map((template) =>
@@ -289,8 +324,20 @@ const firestoreAvatarRepository: AvatarRepository = {
           transaction.create(document.ref, buildDemoAvatarRecord(userId, template, now));
           return;
         }
-        if (!isExactDemoRecord(document.data(), userId, template)) {
+        // Anything that is not this user's demo record for this template is
+        // someone else's data at the same id — never overwrite it.
+        if (!isVerifiedDemoRecord(document.data(), userId, template)) {
           throw demoAvatarConflictError();
+        }
+        // It is a demo record, but the template moved under it — the sprite URL
+        // changed when the pre-made set landed, for instance. Every field here
+        // is ours to own, so refresh it rather than making the user toggle the
+        // set off and on to pick the new one up.
+        if (!isExactDemoRecord(document.data(), userId, template)) {
+          transaction.set(
+            document.ref,
+            buildDemoAvatarRecord(userId, template, now)
+          );
         }
       });
     });

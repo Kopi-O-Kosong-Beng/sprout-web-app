@@ -23,6 +23,19 @@ export interface AvatarRecord {
   metadata: Record<string, unknown> | null;
 }
 
+/** A record the caller is asking us to create — everything but id and userId,
+ *  which the repository owns, and discoveredAt, which is the write time. */
+export interface NewAvatarInput {
+  speciesName: string;
+  speciesFamily: string | null;
+  spriteUrl: string;
+  source: 'mobile' | 'web';
+  isTemporary: boolean;
+  expiresAt: string | null;
+  stats: AvatarStats;
+  metadata: Record<string, unknown> | null;
+}
+
 export interface PaginatedAvatars {
   items: AvatarRecord[];
   page: number;
@@ -35,6 +48,12 @@ export interface AvatarRepository {
   listByUser(userId: string, page: number, pageSize: number): Promise<PaginatedAvatars>;
   /** Returns a single avatar iff it belongs to the caller, else null. */
   getOwned(userId: string, avatarId: string): Promise<AvatarRecord | null>;
+  /** Persists a newly scanned avatar owned by the caller (Req 6.12). */
+  createForUser(
+    userId: string,
+    input: NewAvatarInput,
+    now?: Date
+  ): Promise<AvatarRecord>;
   /** Creates any missing, caller-owned records in the fixed demo set. */
   ensureDemoSet(userId: string): Promise<PaginatedAvatars>;
   /** Removes only verified caller-owned records in the fixed demo set. */

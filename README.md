@@ -231,6 +231,29 @@ See the database anytime:
 npm run inspect:firestore -w server
 ```
 
+### Plant art
+
+The five demo plants use hand-made art in `client/public/plants/` — a
+`SPRITE_<Name>.png` creature and the `IMG_<Name>.jpg` photo it was drawn from,
+which the archive shows on the specimen card. The exact filenames are listed in
+the README there and named in `server/data/demo-avatar-templates.ts`, alongside
+each plant's stats.
+
+Thornback, the battle opponent, is rendered by the pipeline instead. Run this
+once and commit the PNG so every deploy serves the same opponent:
+
+```bash
+npm run sprites:generate -w server                     # anything still missing
+npm run sprites:generate -w server -- --force          # re-render everything
+npm run sprites:generate -w server -- --only=thornback # just one
+```
+
+This needs an image-model key in `server/.env` — `FLUX_API_KEY` (or
+`NVIDIA_API_KEY`) and/or `GEMINI_API_KEY`, ideally with `REMOVE_BG_API_KEY` for
+a transparent cutout. Without one the script stops rather than commit the
+pipeline's placeholder drawing. Missing sprites are not fatal: an avatar with no
+sprite file renders as an empty pot.
+
 ## 3. Try the API
 
 **Easiest:** open `test.html` in this repo with VS Code's *Live Server* extension (right-click → "Open with Live Server"). It's a real form that submits a query ticket to your local backend and shows the response.

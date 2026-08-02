@@ -281,7 +281,7 @@ describe('verified PVE battle API', () => {
       userId,
       avatarId,
       player: { name: 'Sunbeam' },
-      bot: { spriteUrl: '/static/sprites/thornback.png' },
+      bot: { spriteUrl: '/sprites/thornback.png' },
       rngSeed: expect.any(Number),
       rngStep: 1,
       pendingBotMoveId: expect.any(String),
@@ -408,7 +408,7 @@ describe('verified PVE battle API', () => {
 
     expect(rawSession).toMatchObject({
       npcPresetVersion: 'thornback-v1',
-      bot: { spriteUrl: '/static/sprites/thornback.png' },
+      bot: { spriteUrl: '/sprites/thornback.png' },
     });
 
     const read = await request(app)
