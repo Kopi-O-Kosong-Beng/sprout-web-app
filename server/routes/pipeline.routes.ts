@@ -17,7 +17,7 @@
 import { Router, json } from 'express';
 import type { Request, Response } from 'express';
 import authMiddleware from '../middleware/auth.middleware';
-import { identifyPlant } from '../pipeline/stages/identify';
+import { identifyPlant, isMockIdentification } from '../pipeline/stages/identify';
 import { craftPromptTiered } from '../pipeline/stages/promptCraft';
 import { generateSprite } from '../pipeline/stages/generate';
 import { removeBackgroundSafe } from '../pipeline/stages/removeBg';
@@ -88,9 +88,22 @@ router.post('/run-stream', async (req: Request, res: Response) => {
 
     let idSuccess = true;
     let idMsg = '';
+    /*
+     * Whether `identification.name` names a real species, which decides whether
+     * the scan may share the canonical (cross-user) sprite and dex record.
+     *
+     * Two distinct ways it can be a placeholder:
+     *  - identification failed, and the name below is a literal stand-in;
+     *  - identifyPlant took its keyless mock path, which reports high
+     *    confidence for a hardcoded species on every photo. That case looks
+     *    like success from here, so it is asked about directly rather than
+     *    inferred from the returned name.
+     */
+    let identifiedSpecies = !isMockIdentification(serverEnv.plantApiKey);
 
     if ('error' in identification || identification.needsName) {
       idSuccess = false;
+      identifiedSpecies = false;
       idMsg = identification.error || 'Plant identification low confidence';
       identification = {
         name: customName || 'Unknown Plant Species',
@@ -116,6 +129,9 @@ router.post('/run-stream', async (req: Request, res: Response) => {
         probability: 1,
       };
       idSuccess = true;
+      // A name the player typed is a real species claim, not a placeholder, so
+      // it goes back to being canonical even in mock mode.
+      identifiedSpecies = true;
       idMsg = `Species override applied: "${overrideName}"`;
     }
 
@@ -249,6 +265,10 @@ router.post('/run-stream', async (req: Request, res: Response) => {
         step: '2b',
         rawSpriteB64: rawSpriteBuffer.toString('base64'),
         plantName: identification.name,
+        // Echoed back on /run-stage2c: only this half of the run can tell a
+        // real identification from a placeholder, and the continuation is a
+        // separate request that receives nothing but the name.
+        identified: identifiedSpecies,
       });
       res.end();
       return;
@@ -259,7 +279,8 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       rawSpriteBuffer,
       identification,
       deadline,
-      req.user!.uid
+      req.user!.uid,
+      identifiedSpecies
     );
 
     sendEvent({
@@ -297,6 +318,22 @@ router.post('/run-stage2c', async (req: Request, res: Response) => {
     const rawSpriteBuffer = Buffer.from(cleanB64, 'base64');
     const speciesName = plantName || 'Plant Monster';
 
+    /*
+     * This leg receives a name and nothing else, so it cannot re-derive whether
+     * that name is a real identification. The first leg can, and puts the
+     * answer on `awaiting_stage2c_confirmation` for the client to echo back.
+     *
+     * When it is absent (an older client), fall back to what the server *can*
+     * still tell on its own: with no Plant.id key configured, every name this
+     * server produced came from the mock path. That fallback can only be
+     * conservative — it may scope a genuinely typed name to one user, which
+     * costs a shared sprite, never a wrong one.
+     */
+    const identifiedSpecies =
+      typeof req.body.identified === 'boolean'
+        ? req.body.identified
+        : !isMockIdentification(serverEnv.plantApiKey);
+
     // Resumed at stage 2c after the human gate, so this leg gets its own
     // budget — the wall-clock spent waiting for the user isn't the pipeline's.
     const deadline = createDeadline();
@@ -311,7 +348,8 @@ router.post('/run-stage2c', async (req: Request, res: Response) => {
       rawSpriteBuffer,
       identification,
       deadline,
-      req.user!.uid
+      req.user!.uid,
+      identifiedSpecies
     );
 
     sendEvent({
@@ -345,7 +383,9 @@ async function runStage2cOnward(
   rawSpriteBuffer: Buffer,
   identification: { name: string; taxonomy?: Record<string, string> },
   deadline: ReturnType<typeof createDeadline>,
-  userId: string
+  userId: string,
+  /** False when identification.name is a placeholder — see persistScan. */
+  identifiedSpecies: boolean
 ) {
   // Step 2c: Background Removal
   sendEvent({
@@ -475,7 +515,8 @@ async function runStage2cOnward(
     userId,
     identification.name,
     identification.taxonomy?.family ?? null,
-    finishedPngBuffer
+    finishedPngBuffer,
+    { identified: identifiedSpecies }
   );
 
   return {

@@ -197,3 +197,46 @@ describe('pipeline complete event discovery block', () => {
     expect(complete.discovery).toBeNull();
   });
 });
+
+describe('pipeline complete event species scoping', () => {
+  it('keeps a real identification canonical across users', async () => {
+    await runScan(SCANNER);
+    await runScan(FINDER);
+
+    expect(mockSpriteSaves).toEqual(['fern', 'fern']);
+  });
+
+  it('scopes a failed identification to the scanning user', async () => {
+    mockIdentifyPlant.mockResolvedValue({ error: 'Not identified as a plant.', needsName: true });
+
+    await runScan(SCANNER);
+    await runScan(FINDER);
+
+    expect(mockSpriteSaves[0]).toContain('unknown_plant_species__u_');
+    expect(mockSpriteSaves[0]).not.toBe(mockSpriteSaves[1]);
+  });
+
+  it('scopes the keyless mock identification to the scanning user', async () => {
+    // The mock path reports high confidence for one hardcoded species on every
+    // photo, so from the route it is indistinguishable from a real success —
+    // except by the absence of the key that selects it.
+    delete process.env.PLANT_API_KEY;
+    delete process.env.PLANTID_API_KEY;
+
+    await runScan(SCANNER);
+    await runScan(FINDER);
+
+    expect(mockSpriteSaves[0]).toContain('fern__u_');
+    expect(mockSpriteSaves[0]).not.toBe(mockSpriteSaves[1]);
+  });
+
+  it('treats a name the player typed as a real species even in mock mode', async () => {
+    delete process.env.PLANT_API_KEY;
+    delete process.env.PLANTID_API_KEY;
+
+    await runScan(SCANNER, { customName: 'Monstera deliciosa' });
+    await runScan(FINDER, { customName: 'Monstera deliciosa' });
+
+    expect(mockSpriteSaves).toEqual(['monstera_deliciosa', 'monstera_deliciosa']);
+  });
+});

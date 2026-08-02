@@ -21,6 +21,14 @@ export interface ScanPersistenceDependencies {
   resolveDiscovery: DiscoveryResolver;
 }
 
+export interface ScanPersistOptions {
+  /** False when the species name is a placeholder rather than a real
+   *  identification — a failed Plant.id call, or the keyless mock path. Those
+   *  scans get a per-user species key so they never share the canonical sprite
+   *  object with a different user's plant. */
+  identified: boolean;
+}
+
 export interface ScanPersistResult {
   saved: boolean;
   avatarId: string | null;
@@ -29,12 +37,38 @@ export interface ScanPersistResult {
   discovery: PublicDiscovery | null;
 }
 
+/** Scopes a species key to one user.
+ *
+ *  Two users' "Unknown Plant Species" are not the same plant, but sprite
+ *  storage is canonical per species: the second scanner would silently inherit
+ *  the first scanner's sprite. Same for the mock identification path, which
+ *  answers "Polygala calcarea" for every photo when PLANT_API_KEY is absent —
+ *  a showcase run without a key would hand every user the first scanner's
+ *  plant. Scoping the key to the scanner keeps those scans apart.
+ *
+ *  Two details make the derived key safe in all four of its roles (dex document
+ *  id, storage path segment, archive de-duplication key, stats hash input):
+ *
+ *   - sanitizeSpeciesKey collapses runs of underscores, so a canonical key can
+ *     never contain '__'. That makes '__u_' a separator no real species name
+ *     can forge, however it is spelled.
+ *   - The uid is hex-encoded rather than sanitized. sanitizeSpeciesKey
+ *     lowercases, and Firebase UIDs are case-sensitive, so two distinct users
+ *     could otherwise fold onto one key and share a sprite again. Hex is
+ *     injective, and alphanumeric — valid as both a Firestore document id and a
+ *     storage path segment.
+ */
+export function scopeSpeciesKeyToUser(speciesKey: string, userId: string): string {
+  return `${speciesKey}__u_${Buffer.from(userId, 'utf8').toString('hex')}`;
+}
+
 export async function persistScan(
   dependencies: ScanPersistenceDependencies,
   userId: string,
   speciesName: string,
   speciesFamily: string | null,
-  png: Buffer
+  png: Buffer,
+  options: ScanPersistOptions
 ): Promise<ScanPersistResult> {
   const failure = (saveError: string): ScanPersistResult => ({
     saved: false,
@@ -51,10 +85,13 @@ export async function persistScan(
     // to come back as saved: false, not an uncaught exception out of
     // runStage2cOnward. The empty-key behavior below is unchanged: it still
     // returns before any dependency I/O runs.
-    const speciesKey = sanitizeSpeciesKey(speciesName);
-    if (!speciesKey) {
+    const canonicalKey = sanitizeSpeciesKey(speciesName);
+    if (!canonicalKey) {
       return failure('Identified species name has no usable characters');
     }
+    const speciesKey = options.identified
+      ? canonicalKey
+      : scopeSpeciesKeyToUser(canonicalKey, userId);
 
     // Pure computation, resolved ahead of the actual I/O calls so a bug here
     // is legible as its own thing rather than tangled up with the Firestore

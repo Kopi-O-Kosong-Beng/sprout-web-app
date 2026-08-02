@@ -19,6 +19,20 @@ export interface IdentificationError {
 }
 
 /**
+ * True when identifyPlant will take its mock path for this key.
+ *
+ * Exported so callers can tell a *real* identification from the hardcoded
+ * stand-in below without inspecting the species name it returns. Callers need
+ * that distinction: the mock answers "Polygala calcarea" for every photo, so
+ * treating it as a genuine species would make two different users' plants share
+ * one canonical dex record and one canonical sprite. Deriving it from the same
+ * condition identifyPlant itself branches on keeps the two from drifting.
+ */
+export function isMockIdentification(apiKey: string | null | undefined): boolean {
+  return !apiKey || apiKey === "MOCK_KEY";
+}
+
+/**
  * Step 3 / §2: identifyPlant
  * Plant.id v3 identification + flattening + is-plant check.
  */
@@ -27,7 +41,7 @@ export async function identifyPlant(
   apiKey: string,
   deadline?: Deadline
 ): Promise<IdentificationResult | IdentificationError> {
-  if (!apiKey || apiKey === "MOCK_KEY") {
+  if (isMockIdentification(apiKey)) {
     // Graceful mock mode if API key is mock or missing during dry runs
     return {
       name: "Polygala calcarea",
