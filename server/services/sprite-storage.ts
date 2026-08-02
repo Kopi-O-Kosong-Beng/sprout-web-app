@@ -50,6 +50,34 @@ function downloadUrl(bucketName: string, objectName: string, token: string): str
   return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encoded}?alt=media&token=${token}`;
 }
 
+/** Writes the PNG and stamps `token` onto the object's metadata.
+ *
+ *  `createOnly` picks the precondition. It must be false whenever the object is
+ *  already known to exist: `ifGenerationMatch: 0` means "only if there is no
+ *  live generation", so against an existing object it cannot do anything but
+ *  fail with 412 — which is precisely how the token-less recovery path below
+ *  used to end up returning a token it had never managed to store. */
+async function writeSprite(
+  file: SpriteStorageFile,
+  png: Buffer,
+  token: string,
+  createOnly: boolean
+): Promise<void> {
+  await file.save(png, {
+    resumable: false,
+    contentType: 'image/png',
+    metadata: {
+      cacheControl: 'public, max-age=31536000, immutable',
+      metadata: { firebaseStorageDownloadTokens: token },
+    },
+    ...(createOnly
+      ? // Fail instead of clobbering an object another concurrent request
+        // already created for the same species.
+        { preconditionOpts: { ifGenerationMatch: 0 } }
+      : {}),
+  });
+}
+
 export function createFirebaseSpriteStorage(
   dependencies: SpriteStorageDependencies = defaultSpriteStorageDependencies
 ): SpriteStorage {
@@ -62,28 +90,29 @@ export function createFirebaseSpriteStorage(
       const objectName = objectNameFor(speciesKey);
       const file = dependencies.createFile(bucketName, objectName);
 
+      /** Stamps our own token onto an object that already exists but has none.
+       *  Unconditional by necessity — see writeSprite. The returned URL then
+       *  carries a token that is genuinely on the object, not one we invented
+       *  and never wrote. */
+      const rewriteTokenlessObject = async (): Promise<string> => {
+        const token = dependencies.createToken();
+        await writeSprite(file, png, token, false);
+        return downloadUrl(bucketName, objectName, token);
+      };
+
       const [exists] = await file.exists();
       if (exists) {
         const [metadata] = await file.getMetadata();
         const existingToken = metadata.metadata?.firebaseStorageDownloadTokens;
-        // A token-less object cannot be served over the download URL, so fall
-        // through and rewrite it rather than handing back a dead link.
         if (existingToken) return downloadUrl(bucketName, objectName, existingToken);
+        // A token-less object cannot be served over the download URL. Rewrite
+        // it rather than handing back a dead link.
+        return rewriteTokenlessObject();
       }
 
       const token = dependencies.createToken();
       try {
-        await file.save(png, {
-          resumable: false,
-          contentType: 'image/png',
-          metadata: {
-            cacheControl: 'public, max-age=31536000, immutable',
-            metadata: { firebaseStorageDownloadTokens: token },
-          },
-          // Create-only: fail instead of clobbering an object another
-          // concurrent request already created for the same species.
-          preconditionOpts: { ifGenerationMatch: 0 },
-        });
+        await writeSprite(file, png, token, true);
       } catch (err) {
         if ((err as { code?: number }).code === 412) {
           // Lost the create race. The other writer's object is now canonical;
@@ -91,9 +120,9 @@ export function createFirebaseSpriteStorage(
           const [metadata] = await file.getMetadata();
           const winningToken = metadata.metadata?.firebaseStorageDownloadTokens;
           if (winningToken) return downloadUrl(bucketName, objectName, winningToken);
-          // Same token-less situation as above: nothing durable to serve, so
-          // fall back to our own token rather than surface a 404 for certain.
-          return downloadUrl(bucketName, objectName, token);
+          // The winner stored an object with no token — dead for every caller,
+          // not just this one. Same repair as above.
+          return rewriteTokenlessObject();
         }
         throw err;
       }
