@@ -115,8 +115,20 @@ function fitWithin(text: string, max: number): { text: string; truncated: boolea
 
   const clipped = text.slice(0, max);
 
+  /*
+   * Prefer a sentence break, but only a late one.
+   *
+   * The threshold used to be 50% of the budget, which meant a description whose
+   * last full stop fell early lost everything after it — observed in practice
+   * cutting an 800-character allowance down to a 652-character prompt, throwing
+   * away ~150 characters of creature description to avoid ending mid-sentence.
+   * A clause fragment costs the render far less than a missing limb does.
+   *
+   * At 92% the sentence break is taken only when it is nearly free; otherwise a
+   * word break keeps everything but the final partial word.
+   */
   const lastSentence = Math.max(clipped.lastIndexOf(". "), clipped.lastIndexOf("; "));
-  if (lastSentence > max * 0.5) {
+  if (lastSentence > max * 0.92) {
     return { text: clipped.slice(0, lastSentence), truncated: true };
   }
 
@@ -188,9 +200,19 @@ export function stripNegativeTerms(prompt: string): {
 }
 
 /**
- * Builds the final render prompt: scrubbed description + style targets, plus an
- * avoid-clause only where the model will act on one, trimmed to the provider's
- * hard character limit.
+ * Builds the final render prompt, trimmed to the provider's hard limit.
+ *
+ * Order is: avoid-clause, then the scrubbed description, then the style targets.
+ *
+ * The avoid-clause leads because an instruction-following image model reads the
+ * prompt as instructions rather than as a bag of weighted tokens, and a
+ * constraint stated after the thing it constrains has already been drawn in the
+ * model's head. Leading with it makes the exclusions a frame for everything that
+ * follows.
+ *
+ * This only changes the Gemini path. Flux receives no avoid-clause at all — see
+ * negativeClauseFor — so its prompt is unchanged by the ordering, which matters
+ * because IMAGE_PROVIDER defaults to flux.
  */
 export function applyStyleScaffold(
   craftedPrompt: string,
@@ -218,7 +240,7 @@ export function applyStyleScaffold(
     truncated = fitted.truncated;
   }
 
-  const joined = [description, style, negative]
+  const joined = [negative, description, style]
     .filter(Boolean)
     .map((p) => p.replace(/\.?\s*$/, ""))
     .join(". ");

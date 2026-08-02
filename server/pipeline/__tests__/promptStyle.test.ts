@@ -154,4 +154,50 @@ describe("Flux's 800-character prompt limit", () => {
     const { truncated } = applyStyleScaffold(LONG, "gemini");
     expect(truncated).toBe(false);
   });
+
+  /**
+   * Trimming used to accept any sentence break past 50% of the budget, so a
+   * description whose last full stop fell early lost everything after it — in
+   * practice an 800-character allowance producing a 652-character prompt. A
+   * clause fragment costs the render less than a missing limb does.
+   */
+  it("[white-box: boundary] uses nearly all of the budget rather than cutting to an early sentence break", () => {
+    // Two sentences: a short one, then a very long one with no internal stop.
+    const earlyStop = `A round mossy creature. ${"a leafy frond curling outward ".repeat(40)}`;
+    const { prompt, truncated } = applyStyleScaffold(earlyStop, "flux");
+    const limit = PROVIDER_PROMPT_LIMIT.flux!;
+
+    expect(truncated).toBe(true);
+    expect(prompt.length).toBeLessThanOrEqual(limit);
+    // The old 50% rule would have collapsed this to the first sentence.
+    expect(prompt.length).toBeGreaterThan(limit * 0.95);
+  });
+});
+
+/**
+ * The avoid-clause leads so the exclusions frame everything after them, rather
+ * than arriving after the model has already read what to draw.
+ */
+describe("clause ordering", () => {
+  const DESC = "A round mossy creature with a leafy crest.";
+
+  it("[black-box: spec] gemini prompts open with the avoid-clause", () => {
+    const { prompt } = applyStyleScaffold(DESC, "gemini");
+    expect(prompt.startsWith("Avoid entirely:")).toBe(true);
+  });
+
+  it("[black-box: spec] description precedes the style targets", () => {
+    const { prompt } = applyStyleScaffold(DESC, "gemini");
+    expect(prompt.indexOf("mossy creature")).toBeLessThan(prompt.indexOf(POSITIVE_STYLE[0]));
+  });
+
+  /**
+   * Flux gets no avoid-clause at all, so ordering cannot change its prompt —
+   * and IMAGE_PROVIDER defaults to flux, which makes this the common path.
+   */
+  it("[black-box: decision-table] flux prompts still open with the description", () => {
+    const { prompt } = applyStyleScaffold(DESC, "flux");
+    expect(prompt.startsWith("A round mossy creature")).toBe(true);
+    expect(prompt).not.toContain("Avoid entirely");
+  });
 });
