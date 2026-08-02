@@ -33,7 +33,11 @@ export async function identifyPlant(
       name: "Polygala calcarea",
       probability: 0.92,
       common_names: ["chalk milkwort", "milkwort"],
-      taxonomy: { Kingdom: "Plantae", Order: "Fabales", Family: "Polygalaceae", Genus: "Polygala" },
+      // Keys must stay lowercase — this must match the Plant.id v3 response shape
+      // (details.taxonomy comes back as { kingdom, order, family, genus, ... }),
+      // since every downstream reader (e.g. pipeline.routes.ts's
+      // identification.taxonomy?.family) reads lowercase keys.
+      taxonomy: { kingdom: "Plantae", order: "Fabales", family: "Polygalaceae", genus: "Polygala" },
       description: "A small perennial plant with vibrant blue flowers.",
       best_light_condition: "Full sun",
       best_soil_type: "Chalky / Alkaline",
