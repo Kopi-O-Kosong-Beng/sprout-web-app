@@ -55,6 +55,7 @@ export function toPlantAvatarData(record: AvatarRecord): PlantAvatarData {
     // UC4 step 3 lists habitat and conservation status among the details.
     // Absent for records whose species metadata predates those fields.
     habitat: metadataString(record.metadata, 'habitat') ?? undefined,
+    description: metadataString(record.metadata, 'description') ?? undefined,
     conservationStatus:
       metadataString(record.metadata, 'conservationStatus') ?? undefined,
   };

@@ -4,6 +4,7 @@ import { isAvatarBattleEligible } from '../data/battle-eligibility';
 import { retentionForSource, type CaptureSource } from '../data/capture-source';
 import type { AvatarRecord, PaginatedAvatars } from '../models/avatar';
 import avatarRepository from '../repositories/avatars';
+import { recordScanDiscovery } from '../services/almanac.service';
 import { deriveAvatarStats } from '../services/avatar-stats';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -66,6 +67,27 @@ export const handleGetAvatar: RequestHandler = async (req, res, next) => {
   }
 };
 
+/* The scan's metadata has been through the route's Joi schema, so these only
+ * narrow what the schema already allows — they are not validation. */
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function asStringMap(value: unknown): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string'
+    )
+  );
+}
+
 /** Body of POST /api/avatar, after the route's Joi schema has run. */
 interface CreateAvatarBody {
   speciesName: string;
@@ -109,7 +131,45 @@ export const handleCreateAvatar: RequestHandler = async (req, res, next) => {
       now
     );
 
-    res.status(201).json(serializeAvatar(avatar, now));
+    // The almanac is a side effect of collecting, not a condition of it. The
+    // archive write has already committed here, so a failure to tally the
+    // discovery is logged and swallowed — losing a count is not worth telling
+    // a player their plant was not saved when it was.
+    let discovery: Awaited<ReturnType<typeof recordScanDiscovery>> = null;
+    try {
+      const scanMetadata = body.metadata ?? {};
+      discovery = await recordScanDiscovery({
+        speciesName: avatar.speciesName,
+        userId: avatar.userId,
+        avatarId: avatar.id,
+        photoUrl: body.photoDataUrl ?? null,
+        discoveredAt: avatar.discoveredAt,
+        // Snapshotted onto the discovery so the almanac can show the creature
+        // and its record without ever reading this player's avatar document.
+        spriteUrl: avatar.spriteUrl,
+        stats: avatar.stats,
+        description: asString(scanMetadata.description),
+        commonNames: asStringArray(scanMetadata.commonNames),
+        taxonomy: asStringMap(scanMetadata.taxonomy),
+        confidence:
+          typeof scanMetadata.confidence === 'number' ? scanMetadata.confidence : null,
+      });
+    } catch (err) {
+      console.error('[almanac] discovery not recorded:', err);
+    }
+
+    res.status(201).json({
+      ...serializeAvatar(avatar, now),
+      // Present only when the species is one of the almanac's 200, so the Scan
+      // screen can say "first discovery" without asking a second question.
+      almanac: discovery
+        ? {
+            speciesId: discovery.species.id,
+            commonName: discovery.species.commonName,
+            firstDiscovery: discovery.firstDiscovery,
+          }
+        : null,
+    });
   } catch (err) {
     next(err);
   }

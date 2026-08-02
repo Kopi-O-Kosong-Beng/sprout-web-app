@@ -231,6 +231,23 @@ See the database anytime:
 npm run inspect:firestore -w server
 ```
 
+### The almanac taxonomy
+
+The landing page and the admin dashboard share a fixed list of 200 Singapore
+flowering plants, in `server/data/almanac-taxonomy.json`. It is derived from:
+
+> Chong, K. Y., Tan, H. T. W. & Corlett, R. T. (2009). *A Checklist of the Total
+> Vascular Plant Flora of Singapore: Native, Naturalised and Cultivated
+> Species.* Raffles Museum of Biodiversity Research, NUS.
+
+`scripts/extract-flora-checklist.py` builds the file from that PDF and documents
+the selection rules — only species the checklist itself calls common,
+naturalised or casual; flowering plants only; families drawn round-robin so no
+one family dominates. Species, family, status, origin and growth form all come
+from the source. **Common names do not** — the checklist has none, so they are
+hand-added in the script for the 68 species whose name is well established here,
+and left null for the rest.
+
 ### Plant art
 
 The five demo plants use hand-made art in `client/public/plants/` — a

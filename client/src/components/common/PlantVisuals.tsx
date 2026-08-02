@@ -37,6 +37,8 @@ export interface PlantAvatarData {
   isDemo?: boolean;
   /** UC4 detail fields; optional because older records may not carry them. */
   habitat?: string;
+  /** Plant.id's prose. Held whole; shortened at the point of display. */
+  description?: string;
   conservationStatus?: string;
 }
 

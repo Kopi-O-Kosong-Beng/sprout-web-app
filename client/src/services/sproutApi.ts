@@ -277,6 +277,124 @@ export async function setDemoAvatars(
   return response.data;
 }
 
+export type AlmanacStatus = 'common' | 'naturalised' | 'casual';
+
+/** A card as the public landing page sees it: no finder, no date, no photo. */
+export interface AlmanacEntry {
+  id: string;
+  speciesName: string;
+  commonName: string | null;
+  family: string;
+  status: AlmanacStatus;
+  origin: string | null;
+  growthForm: string | null;
+  discovered: boolean;
+  discoveryCount: number;
+}
+
+/**
+ * One species opened up.
+ *
+ * The sprite, stats and botanical record come back for anyone — they describe
+ * the plant. The three optional fields describe the *person* who found it and
+ * are present only when the request carried a login.
+ */
+export interface AlmanacEntryDetail extends AlmanacEntry {
+  spriteUrl: string | null;
+  stats: AvatarStats | null;
+  description: string | null;
+  commonNames: string[];
+  taxonomy: Record<string, string>;
+  confidence: number | null;
+  discoveredByName?: string | null;
+  discoveredAt?: string | null;
+  photoUrl?: string | null;
+}
+
+export interface AlmanacSummary {
+  source: string;
+  total: number;
+  discovered: number;
+  species: AlmanacEntry[];
+}
+
+export interface AdminAlmanac extends Omit<AlmanacSummary, 'species'> {
+  species: AlmanacEntryDetail[];
+  offTaxonomy: Array<{
+    speciesId: string;
+    speciesName: string;
+    discoveredByName: string;
+    discoveredAt: string;
+    discoveryCount: number;
+  }>;
+}
+
+/** Public — no Authorization header required (GET /api/almanac). */
+export async function getAlmanac(): Promise<AlmanacSummary> {
+  const { data } = await apiClient.get<AlmanacSummary>('/api/almanac');
+  return data;
+}
+
+/** Public. A signed-in caller additionally gets the finder, date and photo. */
+export async function getAlmanacEntry(
+  speciesId: string
+): Promise<AlmanacEntryDetail> {
+  const { data } = await apiClient.get<AlmanacEntryDetail>(
+    `/api/almanac/${encodeURIComponent(speciesId)}`
+  );
+  return data;
+}
+
+export async function getAdminAlmanac(): Promise<AdminAlmanac> {
+  const { data } = await apiClient.get<AdminAlmanac>('/api/admin/almanac');
+  return data;
+}
+
+export interface CleanupReport {
+  target: string;
+  dryRun: boolean;
+  matched: number;
+  deleted: number;
+  sample: Array<{ id: string; label: string; detail: string }>;
+  ranAt: string;
+}
+
+/**
+ * Runs an admin cleanup target. Dry run unless `confirmTarget` is passed, which
+ * the server also insists on — one accidental click cannot delete anything.
+ */
+export async function runAdminCleanup(
+  target: string,
+  options: { dryRun: boolean } = { dryRun: true }
+): Promise<CleanupReport> {
+  const { data } = await apiClient.post<CleanupReport>('/api/admin/cleanup', {
+    target,
+    dryRun: options.dryRun,
+    ...(options.dryRun ? {} : { confirmTarget: target }),
+  });
+  return data;
+}
+
+export interface ApiProbe {
+  status: 'PASS' | 'FAIL' | 'WARN' | 'SKIP';
+  latencyMs?: number;
+  remainingCredits?: number;
+  detail: string;
+  model?: string;
+}
+
+export interface ApiHealth {
+  timestamp: string;
+  overallStatus: 'HEALTHY' | 'DEGRADED';
+  probes: Record<string, ApiProbe>;
+}
+
+/** Live provider probes. Admin-only, same ADMIN_EMAILS gate as /api/admin. */
+export async function getApiHealth(): Promise<ApiHealth> {
+  const { data } = await apiClient.get<ApiHealth>('/api/platform/health-check');
+  return data;
+}
+
 export async function startPveBattle(avatarId: string): Promise<BattleSession> {
   const { data } = await apiClient.post<BattleSession>('/api/battle/pve/start', {
     avatarId,

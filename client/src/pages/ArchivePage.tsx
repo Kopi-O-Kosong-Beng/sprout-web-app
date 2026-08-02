@@ -8,6 +8,7 @@ import {
   type PlantAvatarData,
 } from '../components/common/PlantVisuals';
 import { useArchive } from '../hooks/useArchive';
+import { summarise } from '../utils/text';
 
 /**
  * The archive, drawn as the Android garden: pots resting on shelf planks, three
@@ -309,6 +310,14 @@ function SpecimenCard({
           <p className="mt-2 text-xs leading-relaxed opacity-80">
             {avatar.species} from {avatar.family}. Discovered on {avatar.discovered}.
           </p>
+
+          {/* Plant.id's prose runs to paragraphs; the card keeps the opening
+              and leaves the rest on the record. Same rule as the almanac. */}
+          {summarise(avatar.description, 180) && (
+            <p className="mt-2 text-xs leading-relaxed opacity-70">
+              {summarise(avatar.description, 180)}
+            </p>
+          )}
 
           {(avatar.habitat || avatar.conservationStatus) && (
             <dl className="mt-3 space-y-1.5 text-xs leading-relaxed">
