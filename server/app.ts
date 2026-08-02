@@ -54,19 +54,12 @@ app.use(
 // 1024px JPEG at q0.85, which is 120-230 kB of base64 for an ordinary plant
 // photo, so that ceiling rejects real scans while small fixtures still pass.
 //
-// The avatar router is skipped for the same reason: saving a scan carries the
-// finished sprite, and that router mounts its own 1 MB parser for it.
-//
-// Only those two prefixes are skipped. Every other route keeps the tighter
-// default, which is what it wants: the rest of the API takes small forms, and
-// raising the limit globally would widen the surface for oversized-body
-// pressure.
-const BODY_PARSER_EXEMPT_PREFIXES = ['/api/pipeline', '/api/avatar'];
+// Only that prefix is skipped. Every other route keeps the tighter default,
+// which is what it wants: the rest of the API takes small forms, and raising
+// the limit globally would widen the surface for oversized-body pressure.
 const parseJsonBody = express.json();
 app.use((req, res, next) =>
-  BODY_PARSER_EXEMPT_PREFIXES.some((prefix) => req.path.startsWith(prefix))
-    ? next()
-    : parseJsonBody(req, res, next)
+  req.path.startsWith('/api/pipeline') ? next() : parseJsonBody(req, res, next)
 );
 app.use(express.urlencoded({ extended: true }));
 

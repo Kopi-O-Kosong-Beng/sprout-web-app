@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import BackButton from '../components/common/BackButton';
-import { CaptureBadge } from '../components/common/PlantVisuals';
-import { extractApiError } from '../services/apiClient';
 import { streamPipeline, type PipelineEvent } from '../services/pipelineStream';
-import { createAvatar } from '../services/sproutApi';
 
 /**
  * Scan screen — ported from plantemon-web's (app)/scan/page.tsx, itself a port
@@ -25,9 +21,6 @@ import { createAvatar } from '../services/sproutApi';
  * be exercised without a real plant to hand.
  */
 
-/** The client-visible stages of a scan, in order. */
-type ScanStep = 'identify' | 'sprite' | 'finish';
-
 /**
  * How the photo reached the pipeline, which is what decides whether the saved
  * plant is kept or expires.
@@ -35,67 +28,45 @@ type ScanStep = 'identify' | 'sprite' | 'finish';
  * The camera — live preview or the OS camera app — means someone stood in front
  * of a real plant, so it is an IRL scan and the record is permanent. A file off
  * disk could be any picture of anything, so it is a web upload: playable and
- * battleable, but gone in 24 hours. The server enforces this; the two constants
+ * battleable, but gone in 24 hours. The server enforces this; the two values
  * here are just the two buttons.
  */
 type CaptureSource = 'mobile' | 'web';
 
-/** What a finished run knows about the plant, in the shape the archive takes. */
-interface ScannedPlant {
-  name: string;
-  family: string | null;
-  taxonomy?: Record<string, string>;
-  commonNames?: string[];
-  description?: string;
-  confidence?: number;
+/** The client-visible stages of a scan, in order. */
+type ScanStep = 'identify' | 'sprite' | 'finish';
+
+/**
+ * The `discovery` block of the pipeline's `complete` event.
+ *
+ * Exported so ScanPage.test.tsx types its fixture against the very shape this
+ * page reads — the two used to be able to drift, and did.
+ *
+ * `discoveryCount` counts *scans*, not people: the dex increments it on every
+ * scan, including repeats by the same user (server/repositories/dex.ts). One
+ * person scanning a fern five times makes it 5, so it must never be labelled as
+ * a number of explorers.
+ */
+export interface ScanDiscovery {
+  firstDiscoveredByName: string;
+  firstDiscoveredAt: string;
+  discoveryCount: number;
+  isFirstDiscoverer: boolean;
 }
 
 type Status =
   | { kind: 'idle' }
   | { kind: 'busy'; step: ScanStep; plantName?: string; detail?: string }
-  | { kind: 'naming'; photo: CapturedPhoto; source: CaptureSource }
+  | { kind: 'naming'; photo: string; source: CaptureSource }
   | {
       kind: 'done';
       sprite: string;
-      plant: ScannedPlant;
-      source: CaptureSource;
-      /** A downscaled copy of the photo, banked with the record. */
-      photo?: string;
+      name: string;
+      saved: boolean;
+      saveError?: string;
+      discovery: ScanDiscovery | null;
     }
   | { kind: 'error'; message: string };
-
-/** Where the result dialog's "Save to archive" button has got to. */
-type SaveState =
-  | { kind: 'idle' }
-  | { kind: 'saving' }
-  | { kind: 'saved' }
-  | { kind: 'error'; message: string };
-
-/** The pipeline's assembled plant, as it arrives on the `complete` event. */
-interface PipelinePlant {
-  name?: string;
-  taxonomy?: Record<string, string>;
-  common_names?: string[];
-  description?: string;
-  probability?: number;
-}
-
-/** Plant.id capitalises its taxonomy ranks; a hand-named run may not. */
-function familyOf(taxonomy: Record<string, string> | undefined): string | null {
-  const family = taxonomy?.Family ?? taxonomy?.family;
-  return family?.trim() ? family.trim() : null;
-}
-
-function toScannedPlant(plant: PipelinePlant, fallbackName: string): ScannedPlant {
-  return {
-    name: plant.name?.trim() || fallbackName,
-    family: familyOf(plant.taxonomy),
-    taxonomy: plant.taxonomy,
-    commonNames: plant.common_names,
-    description: plant.description,
-    confidence: plant.probability,
-  };
-}
 
 /** Maps a pipeline hop id onto the three stages the player is shown. */
 const STEP_FOR_HOP: Record<string, ScanStep> = {
@@ -109,69 +80,34 @@ const STEP_FOR_HOP: Record<string, ScanStep> = {
 };
 
 const MAX_IMAGE_EDGE = 1024;
-/**
- * The archive copy is much smaller than the one the pipeline identifies from.
- * It is only ever drawn as a thumbnail on the specimen card, and it is stored
- * inside the Firestore document next to the sprite, so a full 1024px JPEG would
- * spend a fifth of the 1 MB ceiling on pixels nothing displays.
- */
-const MAX_ARCHIVE_PHOTO_EDGE = 384;
 
-/** Draws a bitmap or video frame to a JPEG data URL, bounded by `maxEdge`. */
-function toJpegDataUrl(
-  source: CanvasImageSource,
-  width: number,
-  height: number,
-  maxEdge: number
-): string {
-  const scale = Math.min(1, maxEdge / Math.max(width, height));
+/** Downscales to a JPEG data URL — the shape the pipeline endpoint expects. */
+async function fileToJpegDataUrl(file: Blob): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round(width * scale);
-  canvas.height = Math.round(height * scale);
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
 
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Could not read that image.');
-  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
 
   return canvas.toDataURL('image/jpeg', 0.85);
 }
 
-/** Both sizes of one photo: what the pipeline reads, and what the archive keeps. */
-export interface CapturedPhoto {
-  full: string;
-  thumbnail: string;
-}
-
-/** Downscales a picked file to the shape the pipeline endpoint expects. */
-async function fileToPhoto(file: Blob): Promise<CapturedPhoto> {
-  const bitmap = await createImageBitmap(file);
-  try {
-    return {
-      full: toJpegDataUrl(bitmap, bitmap.width, bitmap.height, MAX_IMAGE_EDGE),
-      thumbnail: toJpegDataUrl(
-        bitmap,
-        bitmap.width,
-        bitmap.height,
-        MAX_ARCHIVE_PHOTO_EDGE
-      ),
-    };
-  } finally {
-    bitmap.close();
-  }
-}
-
-/** Grabs the current video frame at the same two sizes. */
-function captureFrame(video: HTMLVideoElement): CapturedPhoto {
-  const { videoWidth, videoHeight } = video;
-  return {
-    full: toJpegDataUrl(video, videoWidth, videoHeight, MAX_IMAGE_EDGE),
-    thumbnail: toJpegDataUrl(
-      video,
-      videoWidth,
-      videoHeight,
-      MAX_ARCHIVE_PHOTO_EDGE
-    ),
-  };
+/** Grabs the current video frame at the same ceiling. */
+function captureFrame(video: HTMLVideoElement): string {
+  const scale = Math.min(
+    1,
+    MAX_IMAGE_EDGE / Math.max(video.videoWidth, video.videoHeight)
+  );
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.85);
 }
 
 export default function ScanPage() {
@@ -241,7 +177,7 @@ export default function ScanPage() {
 
   /** The shared tail of every input path. */
   const runPipeline = useCallback(
-    async (photo: CapturedPhoto, source: CaptureSource, customName?: string) => {
+    async (jpegDataUrl: string, source: CaptureSource, customName?: string) => {
     if (processingRef.current) return;
     processingRef.current = true;
 
@@ -249,9 +185,10 @@ export default function ScanPage() {
     abortRef.current = controller;
     let finalSprite: string | null = null;
     let finalName = customName ?? '';
-    // Everything hop 3 assembled about the plant, kept so the result dialog can
-    // bank it: the archive record wants the family and details, not just a name.
-    let finalPlant: PipelinePlant = {};
+    let savedOutcome: { saved: boolean; saveError?: string; discovery: ScanDiscovery | null } = {
+      saved: true,
+      discovery: null,
+    };
 
     try {
       setStatus({ kind: 'busy', step: 'identify' });
@@ -259,8 +196,11 @@ export default function ScanPage() {
       await streamPipeline(
         '/api/pipeline/run-stream',
         {
-          imageBase64: photo.full,
+          imageBase64: jpegDataUrl,
           customName: customName || undefined,
+          // Decides the saved record's lifetime; the server defaults an
+          // undeclared caller to 'web', the expiring one.
+          source,
           // The pause after the render hop is a studio affordance — it exists so
           // an operator can inspect the raw sprite before the cutout runs. A
           // player just wants the finished creature, so run straight through.
@@ -291,10 +231,14 @@ export default function ScanPage() {
           }
 
           if (event.event === 'complete') {
-            const plant = event.finalPlant as PipelinePlant | undefined;
-            finalPlant = plant ?? {};
+            const plant = event.finalPlant as { name?: string } | undefined;
             finalName = plant?.name ?? finalName;
             finalSprite = `data:image/png;base64,${String(event.finalSpriteB64)}`;
+            savedOutcome = {
+              saved: event.saved !== false,
+              saveError: event.saveError ? String(event.saveError) : undefined,
+              discovery: (event.discovery ?? null) as ScanDiscovery | null,
+            };
           }
 
           if (event.event === 'pipeline_error' || event.event === 'error') {
@@ -311,27 +255,25 @@ export default function ScanPage() {
       setStatus({
         kind: 'done',
         sprite: finalSprite,
-        plant: toScannedPlant(finalPlant, finalName || 'Unknown Plant'),
-        source,
-        photo: photo.thumbnail,
+        name: finalName || 'Unknown Plant',
+        saved: savedOutcome.saved,
+        saveError: savedOutcome.saveError,
+        discovery: savedOutcome.discovery,
       });
     } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : 'Something went wrong.';
       setStatus({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Something went wrong.',
+        message: rawMessage.includes('401') ? 'Please sign in to scan a plant.' : rawMessage,
       });
     } finally {
       processingRef.current = false;
       abortRef.current = null;
     }
-    },
-    []
-  );
+  }, []);
 
   const onCapture = useCallback(() => {
-    // Live preview available: grab a frame. Otherwise open the native camera,
-    // which lands in onFilePicked — still an IRL scan, hence the explicit source
-    // on that input rather than one rule for every file.
+    // Live preview available: grab a frame. Otherwise open the native camera.
     if (cameraReady && videoRef.current) {
       void runPipeline(captureFrame(videoRef.current), 'mobile');
     } else {
@@ -343,7 +285,7 @@ export default function ScanPage() {
     async (file: File | undefined, source: CaptureSource) => {
       if (!file) return;
       try {
-        void runPipeline(await fileToPhoto(file), source);
+        void runPipeline(await fileToJpegDataUrl(file), source);
       } catch (error) {
         setStatus({
           kind: 'error',
@@ -354,10 +296,10 @@ export default function ScanPage() {
     [runPipeline]
   );
 
-  // The bundled photo is a file like any other, so it saves as a web upload.
   const onTestImage = useCallback(async () => {
     const response = await fetch('/img/test_plant.jpg');
-    void runPipeline(await fileToPhoto(await response.blob()), 'web');
+    // The bundled photo is a file like any other, so it saves as a web upload.
+    void runPipeline(await fileToJpegDataUrl(await response.blob()), 'web');
   }, [runPipeline]);
 
   const busy = status.kind === 'busy';
@@ -456,8 +398,7 @@ export default function ScanPage() {
         </button>
       </div>
 
-      {/* Upload: gallery / files. No `capture`, so it does NOT launch the camera
-          — a picture off disk is a web upload, and expires in 24 hours. */}
+      {/* Upload: gallery / files. No `capture`, so it does NOT launch the camera. */}
       <input
         ref={uploadInputRef}
         type="file"
@@ -496,9 +437,10 @@ export default function ScanPage() {
       {status.kind === 'done' && (
         <ResultDialog
           sprite={status.sprite}
-          plant={status.plant}
-          source={status.source}
-          photo={status.photo}
+          name={status.name}
+          saved={status.saved}
+          saveError={status.saveError}
+          discovery={status.discovery}
           onScanAnother={() => setStatus({ kind: 'idle' })}
         />
       )}
@@ -626,108 +568,56 @@ function NameDialog({
   );
 }
 
-/**
- * The finished creature, and what can be done with it.
- *
- * "Save sprite" used to be an `<a download>` and nothing else — it wrote the
- * PNG to the player's Downloads folder, which is why a scanned plant never
- * turned up in the archive. Banking the record is the primary action now; the
- * download stays as the secondary one, because keeping a copy of the art is a
- * reasonable thing to want and it is the only action that works signed out.
- */
 function ResultDialog({
   sprite,
-  plant,
-  source,
-  photo,
+  name,
+  saved,
+  saveError,
+  discovery,
   onScanAnother,
 }: {
   sprite: string;
-  plant: ScannedPlant;
-  source: CaptureSource;
-  photo?: string;
+  name: string;
+  saved: boolean;
+  saveError?: string;
+  discovery: ScanDiscovery | null;
   onScanAnother: () => void;
 }) {
-  const [save, setSave] = useState<SaveState>({ kind: 'idle' });
-  const isUpload = source === 'web';
-
-  const onSave = useCallback(async () => {
-    setSave({ kind: 'saving' });
-    try {
-      await createAvatar({
-        speciesName: plant.name,
-        speciesFamily: plant.family,
-        spriteDataUrl: sprite,
-        photoDataUrl: photo,
-        source,
-        metadata: {
-          taxonomy: plant.taxonomy,
-          commonNames: plant.commonNames,
-          description: plant.description,
-          confidence: plant.confidence,
-        },
-      });
-      setSave({ kind: 'saved' });
-    } catch (error) {
-      setSave({
-        kind: 'error',
-        message: extractApiError(error, 'Could not save this plant to your archive.'),
-      });
-    }
-  }, [photo, plant, source, sprite]);
-
   return (
     <Overlay>
       <h2 className="text-center text-xs">Done!</h2>
       <img src={sprite} alt="" className="pixelated mx-auto mt-3 h-40 w-40 object-contain" />
-      <p className="mt-2 text-center text-[10px] leading-relaxed">{plant.name}</p>
-
-      {/* Say which it is before the save, not after: the difference between a
-          kept plant and one that is gone tomorrow is worth knowing up front. */}
-      <p className="mt-2 text-center">
-        <CaptureBadge source={source} />
-      </p>
+      <p className="mt-2 text-center text-[10px] leading-relaxed">{name}</p>
       <p className="mt-1 text-center text-[8px] leading-relaxed opacity-70">
-        {isUpload
-          ? 'Uploaded from a file, so this one expires 24 hours after you save it.'
-          : 'Scanned from your camera, so this one is kept in your archive.'}
+        Rendered at 192×192 and snapped to the Florentine24 palette.
       </p>
 
-      {save.kind === 'saved' ? (
-        <p
-          role="status"
-          className="mt-4 text-center text-[9px] leading-relaxed"
-          style={{ color: 'var(--color-hp-high)' }}
-        >
-          Saved to your archive.{' '}
-          <Link to="/archive" className="underline">
-            Open it
-          </Link>
+      {!saved && (
+        <p className="pixel-panel mt-3 px-3 py-2 text-center text-[9px] leading-relaxed text-red-700">
+          Your plant was generated, but it could not be saved.{saveError ? ` ${saveError}` : ''}
         </p>
-      ) : (
-        <button
-          type="button"
-          onClick={() => void onSave()}
-          disabled={save.kind === 'saving'}
-          style={{ background: 'var(--color-hp-high)', color: '#fff' }}
-          className="press pixel-button mt-4 block w-full px-2 py-2 text-center text-[9px] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {save.kind === 'saving' ? 'Saving…' : 'Save to archive'}
-        </button>
       )}
 
-      {save.kind === 'error' && (
-        <p role="alert" className="mt-2 text-center text-[9px] leading-relaxed text-red-700">
-          {save.message}
-        </p>
-      )}
+      {discovery &&
+        (discovery.isFirstDiscoverer ? (
+          <p className="mt-3 text-center text-[9px] leading-relaxed">
+            You discovered this first!
+          </p>
+        ) : (
+          <div className="mt-3 text-center text-[9px] leading-relaxed">
+            <p>First discovered by {discovery.firstDiscoveredByName}</p>
+            {/* Scans, not scanners — see ScanDiscovery. */}
+            <p>Scanned {discovery.discoveryCount} times</p>
+          </div>
+        ))}
 
       <a
         href={sprite}
-        download={`${plant.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`}
-        className="press pixel-button mt-2 block w-full px-2 py-2 text-center text-[9px]"
+        download={`${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`}
+        style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+        className="press pixel-button mt-4 block w-full px-2 py-2 text-center text-[9px]"
       >
-        Download sprite
+        Save sprite
       </a>
       <button
         type="button"

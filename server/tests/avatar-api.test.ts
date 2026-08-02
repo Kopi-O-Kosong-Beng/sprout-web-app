@@ -1,7 +1,6 @@
 import request from 'supertest';
 import { getDb } from '../firebase';
 import { clearFirestore } from './firestore-test-utils';
-import { deriveAvatarStats } from '../services/avatar-stats';
 
 const mockAuthAdmin = { verifyIdToken: jest.fn() };
 
@@ -206,6 +205,7 @@ describe('verified avatar archive API', () => {
       battleEligible: true,
       stats: { hp: 100, attack: 52, defense: 61, speed: 48 },
       metadata: { displayName: 'Detail Fern' },
+      discovery: null,
     });
   });
 
@@ -272,166 +272,5 @@ describe('verified avatar archive API', () => {
     expect(missing.body).toEqual({ error: 'Avatar not found.' });
     expect(foreign.body).toEqual(missing.body);
     expect(JSON.stringify(foreign.body)).not.toContain('Private Foreign Fern');
-  });
-});
-
-describe('saving a scanned avatar', () => {
-  // A real sprite is a 192x192 Spica72 PNG; a 1x1 stands in for the bytes,
-  // since nothing on this path decodes the image.
-  const SPRITE_DATA_URL =
-    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-  const PHOTO_DATA_URL = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==';
-
-  function scanBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    return {
-      speciesName: 'Monstera deliciosa',
-      speciesFamily: 'Araceae',
-      spriteDataUrl: SPRITE_DATA_URL,
-      source: 'mobile',
-      metadata: {
-        taxonomy: { Family: 'Araceae' },
-        commonNames: ['Swiss cheese plant'],
-        confidence: 0.91,
-      },
-      ...overrides,
-    };
-  }
-
-  it('keeps an IRL scan for good and lists it in the caller archive', async () => {
-    const created = await request(app)
-      .post('/api/avatar')
-      .set('Authorization', authorization())
-      .send(scanBody());
-
-    expect(created.status).toBe(201);
-    expect(created.body).toMatchObject({
-      userId: OWNER_ID,
-      speciesName: 'Monstera deliciosa',
-      speciesFamily: 'Araceae',
-      spriteUrl: SPRITE_DATA_URL,
-      source: 'mobile',
-      isTemporary: false,
-      expiresAt: null,
-      battleEligible: true,
-      stats: deriveAvatarStats('Monstera deliciosa', 'Araceae'),
-      metadata: {
-        displayName: 'Monstera deliciosa',
-        capturedVia: 'scan',
-        confidence: 0.91,
-      },
-    });
-    expect(created.body.id).toEqual(expect.any(String));
-
-    const list = await request(app)
-      .get('/api/avatar')
-      .set('Authorization', authorization());
-    expect(list.body.total).toBe(1);
-    expect(list.body.items[0].id).toBe(created.body.id);
-
-    const foreign = await request(app)
-      .get('/api/avatar')
-      .set('Authorization', authorization(FOREIGN_ID));
-    expect(foreign.body.items).toEqual([]);
-  });
-
-  it('makes a web upload a 24h TempAvatar (Req 6.12)', async () => {
-    const created = await request(app)
-      .post('/api/avatar')
-      .set('Authorization', authorization())
-      .send(scanBody({ source: 'web' }));
-
-    expect(created.status).toBe(201);
-    expect(created.body).toMatchObject({ source: 'web', isTemporary: true });
-    const ttlMs =
-      Date.parse(created.body.expiresAt) - Date.parse(created.body.discoveredAt);
-    expect(ttlMs).toBe(24 * 60 * 60 * 1000);
-  });
-
-  it('keeps the photograph beside the sprite when the scan sends one', async () => {
-    const created = await request(app)
-      .post('/api/avatar')
-      .set('Authorization', authorization())
-      .send(scanBody({ photoDataUrl: PHOTO_DATA_URL }));
-
-    expect(created.status).toBe(201);
-    expect(created.body.metadata.photoUrl).toBe(PHOTO_DATA_URL);
-  });
-
-  it('rejects a photograph that is not a JPEG data URL', async () => {
-    const response = await request(app)
-      .post('/api/avatar')
-      .set('Authorization', authorization())
-      .send(scanBody({ photoDataUrl: SPRITE_DATA_URL }));
-
-    expect(response.status).toBe(400);
-    expect(response.body.error).toContain(
-      'photoDataUrl must be a base64 JPEG data URL.'
-    );
-  });
-
-  it.each([['omitted', undefined], ['unknown', 'sideloaded']])(
-    'refuses to guess retention from a %s source',
-    async (_kind, source) => {
-      const body = scanBody();
-      if (source === undefined) delete (body as Record<string, unknown>).source;
-      else body.source = source;
-
-      const response = await request(app)
-        .post('/api/avatar')
-        .set('Authorization', authorization())
-        .send(body);
-
-      expect(response.status).toBe(400);
-      expect(response.body.error).toContain('source');
-    }
-  );
-
-  it('drops metadata the archive was not promised', async () => {
-    const created = await request(app)
-      .post('/api/avatar')
-      .set('Authorization', authorization())
-      .send(scanBody({ metadata: { confidence: 0.5, promptUsed: 'leak me' } }));
-
-    expect(created.status).toBe(201);
-    expect(created.body.metadata).not.toHaveProperty('promptUsed');
-    expect(JSON.stringify(created.body)).not.toContain('leak me');
-  });
-
-  it('rejects a sprite that is not a PNG data URL and writes nothing', async () => {
-    const response = await request(app)
-      .post('/api/avatar')
-      .set('Authorization', authorization())
-      .send(scanBody({ spriteDataUrl: 'https://example.com/sprite.png' }));
-
-    expect(response.status).toBe(400);
-    expect(response.body.error).toContain(
-      'spriteDataUrl must be a base64 PNG data URL.'
-    );
-
-    const list = await request(app)
-      .get('/api/avatar')
-      .set('Authorization', authorization());
-    expect(list.body.total).toBe(0);
-  });
-
-  it('rejects a sprite too large for a Firestore document', async () => {
-    const response = await request(app)
-      .post('/api/avatar')
-      .set('Authorization', authorization())
-      .send(
-        scanBody({
-          spriteDataUrl: `data:image/png;base64,${'A'.repeat(512_001)}`,
-        })
-      );
-
-    expect(response.status).toBe(400);
-    expect(response.body.error).toContain('Sprite is too large to save.');
-  });
-
-  it('rejects an unauthenticated save', async () => {
-    const response = await request(app).post('/api/avatar').send(scanBody());
-
-    expect(response.status).toBe(401);
-    expect(response.body).toEqual({ error: 'Unauthorised.' });
   });
 });

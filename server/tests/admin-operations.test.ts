@@ -112,7 +112,10 @@ describe('admin almanac', () => {
     expect(response.status).toBe(200);
     expect(response.body.total).toBe(200);
     expect(response.body.species).toHaveLength(200);
-    expect(response.body.species[0]).toHaveProperty('discoveredByName');
+    // Sprite and stats, not the finder: uid-to-name resolution is per species
+    // and the admin view lists all 200, so it stays a per-card lookup.
+    expect(response.body.species[0]).toHaveProperty('spriteUrl');
+    expect(response.body.species[0]).toHaveProperty('stats');
     expect(response.body.offTaxonomy).toEqual([]);
     expect(response.body.source).toContain('Chong');
   });
@@ -120,14 +123,13 @@ describe('admin almanac', () => {
   // Anything a player scanned that is not one of the 200 is the signal that the
   // taxonomy needs extending, so it must not be silently dropped.
   it('surfaces discoveries made outside the taxonomy', async () => {
-    await getDb().collection('almanac_discoveries').doc('monstera-deliciosa').set({
+    await getDb().collection('dex').doc('monstera_deliciosa').set({
+      speciesKey: 'monstera_deliciosa',
       speciesName: 'Monstera deliciosa',
-      discoveredByUserId: MEMBER_UID,
-      discoveredByName: 'SomePlayer',
-      discoveredAt: '2026-08-01T00:00:00.000Z',
-      avatarId: 'avatar-1',
-      photoUrl: null,
+      firstDiscoveredBy: MEMBER_UID,
+      firstDiscoveredAt: '2026-08-01T00:00:00.000Z',
       discoveryCount: 3,
+      spriteUrl: 'https://cdn.test/monstera.png',
     });
 
     const response = await request(app)
@@ -136,9 +138,8 @@ describe('admin almanac', () => {
 
     expect(response.body.offTaxonomy).toEqual([
       {
-        speciesId: 'monstera-deliciosa',
+        speciesKey: 'monstera_deliciosa',
         speciesName: 'Monstera deliciosa',
-        discoveredByName: 'SomePlayer',
         discoveredAt: '2026-08-01T00:00:00.000Z',
         discoveryCount: 3,
       },

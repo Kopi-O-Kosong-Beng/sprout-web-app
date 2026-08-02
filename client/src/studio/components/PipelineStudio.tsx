@@ -124,6 +124,15 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
   const [customPlantName, setCustomPlantName] = useState('');
   /** Species Hop 0 identified, carried across the 2c gate. */
   const [identifiedName, setIdentifiedName] = useState<string | null>(null);
+  /**
+   * Whether Hop 1 produced a real identification rather than a placeholder (a
+   * failed lookup, or the keyless mock that answers with one hardcoded species
+   * for every photo). Only the first leg can tell; the 2c continuation is a
+   * separate request that receives nothing but the name, so the answer is
+   * carried across the gate and echoed back. The server uses it to decide
+   * whether the scan may share the canonical, cross-user sprite.
+   */
+  const [identifiedSpecies, setIdentifiedSpecies] = useState<boolean | null>(null);
   /** Input + fixture picker fold away on run so the whole flow fits one screen. */
   const [inputCollapsed, setInputCollapsed] = useState(false);
 
@@ -224,6 +233,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
     setEvalScores(null);
     setDexStatus(null);
     setIdentifiedName(null);
+    setIdentifiedSpecies(null);
     setSteps(freshSteps());
     // Cleared with the rest of the run state, or a re-run would write the
     // previous plant's sprite when the new one fails before step 2d.
@@ -376,6 +386,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
 
     if (data.event === 'awaiting_stage2c_confirmation') {
       if (data.rawSpriteB64) setRawSpriteB64(`data:image/png;base64,${data.rawSpriteB64}`);
+      if (typeof data.identified === 'boolean') setIdentifiedSpecies(data.identified);
       setAwaitingStage2cPermission(true);
       return;
     }
@@ -401,6 +412,14 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
         body: JSON.stringify({
           rawSpriteB64,
           plantName: customPlantName || identifiedName || 'Plant Monster',
+          // A name typed here is a real species claim; otherwise report what
+          // the first leg observed. Omitted when unknown, so the server falls
+          // back to its own (conservative) derivation.
+          ...(customPlantName
+            ? { identified: true }
+            : identifiedSpecies !== null
+              ? { identified: identifiedSpecies }
+              : {}),
         }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);

@@ -238,36 +238,6 @@ export async function listOwnedAvatars(
   return data;
 }
 
-/** What the Scan screen banks after a run: the identification, the finished
- *  sprite, and the details worth keeping. Stats are the server's to derive. */
-export interface NewAvatarInput {
-  speciesName: string;
-  speciesFamily?: string | null;
-  /** The finished 192x192 PNG, as `data:image/png;base64,...`. */
-  spriteDataUrl: string;
-  /** The photo it was made from, downscaled, as `data:image/jpeg;base64,...`. */
-  photoDataUrl?: string;
-  /**
-   * How it was captured, which decides how long it lives: `mobile` is an IRL
-   * camera scan and is kept, `web` is a file upload and expires in 24 hours.
-   */
-  source: 'mobile' | 'web';
-  metadata?: {
-    taxonomy?: Record<string, string>;
-    commonNames?: string[];
-    description?: string;
-    confidence?: number;
-  };
-}
-
-/** Saves a scanned plant into the caller's archive (POST /api/avatar → 201). */
-export async function createAvatar(
-  input: NewAvatarInput
-): Promise<AvatarRecord> {
-  const { data } = await apiClient.post<AvatarRecord>('/api/avatar', input);
-  return data;
-}
-
 export async function setDemoAvatars(
   enabled: boolean
 ): Promise<PaginatedAvatars> {
@@ -295,20 +265,17 @@ export interface AlmanacEntry {
 /**
  * One species opened up.
  *
- * The sprite, stats and botanical record come back for anyone — they describe
- * the plant. The three optional fields describe the *person* who found it and
- * are present only when the request carried a login.
+ * The sprite and stats come back for anyone — they describe the plant. The
+ * finder's name and the discovery date describe a *person* and are present only
+ * when the request carried a login.
  */
 export interface AlmanacEntryDetail extends AlmanacEntry {
   spriteUrl: string | null;
-  stats: AvatarStats | null;
-  description: string | null;
-  commonNames: string[];
-  taxonomy: Record<string, string>;
-  confidence: number | null;
+  stats: AvatarStats;
   discoveredByName?: string | null;
   discoveredAt?: string | null;
-  photoUrl?: string | null;
+  /** True when the signed-in caller is the one who found it first. */
+  isFirstDiscoverer?: boolean;
 }
 
 export interface AlmanacSummary {
