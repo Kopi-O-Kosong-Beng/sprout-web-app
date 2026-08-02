@@ -342,7 +342,7 @@ router.post('/run-stage2c', async (req: Request, res: Response) => {
 async function runStage2cOnward(
   sendEvent: (data: unknown) => void,
   rawSpriteBuffer: Buffer,
-  identification: any,
+  identification: { name: string; taxonomy?: Record<string, string> },
   deadline: ReturnType<typeof createDeadline>,
   userId: string
 ) {

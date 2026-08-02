@@ -39,19 +39,30 @@ export async function persistScan(
     discovery: null,
   });
 
-  const speciesKey = sanitizeSpeciesKey(speciesName);
-  if (!speciesKey) {
-    return failure('Identified species name has no usable characters');
-  }
-
   try {
+    // sanitizeSpeciesKey lives inside this try, not above it: if speciesName
+    // were ever not a string, .toLowerCase() inside it would throw, and Section
+    // F's "never abort the run" guarantee must hold unconditionally — that has
+    // to come back as saved: false, not an uncaught exception out of
+    // runStage2cOnward. The empty-key behavior below is unchanged: it still
+    // returns before any dependency I/O runs.
+    const speciesKey = sanitizeSpeciesKey(speciesName);
+    if (!speciesKey) {
+      return failure('Identified species name has no usable characters');
+    }
+
+    // Pure computation, resolved ahead of the actual I/O calls so a bug here
+    // is legible as its own thing rather than tangled up with the Firestore
+    // write it happens to be constructed for.
+    const stats = deriveSpeciesStats(speciesKey);
+
     const spriteUrl = await dependencies.storage.save(speciesKey, png);
     const discovery = await dependencies.dex.recordDiscovery(speciesKey, userId, speciesName);
     const { record, created } = await dependencies.avatars.upsertFromScan(userId, {
       speciesName,
       speciesFamily,
       spriteUrl,
-      stats: deriveSpeciesStats(speciesKey),
+      stats,
       metadata: null,
     });
 

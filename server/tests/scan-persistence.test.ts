@@ -56,6 +56,20 @@ describe('persistScan', () => {
     expect(result.saveError).toContain('bucket unreachable');
   });
 
+  it('reports a dex discovery failure without throwing', async () => {
+    const dependencies = deps({
+      dex: {
+        recordDiscovery: jest.fn().mockRejectedValue(new Error('dex write conflict')),
+        get: jest.fn(),
+      },
+    });
+    const result = await persistScan(dependencies, 'user-a', 'Fern', null, PNG);
+
+    expect(result.saved).toBe(false);
+    expect(result.avatarId).toBeNull();
+    expect(result.saveError).toContain('dex write conflict');
+  });
+
   it('reports a Firestore failure without throwing', async () => {
     const dependencies = deps({
       avatars: { upsertFromScan: jest.fn().mockRejectedValue(new Error('firestore down')) },
