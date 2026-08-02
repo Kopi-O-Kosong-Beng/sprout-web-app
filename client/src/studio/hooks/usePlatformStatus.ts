@@ -20,10 +20,11 @@ export interface ConfigStatus {
 
 export interface ProbeResult {
   status: 'PASS' | 'FAIL' | 'WARN' | 'SKIP';
-  latencyMs?: number;
-  remainingCredits?: number;
-  limit?: number;
-  used?: number;
+  /** null when the provider was not probed — see adminRoutes' health-check. */
+  latencyMs?: number | null;
+  remainingCredits?: number | null;
+  limit?: number | null;
+  used?: number | null;
   detail: string;
   model?: string;
 }

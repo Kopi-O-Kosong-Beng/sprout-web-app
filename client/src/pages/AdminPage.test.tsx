@@ -103,7 +103,9 @@ function stubApiDefaults() {
     overallStatus: 'DEGRADED',
     probes: {
       plantId: { status: 'PASS', latencyMs: 412, detail: '460 credits left' },
-      flux: { status: 'SKIP', detail: 'No FLUX_API_KEY configured' },
+      // Flux is billed per render, so the endpoint reports it unprobed with an
+      // explicit null latency rather than a number nobody measured.
+      flux: { status: 'SKIP', latencyMs: null, detail: 'key present — not probed' },
     },
   });
 }
@@ -234,8 +236,11 @@ describe('AdminPage operations panels', () => {
     expect(await screen.findByText('plantId')).toBeInTheDocument();
     expect(screen.getByText('460 credits left')).toBeInTheDocument();
     expect(screen.getByText('412 ms')).toBeInTheDocument();
-    // A missing key is a skip, not a failure — the pipeline degrades hop by hop.
-    expect(screen.getByText('No FLUX_API_KEY configured')).toBeInTheDocument();
+    // SKIP is not a failure — an unprobed or unconfigured hop degrades, and the
+    // page says which rather than showing green for something it never called.
+    expect(screen.getByText('key present — not probed')).toBeInTheDocument();
+    // null latency must read as "not measured", never as "null ms" or 0.
+    expect(screen.getByText('—')).toBeInTheDocument();
   });
 
   it('will not delete on a single press', async () => {

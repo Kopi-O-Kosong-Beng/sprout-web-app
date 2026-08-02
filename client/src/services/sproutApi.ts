@@ -377,8 +377,13 @@ export async function runAdminCleanup(
 
 export interface ApiProbe {
   status: 'PASS' | 'FAIL' | 'WARN' | 'SKIP';
-  latencyMs?: number;
-  remainingCredits?: number;
+  /** null when the provider was deliberately not probed — Flux and withoutBG
+   *  bill per call, so the health page reports "key present, liveness unknown"
+   *  rather than spending a credit on every page load. */
+  latencyMs?: number | null;
+  remainingCredits?: number | null;
+  limit?: number | null;
+  used?: number | null;
   detail: string;
   model?: string;
 }

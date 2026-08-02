@@ -201,9 +201,12 @@ function ApiHealthPanel() {
     <section className="page-heading">
       <h2>API health</h2>
       <p>
-        Calls each upstream provider once and reports what came back. A key that
-        is missing reports SKIP rather than failing — the pipeline degrades hop
-        by hop instead of stopping.
+        Contacts Plant.id, Gemini and withoutBG once each and reports what came
+        back. Flux and the cutout service are listed but deliberately not
+        probed: both bill per call, and a health page that spends credit every
+        time you open it is its own problem — they report SKIP, meaning key
+        present, liveness unknown. A missing key is a SKIP too; the pipeline
+        degrades hop by hop rather than stopping.
       </p>
 
       <button
@@ -240,7 +243,8 @@ function ApiHealthPanel() {
                     <td>{name}</td>
                     <td>{probeResult.status}</td>
                     <td>
-                      {probeResult.latencyMs === undefined
+                      {/* null means not probed, which is not the same as 0 ms. */}
+                      {probeResult.latencyMs == null
                         ? '—'
                         : `${probeResult.latencyMs} ms`}
                     </td>
