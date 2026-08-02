@@ -37,6 +37,13 @@ export interface ScanPersistResult {
   discovery: PublicDiscovery | null;
 }
 
+/** Firestore and Cloud Storage exceptions routinely name the bucket, the
+ *  project, the full object path and the acting service-account principal.
+ *  None of that belongs in a player-facing dialog, so the raw text stays in the
+ *  console.error below and the client gets a fixed line. */
+const SAVE_FAILED_MESSAGE = 'Please try scanning it again.';
+const UNUSABLE_SPECIES_NAME_MESSAGE = 'That plant name could not be used to save the scan.';
+
 /** Scopes a species key to one user.
  *
  *  Two users' "Unknown Plant Species" are not the same plant, but sprite
@@ -87,7 +94,7 @@ export async function persistScan(
     // returns before any dependency I/O runs.
     const canonicalKey = sanitizeSpeciesKey(speciesName);
     if (!canonicalKey) {
-      return failure('Identified species name has no usable characters');
+      return failure(UNUSABLE_SPECIES_NAME_MESSAGE);
     }
     const speciesKey = options.identified
       ? canonicalKey
@@ -130,6 +137,6 @@ export async function persistScan(
     // pipeline crash.
     const message = error instanceof Error ? error.message : String(error);
     console.error('Scan persistence failed:', message);
-    return failure(message);
+    return failure(SAVE_FAILED_MESSAGE);
   }
 }

@@ -29,6 +29,11 @@ type ScanStep = 'identify' | 'sprite' | 'finish';
  *
  * Exported so ScanPage.test.tsx types its fixture against the very shape this
  * page reads — the two used to be able to drift, and did.
+ *
+ * `discoveryCount` counts *scans*, not people: the dex increments it on every
+ * scan, including repeats by the same user (server/repositories/dex.ts). One
+ * person scanning a fern five times makes it 5, so it must never be labelled as
+ * a number of explorers.
  */
 export interface ScanDiscovery {
   firstDiscoveredByName: string;
@@ -584,7 +589,8 @@ function ResultDialog({
         ) : (
           <div className="mt-3 text-center text-[9px] leading-relaxed">
             <p>First discovered by {discovery.firstDiscoveredByName}</p>
-            <p>Found by {discovery.discoveryCount} explorers</p>
+            {/* Scans, not scanners — see ScanDiscovery. */}
+            <p>Scanned {discovery.discoveryCount} times</p>
           </div>
         ))}
 

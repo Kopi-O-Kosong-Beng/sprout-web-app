@@ -109,7 +109,10 @@ describe('ScanPage save outcome', () => {
     await startScan();
 
     expect(await screen.findByText(/Justin/)).toBeInTheDocument();
-    expect(screen.getByText(/found by 3 explorers/i)).toBeInTheDocument();
+    // The dex counts scans, not scanners (repeat scans by one user included),
+    // so the label must not claim a number of people.
+    expect(screen.getByText(/scanned 3 times/i)).toBeInTheDocument();
+    expect(screen.queryByText(/explorers/i)).not.toBeInTheDocument();
   });
 
   it('calls out the caller when they discovered it first', async () => {
@@ -126,17 +129,20 @@ describe('ScanPage save outcome', () => {
   });
 
   it('tells the user when the scan could not be saved', async () => {
+    // The server maps every save fault onto this fixed line. Raw Firestore and
+    // Cloud Storage messages name the bucket, project and service account, so
+    // they must never reach the dialog.
     scriptStream([
       completeEvent({
         saved: false,
         avatarId: null,
-        saveError: 'bucket unreachable',
+        saveError: 'Please try scanning it again.',
       } as Partial<PipelineEvent>),
     ]);
     await startScan();
 
     expect(await screen.findByText(/could not be saved/i)).toBeInTheDocument();
-    expect(screen.getByText(/bucket unreachable/i)).toBeInTheDocument();
+    expect(screen.getByText(/please try scanning it again/i)).toBeInTheDocument();
   });
 
   it('asks the user to sign in when the server rejects the request', async () => {

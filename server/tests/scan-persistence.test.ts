@@ -77,7 +77,7 @@ describe('persistScan', () => {
 
     expect(result.saved).toBe(false);
     expect(result.avatarId).toBeNull();
-    expect(result.saveError).toContain('bucket unreachable');
+    expect(result.saveError).toBeTruthy();
   });
 
   it('reports a dex discovery failure without throwing', async () => {
@@ -91,7 +91,6 @@ describe('persistScan', () => {
 
     expect(result.saved).toBe(false);
     expect(result.avatarId).toBeNull();
-    expect(result.saveError).toContain('dex write conflict');
   });
 
   it('reports a Firestore failure without throwing', async () => {
@@ -101,7 +100,6 @@ describe('persistScan', () => {
     const result = await persistScan(dependencies, 'user-a', 'Fern', null, PNG, IDENTIFIED);
 
     expect(result.saved).toBe(false);
-    expect(result.saveError).toContain('firestore down');
   });
 
   it('refuses a species name with no usable characters', async () => {
@@ -110,6 +108,80 @@ describe('persistScan', () => {
 
     expect(result.saved).toBe(false);
     expect(dependencies.storage.save).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * saveError is streamed to the browser and rendered verbatim in the result
+ * dialog. Firestore and Cloud Storage exceptions routinely carry the bucket
+ * name, the project id, the full object path and the acting service-account
+ * principal, so the raw text must stay in the log and never on the wire.
+ */
+describe('persistScan save error reporting', () => {
+  const leaky = new Error(
+    'Permission denied on gs://sprout-prod.appspot.com/sprites/fern/v1.png for ' +
+      'service account pipeline@sprout-prod.iam.gserviceaccount.com (project sprout-prod)'
+  );
+
+  it('does not put the exception text on the wire', async () => {
+    const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const dependencies = deps({ storage: { save: jest.fn().mockRejectedValue(leaky) } });
+      const result = await persistScan(dependencies, 'user-a', 'Fern', null, PNG, IDENTIFIED);
+
+      expect(result.saveError).toBeTruthy();
+      expect(result.saveError).not.toContain('gs://');
+      expect(result.saveError).not.toContain('sprout-prod');
+      expect(result.saveError).not.toContain('iam.gserviceaccount.com');
+      expect(result.saveError).not.toContain('sprites/fern');
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it('keeps the raw detail in the log', async () => {
+    const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const dependencies = deps({ storage: { save: jest.fn().mockRejectedValue(leaky) } });
+      await persistScan(dependencies, 'user-a', 'Fern', null, PNG, IDENTIFIED);
+
+      expect(errorLog).toHaveBeenCalledWith(
+        'Scan persistence failed:',
+        expect.stringContaining('gs://sprout-prod.appspot.com')
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it('reports the same fixed line whatever the underlying fault was', async () => {
+    const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const storageFault = await persistScan(
+        deps({ storage: { save: jest.fn().mockRejectedValue(new Error('bucket unreachable')) } }),
+        'user-a',
+        'Fern',
+        null,
+        PNG,
+        IDENTIFIED
+      );
+      const firestoreFault = await persistScan(
+        deps({
+          avatars: { upsertFromScan: jest.fn().mockRejectedValue(new Error('firestore down')) },
+        }),
+        'user-a',
+        'Fern',
+        null,
+        PNG,
+        IDENTIFIED
+      );
+
+      expect(storageFault.saveError).toBe(firestoreFault.saveError);
+      expect(storageFault.saveError).not.toContain('bucket unreachable');
+      expect(firestoreFault.saveError).not.toContain('firestore down');
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 });
 
