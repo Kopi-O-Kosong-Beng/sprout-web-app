@@ -609,6 +609,49 @@
   }
 }
 
+/* Two short related fields share a row on anything wider than a phone. */
+.field-row {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 30rem) {
+  .field-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* The aside tracks the form on a long page rather than scrolling away and
+   leaving the reader with nothing beside the message box. */
+@media (min-width: 60rem) {
+  .support-card {
+    position: sticky;
+    top: 6rem;
+  }
+}
+
+.support-steps {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.support-steps code {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.support-heading-alt {
+  margin-top: 1.25rem !important;
+  padding-top: 1rem;
+  border-top: 3px solid rgb(26 26 26 / 0.14);
+}
+
 .contact-success {
   display: flex;
   flex-direction: column;
