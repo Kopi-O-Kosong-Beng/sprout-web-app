@@ -55,10 +55,11 @@ export default function ContactPage() {
     <main className="contact-page">
       <section className="page-heading">
         <p className="eyebrow">Contact us</p>
-        <h1>Send the Sprout team a query ticket</h1>
+        <h1>Ask the Sprout team anything</h1>
         <p>
-          Submits to <code>POST /api/query/submit</code> — no account needed.
-          You get a reference number back once the ticket is stored.
+          No account needed — tell us what you ran into and we will write back.
+          You get a reference number the moment it is saved, so you can quote it
+          if you need to chase us.
         </p>
       </section>
 
@@ -84,27 +85,32 @@ export default function ContactPage() {
           </div>
         ) : (
           <form className="contact-form" onSubmit={handleSubmit}>
-            <label>
-              Name
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Your name"
-                maxLength={MAX_NAME_LENGTH}
-                required
-              />
-            </label>
-            <label>
-              Email
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-              />
-            </label>
+            {/* Two short fields that belong together sit on one row: six
+                stacked inputs made the form a column tall enough to leave the
+                aside beside it stranded above a screen of empty ground. */}
+            <div className="field-row">
+              <label>
+                Name
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                  maxLength={MAX_NAME_LENGTH}
+                  required
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                />
+              </label>
+            </div>
             <label>
               Organisation (optional)
               <input
@@ -157,12 +163,38 @@ export default function ContactPage() {
           </form>
         )}
 
+        {/*
+          The aside used to hold one short paragraph beside a form four times
+          its height, which left most of the column as bare ground. It now
+          answers the three things someone actually wants to know before typing:
+          what happens to the message, how long it takes, and what to include so
+          the first reply is useful rather than a request for more detail.
+        */}
         <aside className="support-card">
           <MiniArchive />
           <h2>What happens next</h2>
+          <ol className="support-steps">
+            <li>
+              <strong>Your ticket is saved</strong> with a reference like{' '}
+              <code>SPR-20260712-0001</code>.
+            </li>
+            {/* "attempts", not "sends": storing the ticket is confirmed, the
+                email is not. Overstating it would promise delivery the system
+                cannot guarantee, and the ticket is safe either way. */}
+            <li>
+              <strong>Sprout then attempts a confirmation email</strong> to the
+              address you gave, with that reference in it.
+            </li>
+            <li>
+              <strong>The team is notified</strong> and picks it up from there.
+            </li>
+          </ol>
+
+          <h2 className="support-heading-alt">Helping us answer faster</h2>
           <p>
-            Sprout stores a ticket like SPR-20260712-0001, then attempts a
-            confirmation email and a team notification for follow-up.
+            If it is about a plant that would not scan, tell us the species you
+            expected and roughly when you tried. If it is about your account, the
+            email address you signed up with is usually all we need.
           </p>
         </aside>
       </section>
