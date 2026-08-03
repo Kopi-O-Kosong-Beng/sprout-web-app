@@ -26,7 +26,10 @@ export default function AvatarPanel() {
 
   return (
     <section className="panel">
-      <h2>GET /api/avatar</h2>
+      <div className="panel-head">
+        <h2>Avatar list</h2>
+        <span className="endpoint">GET /api/avatar</span>
+      </div>
       <p className="panel-hint">
         Protected route fallback test. Uses the <code>x-dev-uid</code> dev
         bypass (<code>AUTH_DEV_BYPASS=true</code>) when you are not testing a
@@ -34,45 +37,64 @@ export default function AvatarPanel() {
         <code>demo-user-0001</code>.
       </p>
 
-      <label>
-        x-dev-uid
-        <input
-          value={devUid}
-          onChange={(e) => setDevUid(e.target.value)}
-          placeholder="demo-user-0001"
-        />
-      </label>
-      <button type="button" onClick={fetchAvatars} disabled={loading || !devUid.trim()}>
-        {loading ? 'Fetching...' : 'Fetch avatars'}
-      </button>
+      <div className="form-stack">
+        <label>
+          x-dev-uid
+          <input
+            value={devUid}
+            onChange={(e) => setDevUid(e.target.value)}
+            placeholder="demo-user-0001"
+          />
+        </label>
+        <button
+          type="button"
+          className="primary-cta form-submit"
+          onClick={fetchAvatars}
+          disabled={loading || !devUid.trim()}
+        >
+          {loading ? 'Fetching…' : 'Fetch avatars'}
+        </button>
+      </div>
 
       {error && <div className="result result-err">{error}</div>}
 
       {result && (
-        <div className="result result-ok">
-          <p>
-            {result.total} avatar(s) - page {result.page}, pageSize {result.pageSize}
+        <>
+          <p className="readout">
+            <span className="readout-key">Returned</span>
+            <span className="readout-value">
+              {result.total} avatar(s) · page {result.page} · size{' '}
+              {result.pageSize}
+            </span>
           </p>
+          {/* A ruled list, not a grid of cards inside the result box: that was
+              a third card depth, and the species name — a record — was set in
+              9px Press Start 2P and truncated with an ellipsis. */}
           {result.items.length === 0 ? (
-            <p>No avatars for this user.</p>
+            <p className="empty-note">
+              No avatars stored for this uid. The route answered; the collection
+              is empty.
+            </p>
           ) : (
-            <ul className="avatar-list">
+            <ul className="specimen-list">
               {result.items.map((a) => (
-                <li key={a.id} className="avatar-card">
-                  <div className="avatar-name">{a.speciesName}</div>
-                  <div className="avatar-meta">
-                    {a.speciesFamily ?? 'Unknown family'} - {a.source}
-                    {a.isTemporary ? ' - temporary' : ''}
+                <li key={a.id}>
+                  <div className="specimen-name">{a.speciesName}</div>
+                  <div className="specimen-meta">
+                    {a.speciesFamily ?? 'Unknown family'} · {a.source}
+                    {a.isTemporary ? ' · temporary' : ''}
                   </div>
-                  <div className="avatar-stats">
-                    HP {a.stats.hp} - ATK {a.stats.attack} - DEF {a.stats.defense} -
-                    SPD {a.stats.speed}
+                  <div className="specimen-stats">
+                    <span>HP {a.stats.hp}</span>
+                    <span>ATK {a.stats.attack}</span>
+                    <span>DEF {a.stats.defense}</span>
+                    <span>SPD {a.stats.speed}</span>
                   </div>
                 </li>
               ))}
             </ul>
           )}
-        </div>
+        </>
       )}
     </section>
   );

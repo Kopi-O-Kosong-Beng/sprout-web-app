@@ -37,14 +37,17 @@ export default function TicketPanel() {
 
   return (
     <section className="panel">
-      <h2>POST /api/query/submit</h2>
+      <div className="panel-head">
+        <h2>Support ticket</h2>
+        <span className="endpoint">POST /api/query/submit</span>
+      </div>
       <p className="panel-hint">
         Public route — no auth required. Writes a row to the{' '}
         <code>query_tickets</code> collection/table and returns a{' '}
         <code>refNumber</code>.
       </p>
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="form-stack">
         <label>
           Name
           <input value={name} onChange={(e) => setName(e.target.value)} required />
@@ -89,7 +92,11 @@ export default function TicketPanel() {
             required
           />
         </label>
-        <button type="submit" disabled={submitting}>
+        <button
+          type="submit"
+          className="primary-cta form-submit"
+          disabled={submitting}
+        >
           {submitting ? 'Submitting…' : 'Submit ticket'}
         </button>
       </form>
