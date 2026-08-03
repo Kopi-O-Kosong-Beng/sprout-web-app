@@ -815,7 +815,12 @@ describe('BattlePage', () => {
       expect(
         await screen.findByRole('heading', { name: heading })
       ).toBeVisible();
-      expect(screen.getByText(`XP awarded: ${xp}`)).toBeVisible();
+      expect(screen.getByText(`${xp} XP awarded`)).toBeVisible();
+      // A result is only meaningful next to everyone else's.
+      expect(screen.getByRole('link', { name: /view ranking/i })).toHaveAttribute(
+        'href',
+        '/leaderboard'
+      );
       expect(screen.queryByRole('group', { name: /battle moves/i })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: /replay/i })).toBeEnabled();
       expect(screen.getByRole('button', { name: /change plant/i })).toBeEnabled();

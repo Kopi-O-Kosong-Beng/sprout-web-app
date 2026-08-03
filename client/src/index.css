@@ -469,6 +469,33 @@ body {
   align-items: stretch;
 }
 
+/*
+  On a wide screen the fighters take the flanks and the diagonal opens up
+  across the full width, instead of two columns huddled down the centre with
+  empty gutters either side. The offset is a real vertical displacement, not
+  just a grid row: the player sits high on their side and the opponent higher
+  still, which is what reads as depth rather than as a two-column table.
+*/
+@media (min-width: 48rem) {
+  .battle-stage {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 2fr) minmax(0, 5fr);
+    grid-template-areas: 'player . opponent';
+    align-items: end;
+    gap: 1rem;
+    min-height: 17rem;
+  }
+
+  .battle-stage > .stage-player {
+    /* Lifted off the baseline so the pair sits on a diagonal, and so the
+       action bar below is not crowded by the taller of the two cards. */
+    margin-bottom: 2.25rem;
+  }
+
+  .battle-stage > .stage-opponent {
+    margin-bottom: 6.5rem;
+  }
+}
+
 .battle-stage > .stage-player {
   grid-area: player;
 }

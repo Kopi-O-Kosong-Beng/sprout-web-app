@@ -1041,7 +1041,18 @@ export default function BattlePage() {
                         ? 'Defeat'
                         : 'Battle abandoned'}
                   </h2>
-                  <p className="mt-2 text-xs">XP awarded: {session.xpAwarded}</p>
+                  <p className="mt-2 text-[15px] font-semibold">
+                    {session.xpAwarded} XP awarded
+                  </p>
+                  {/* A match ends with a number that only means something next
+                      to everyone else's, so the standings are one tap away
+                      rather than a hunt through the nav. */}
+                  <Link
+                    className="press pixel-button mt-3 inline-block px-3 py-2 text-[9px]"
+                    to="/leaderboard"
+                  >
+                    View ranking
+                  </Link>
                   {pendingCommand === 'replay' && (
                     <p
                       className="pulse-soft mt-2 text-[10px] leading-relaxed opacity-80"
