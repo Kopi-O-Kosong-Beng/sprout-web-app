@@ -182,3 +182,63 @@ describe('LoginPage Google sign-in', () => {
   });
 
 });
+
+/**
+ * Firebase fires onAuthStateChanged the instant signInWithPopup resolves, which
+ * is before loginWithGoogle has finished recording the session. LoginPage's
+ * redirect runs on every render, so without a guard the page navigated away
+ * mid-sequence — unmounting itself while its own request was still in flight
+ * and taking any resulting error message with it.
+ */
+describe('LoginPage holds the redirect until Google sign-in settles', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('stays on the form while the Google request is still running', async () => {
+    const user = userEvent.setup();
+    let finishSignIn: (() => void) | undefined;
+    authMocks.loginWithGoogle.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSignIn = resolve;
+        })
+    );
+
+    // One mounted page throughout: `busy` lives in its state, so a second
+    // render() would be a fresh component and would prove nothing.
+    authState.status = 'signed-out';
+    authState.profile = null;
+    // Built fresh per render: passing the same element reference back to
+    // rerender lets React bail out of reconciliation, so the component would
+    // never re-read the mocked auth status and the test would pass either way.
+    const tree = () => (
+      <MemoryRouter initialEntries={['/login']}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/home" element={<p>In-game hub</p>} />
+        </Routes>
+      </MemoryRouter>
+    );
+    const { rerender } = render(tree());
+
+    await user.click(screen.getByRole('button', { name: /google/i }));
+
+    // Firebase has authenticated; loginWithGoogle has not returned yet.
+    authState.status = 'authenticated';
+    rerender(tree());
+
+    expect(screen.queryByText('In-game hub')).not.toBeInTheDocument();
+
+    finishSignIn?.();
+    expect(await screen.findByText('In-game hub')).toBeInTheDocument();
+  });
+
+  it('redirects once the sign-in call has returned', async () => {
+    authMocks.loginWithGoogle.mockResolvedValue(undefined);
+
+    renderLogin('authenticated', { from: null });
+
+    expect(await screen.findByText('In-game hub')).toBeInTheDocument();
+  });
+});

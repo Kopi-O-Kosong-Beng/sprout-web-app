@@ -47,10 +47,17 @@ export default function LoginPage() {
 
   // Already signed in (Firebase session exists) — don't let this render the
   // login form again; only a logout should bring the user back here.
-  if (status === 'unverified') {
+  //
+  // `busy` holds the redirect while a sign-in this page started is still
+  // running. Firebase fires onAuthStateChanged the moment signInWithPopup
+  // resolves, which is before loginWithGoogle has recorded the session — so
+  // without this guard the Google flow navigated away mid-sequence, unmounting
+  // the page while its own request was in flight and taking any error message
+  // with it. The guard is presentational only; ProtectedRoute is the gate.
+  if (status === 'unverified' && !busy) {
     return <Navigate to="/verify-email" state={{ from }} replace />;
   }
-  if (status === 'authenticated') {
+  if (status === 'authenticated' && !busy) {
     return <Navigate to={from} replace />;
   }
 
