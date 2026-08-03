@@ -557,8 +557,9 @@ describe('BattlePage', () => {
 
     expect(screen.getByRole('progressbar', { name: /fern ward hp 132 of 132/i })).toBeVisible();
     expect(screen.getByRole('progressbar', { name: /thornback hp 0 of 140/i })).toBeVisible();
-    expect(screen.getByText('Sun 5 / 5')).toBeVisible();
-    expect(screen.getByText('Sun 0 / 3')).toBeVisible();
+    // Sun is drawn as pips; the accessible name is what carries the value now.
+    expect(screen.getByRole('img', { name: /fern ward sun 5 of 5/i })).toBeVisible();
+    expect(screen.getByRole('img', { name: /thornback sun 0 of 3/i })).toBeVisible();
     expect(screen.getByText(/committed to a decisive action/i)).toBeVisible();
     // No sprite on the bot: the pot is drawn on its own. Scoped to
     // .plant-sprite because the pot itself is now a painted <img>.
@@ -588,7 +589,9 @@ describe('BattlePage', () => {
       })
     );
 
-    expect(screen.getAllByText('Sun 0 / 0')).toHaveLength(2);
+    // A NaN and a negative maxEnergy must both floor to an empty 0-of-0 track
+    // rather than rendering a negative number of pips.
+    expect(screen.getAllByRole('img', { name: /sun 0 of 0/i })).toHaveLength(2);
     expect(
       screen.getByRole('button', { name: /solar lance/i })
     ).toHaveAccessibleDescription(/needs 2 sun; 0 available/i);

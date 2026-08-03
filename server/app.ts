@@ -9,6 +9,7 @@ import authRoutes from './routes/auth.routes';
 import queryRoutes from './routes/query.routes';
 import avatarRoutes from './routes/avatar.routes';
 import almanacRoutes from './routes/almanac.routes';
+import leaderboardRoutes from './routes/leaderboard.routes';
 import battleRoutes from './routes/battle.routes';
 import adminRoutes from './routes/admin.routes';
 import pipelineRoutes from './routes/pipeline.routes';
@@ -84,6 +85,8 @@ app.use('/api/query', queryRoutes);
 app.use('/api/avatar', avatarRoutes);
 // Deliberately public at the collection level — see routes/almanac.routes.ts.
 app.use('/api/almanac', almanacRoutes);
+// Authenticated in full: every row names a player — see routes/leaderboard.routes.ts.
+app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/battle/pve', battleRoutes);
 app.use('/api/admin', adminRoutes);
 // Migrated from Sprout_Dev_Platform. The sprite pipeline any verified account

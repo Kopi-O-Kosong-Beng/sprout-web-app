@@ -501,3 +501,63 @@ export async function verifyPasswordReset(input: {
   );
   return data;
 }
+
+/* ---------------------------------------------------------------------------
+   Leaderboards
+
+   Authenticated: every row is a display name bound to a play record. Rows carry
+   `isCaller` rather than a uid, so the client can highlight your own standing
+   without ever holding another player's identifier.
+   ------------------------------------------------------------------------- */
+
+export interface XpLeaderboardEntry {
+  rank: number;
+  displayName: string;
+  xp: number;
+  wins: number;
+  losses: number;
+  bestWinStreak: number;
+  isCaller: boolean;
+}
+
+export interface DiscoveryLeaderboardEntry {
+  rank: number;
+  displayName: string;
+  discoveries: number;
+  isCaller: boolean;
+}
+
+/** The caller's true standing across all players, not their index in the
+ *  visible slice — `rank` is null when they do not appear on that board. */
+export interface CallerXpStanding {
+  rank: number | null;
+  displayName: string;
+  xp: number;
+  wins: number;
+  losses: number;
+  bestWinStreak: number;
+}
+
+export interface CallerDiscoveryStanding {
+  rank: number | null;
+  displayName: string;
+  discoveries: number;
+}
+
+export interface Leaderboards {
+  xp: {
+    entries: XpLeaderboardEntry[];
+    caller: CallerXpStanding;
+    totalPlayers: number;
+  };
+  discovery: {
+    entries: DiscoveryLeaderboardEntry[];
+    caller: CallerDiscoveryStanding;
+    totalPlayers: number;
+  };
+}
+
+export async function getLeaderboards(): Promise<Leaderboards> {
+  const { data } = await apiClient.get<Leaderboards>('/api/leaderboard');
+  return data;
+}

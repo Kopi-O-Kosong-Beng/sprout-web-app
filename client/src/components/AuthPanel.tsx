@@ -204,12 +204,17 @@ export default function AuthPanel() {
   const firebaseReady = isFirebaseConfigured();
 
   return (
-    <section className="panel">
-      <h2>Firebase Auth test flow</h2>
+    // `panel-flow` marks this as the wide member of .test-layout: four
+    // sub-procedures need roughly twice the width of the single-form panels.
+    <section className="panel panel-flow">
+      <div className="panel-head">
+        <h2>Firebase auth flow</h2>
+        <span className="endpoint">Authorization: Bearer &lt;idToken&gt;</span>
+      </div>
       <p className="panel-hint">
-        Reference UX for designers. Signup/reset go through the Express backend;
-        login uses the Firebase JS SDK; protected API tests send{' '}
-        <code>Authorization: Bearer &lt;idToken&gt;</code>.
+        Signup and password reset go through the Express backend; login uses the
+        Firebase JS SDK. The steps run in order — step 3 spends the ID token
+        step 2 stores.
       </p>
 
       {!firebaseReady && (
@@ -219,9 +224,13 @@ export default function AuthPanel() {
         </div>
       )}
 
-      <div className="auth-grid">
-        <form onSubmit={handleSignup} className="auth-card">
-          <h3>1. Signup</h3>
+      {/* Four steps as ruled sections, not four cards. A card inside a card
+          inside a grid column was the old shape and it read as debris. */}
+      <div className="flow-steps">
+        <form onSubmit={handleSignup} className="flow-step">
+          <h3>
+            <span className="step-index">1</span>Create account
+          </h3>
           <label>
             Email
             <input
@@ -248,13 +257,19 @@ export default function AuthPanel() {
               required
             />
           </label>
-          <button type="submit" disabled={loading === 'signup'}>
-            {loading === 'signup' ? 'Creating...' : 'Create account'}
+          <button
+            type="submit"
+            className="primary-cta form-submit"
+            disabled={loading === 'signup'}
+          >
+            {loading === 'signup' ? 'Creating…' : 'Create account'}
           </button>
         </form>
 
-        <form onSubmit={handleLogin} className="auth-card">
-          <h3>2. Login</h3>
+        <form onSubmit={handleLogin} className="flow-step">
+          <h3>
+            <span className="step-index">2</span>Sign in
+          </h3>
           <label>
             Email
             <input
@@ -273,50 +288,110 @@ export default function AuthPanel() {
               required
             />
           </label>
-          <button type="submit" disabled={!firebaseReady || loading === 'login'}>
-            {loading === 'login' ? 'Signing in...' : 'Sign in with Firebase'}
+          <button
+            type="submit"
+            className="primary-cta form-submit"
+            disabled={!firebaseReady || loading === 'login'}
+          >
+            {loading === 'login' ? 'Signing in…' : 'Sign in'}
           </button>
-          <button type="button" onClick={refreshToken} disabled={!firebaseReady}>
+          <button
+            type="button"
+            className="secondary-cta form-submit"
+            onClick={refreshToken}
+            disabled={!firebaseReady}
+          >
             Refresh token
           </button>
-          <button type="button" onClick={handleLogout}>
-            Logout
+          <button
+            type="button"
+            className="secondary-cta form-submit"
+            onClick={handleLogout}
+          >
+            Sign out
           </button>
         </form>
 
-        <div className="auth-card">
-          <h3>3. Protected API tests</h3>
-          <p className="panel-hint">
-            Current Firebase user:{' '}
-            <strong>{firebaseUser?.email ?? 'not signed in'}</strong>
+        <div className="flow-step">
+          <h3>
+            <span className="step-index">3</span>Protected calls
+          </h3>
+          <p className="readout">
+            <span className="readout-key">Signed in</span>
+            {/* An absence is not a record: the fallback drops out of the mono
+                face so it cannot be mistaken for something the server said. */}
+            {firebaseUser?.email ? (
+              <span className="readout-value">{firebaseUser.email}</span>
+            ) : (
+              <span className="readout-value is-empty">
+                nobody yet — complete step 2
+              </span>
+            )}
           </p>
-          <button type="button" onClick={fetchMe} disabled={!idToken}>
-            GET /api/auth/me
-          </button>
-          <button type="button" onClick={recordLoginEvent} disabled={!idToken}>
-            POST /api/auth/session/login
-          </button>
-          <button type="button" onClick={recordLogoutEvent} disabled={!idToken}>
-            POST /api/auth/session/logout
-          </button>
-          <button type="button" onClick={fetchAvatars} disabled={!idToken}>
-            GET /api/avatar with token
-          </button>
+          {/* Method and path, in mono. These are strings the caller has to
+              match exactly, so they are shown as the record they are rather
+              than paraphrased into a sentence. */}
+          <div className="endpoint-list">
+            <button
+              type="button"
+              className="endpoint-button"
+              onClick={fetchMe}
+              disabled={!idToken}
+            >
+              {/* The space is for the accessible name — grid drops
+                  whitespace-only nodes, so it costs nothing visually but stops
+                  the button announcing as "GETslashapislashauthslashme". */}
+              <span className="method">GET</span>{' '}
+              <span className="path">/api/auth/me</span>
+            </button>
+            <button
+              type="button"
+              className="endpoint-button"
+              onClick={recordLoginEvent}
+              disabled={!idToken}
+            >
+              <span className="method">POST</span>{' '}
+              <span className="path">/api/auth/session/login</span>
+            </button>
+            <button
+              type="button"
+              className="endpoint-button"
+              onClick={recordLogoutEvent}
+              disabled={!idToken}
+            >
+              <span className="method">POST</span>{' '}
+              <span className="path">/api/auth/session/logout</span>
+            </button>
+            <button
+              type="button"
+              className="endpoint-button"
+              onClick={fetchAvatars}
+              disabled={!idToken}
+            >
+              <span className="method">GET</span>{' '}
+              <span className="path">/api/avatar</span>
+            </button>
+          </div>
           {profile && (
-            <p className="panel-hint">
-              Profile: {profile.displayName} - verified:{' '}
-              {String(profile.emailVerified)}
+            <p className="readout">
+              <span className="readout-key">Profile</span>
+              <span className="readout-value">
+                {profile.displayName} · verified {String(profile.emailVerified)}
+              </span>
             </p>
           )}
           {avatars && (
-            <p className="panel-hint">
-              Token avatar fetch returned {avatars.total} avatar(s).
+            <p className="readout">
+              <span className="readout-key">With token</span>
+              <span className="readout-value">{avatars.total} avatar(s)</span>
             </p>
           )}
         </div>
 
-        <form onSubmit={handleVerifyReset} className="auth-card">
-          <h3>4. Password reset</h3>
+        <form onSubmit={handleVerifyReset} className="flow-step">
+          <h3>
+            <span className="step-index">4</span>Password reset
+          </h3>
           <label>
             Email
             <input
@@ -328,6 +403,7 @@ export default function AuthPanel() {
           </label>
           <button
             type="button"
+            className="secondary-cta form-submit"
             onClick={handleRequestReset}
             disabled={loading === 'request-reset'}
           >
@@ -346,8 +422,12 @@ export default function AuthPanel() {
               required
             />
           </label>
-          <button type="submit" disabled={loading === 'verify-reset'}>
-            Verify OTP + reset password
+          <button
+            type="submit"
+            className="primary-cta form-submit"
+            disabled={loading === 'verify-reset'}
+          >
+            {loading === 'verify-reset' ? 'Resetting…' : 'Reset password'}
           </button>
         </form>
       </div>
