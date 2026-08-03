@@ -137,6 +137,119 @@ function actorLabel(event: BattleEvent): string {
   return 'System';
 }
 
+/**
+ * Who is on the receiving end of a damage or heal event.
+ *
+ * The server's own copy names the actor but never the target — "Thornback dealt
+ * 8 damage." reads identically whether you are winning or losing, which is what
+ * made Guard look like it was hurting the opponent. Derived here rather than in
+ * the API because the bot's messages are deliberately sanitized server-side,
+ * and because this also repairs log entries already stored in Firestore.
+ */
+function eventTargetLine(
+  event: BattleEvent,
+  playerName: string,
+  botName: string
+): string | null {
+  if (event.amount === undefined) return null;
+  if (event.actor === 'system') return null;
+
+  if (event.type === 'healed') {
+    const healer = event.actor === 'player' ? playerName : botName;
+    return `${healer} recovered ${event.amount} HP`;
+  }
+  if (event.type === 'damage_dealt') {
+    const target = event.actor === 'player' ? botName : playerName;
+    return `${target} took ${event.amount} damage`;
+  }
+  return null;
+}
+
+/** One thing that happened to one combatant on the turn just resolved. */
+interface TurnFeedback {
+  /** Changes per turn so React remounts the element and replays the animation. */
+  id: string;
+  kind: 'damage' | 'heal' | 'miss';
+  amount: number;
+}
+
+const RESOLVED_EVENTS = new Set<BattleEventType>([
+  'move_used',
+  'damage_dealt',
+  'move_missed',
+  'healed',
+]);
+
+/**
+ * What to show floating over each combatant after a turn resolves.
+ *
+ * Read back off the server's own log rather than diffed from HP, so the display
+ * cannot disagree with the record — a miss and a fully-guarded hit both leave
+ * HP looking similar, and only the log distinguishes them. A miss floats over
+ * the intended *target*, since that is where the player is looking.
+ */
+function deriveTurnFeedback(session: BattleSession): {
+  player: TurnFeedback | null;
+  opponent: TurnFeedback | null;
+} {
+  let latestTurn: number | null = null;
+  for (const event of session.log) {
+    if (RESOLVED_EVENTS.has(event.type)) latestTurn = event.turnNumber;
+  }
+  if (latestTurn === null) return { player: null, opponent: null };
+
+  let player: TurnFeedback | null = null;
+  let opponent: TurnFeedback | null = null;
+
+  for (const event of session.log) {
+    if (event.turnNumber !== latestTurn) continue;
+    const actedByPlayer = event.actor === 'player';
+
+    if (event.type === 'damage_dealt' && event.amount !== undefined) {
+      const hit: TurnFeedback = {
+        id: `${latestTurn}-${event.actor}-damage-${event.amount}`,
+        kind: 'damage',
+        amount: event.amount,
+      };
+      if (actedByPlayer) opponent = hit;
+      else player = hit;
+    } else if (event.type === 'healed' && event.amount !== undefined) {
+      const heal: TurnFeedback = {
+        id: `${latestTurn}-${event.actor}-heal-${event.amount}`,
+        kind: 'heal',
+        amount: event.amount,
+      };
+      if (actedByPlayer) player = heal;
+      else opponent = heal;
+    } else if (event.type === 'move_missed') {
+      const miss: TurnFeedback = {
+        id: `${latestTurn}-${event.actor}-miss`,
+        kind: 'miss',
+        amount: 0,
+      };
+      if (actedByPlayer) opponent = miss;
+      else player = miss;
+    }
+  }
+
+  return { player, opponent };
+}
+
+/** What a move actually does, in words. The stat row alone reads "Power 0" for
+ *  Guard, which says nothing about the one thing Guard is for. */
+function moveDescription(move: BattleMove): string {
+  switch (move.kind) {
+    case 'guard':
+      return 'Halves the damage you take this turn. Deals none.';
+    case 'quick':
+      return 'Reliable chip damage. Never misses.';
+    case 'signature':
+      return 'Your heaviest hit. Spends all stored Sun.';
+    case 'heal':
+      return 'Restores a quarter of your max HP. Once per battle.';
+  }
+}
+
 function moveDisabledReason(
   move: BattleMove,
   session: BattleSession,
@@ -243,6 +356,10 @@ export default function BattlePage() {
   const requestVersion = useRef(0);
   const inFlight = useRef(false);
   const releaseNavigationLock = useRef<(() => void) | null>(null);
+  const [turnFeedback, setTurnFeedback] = useState<{
+    player: TurnFeedback | null;
+    opponent: TurnFeedback | null;
+  }>({ player: null, opponent: null });
 
   const beginRequest = useCallback((): number | null => {
     if (inFlight.current) return null;
@@ -437,6 +554,26 @@ export default function BattlePage() {
     }
   };
 
+  /*
+    Floats and the hit reaction are transient: they replay whenever the server
+    returns a new session, then clear themselves so a player returning to the
+    tab does not find a stale "-21" hanging over their plant.
+  */
+  useEffect(() => {
+    if (!session) {
+      setTurnFeedback({ player: null, opponent: null });
+      return;
+    }
+    const next = deriveTurnFeedback(session);
+    setTurnFeedback(next);
+    if (!next.player && !next.opponent) return;
+    const timer = window.setTimeout(
+      () => setTurnFeedback({ player: null, opponent: null }),
+      1300
+    );
+    return () => window.clearTimeout(timer);
+  }, [session]);
+
   const avatars = useMemo(() => records.map(toPlantAvatarData), [records]);
   const selectedAvatar =
     avatars.find((avatar) => avatar.id === selectedAvatarId) ?? null;
@@ -517,7 +654,9 @@ export default function BattlePage() {
         </p>
       </div>
 
-      <div className="safe-bottom mx-auto flex w-full max-w-3xl flex-1 flex-col gap-3 px-3 py-3">
+      {/* Wider than the other boards: the arena is three columns across on a
+          laptop, and 48rem squeezed the flanks to roughly 200px each. */}
+      <div className="safe-bottom mx-auto flex w-full max-w-5xl flex-1 flex-col gap-3 px-3 py-3">
         {view === 'loading' && (
           <section
             className="pixel-panel flex flex-col items-center gap-3 p-6 text-center"
@@ -712,29 +851,61 @@ export default function BattlePage() {
               did: opponent above, the turn console between them, your plant
               below — so the two health bars frame whatever is happening.
             */}
-            <Combatant
-              role="Opponent"
-              name={session.bot.name}
-              currentHp={session.bot.currentHp}
-              maxHp={session.bot.maxHp}
-              energy={botEnergy}
-              align="end"
-              visual={<BotAvatar name={session.bot.name} spriteUrl={session.bot.spriteUrl} />}
-            />
+            {/*
+              A face-off, laid out on the horizontal axis: your plant and the
+              opponent hold the flanks and the moves sit between them. DOM order
+              is player, console, opponent; CSS grid areas put the console below
+              the pair on a phone and between them on a laptop.
+            */}
+            <div className="battle-stage">
+              <div className="arena stage-player">
+                <Combatant
+                  role="Your plant"
+                  name={session.player.name}
+                  currentHp={session.player.currentHp}
+                  maxHp={session.player.maxHp}
+                  energy={playerEnergy}
+                  side="player"
+                  feedback={turnFeedback.player}
+                  visual={<PlantAvatar avatar={playerAvatar} large />}
+                />
+              </div>
+
+              <div className="arena stage-opponent">
+                <Combatant
+                  role="Opponent"
+                  name={session.bot.name}
+                  currentHp={session.bot.currentHp}
+                  maxHp={session.bot.maxHp}
+                  energy={botEnergy}
+                  side="opponent"
+                  feedback={turnFeedback.opponent}
+                  visual={
+                    <BotAvatar name={session.bot.name} spriteUrl={session.bot.spriteUrl} />
+                  }
+                />
+              </div>
+            </div>
 
             <div className="pixel-panel p-3">
               {session.status === 'active' ? (
                 <>
                   <div className="flex items-baseline justify-between gap-2">
-                    <p className="font-pixel text-[8px] opacity-60">Your turn</p>
-                    <h2 className="font-pixel text-[10px]">Turn {session.turnNumber}</h2>
+                    <h2 className="font-pixel text-[11px]">Turn {session.turnNumber}</h2>
+                    <span className="text-[13px] font-semibold opacity-70">
+                      Choose one move
+                    </span>
                   </div>
 
-                  <div className="mt-2 border-2 border-black/25 px-2 py-1.5">
-                    <span className="font-pixel block text-[7px] opacity-60">
-                      Opponent intent
-                    </span>
-                    <strong className="battle-server-copy mt-1 block text-[10px] leading-relaxed">
+                  {/*
+                    The tell the player is meant to read before committing, so
+                    it gets real size rather than a 7px kicker over 10px copy.
+                  */}
+                  <div
+                    key={`intent-${session.turnNumber}`}
+                    className="turn-banner mt-2 border-2 border-black/25 px-2.5 py-2"
+                  >
+                    <strong className="battle-server-copy block text-[14px] leading-snug font-semibold">
                       {intentMessage(session.bot.name, session.botIntent)}
                     </strong>
                   </div>
@@ -758,11 +929,7 @@ export default function BattlePage() {
                     </p>
                   )}
 
-                  <div
-                    className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2"
-                    role="group"
-                    aria-label="Battle moves"
-                  >
+                  <div className="move-grid mt-3" role="group" aria-label="Battle moves">
                     {session.player.moves.map((move, index) => {
                       const reason = moveDisabledReason(
                         move,
@@ -770,49 +937,93 @@ export default function BattlePage() {
                         commandLocked,
                         sessionCommandFailed
                       );
+                      /*
+                        While a command is in flight every move reports the same
+                        "being saved" note. Printing it four times said nothing
+                        the spinner above does not, and adding four lines at once
+                        is what made the board jump on click. The per-move notes
+                        that are actually about the move still show.
+                      */
+                      const shownReason = commandLocked ? null : reason;
                       const reasonId = `move-reason-${index}`;
                       return (
-                        <div key={move.id}>
+                        <div className="move-slot" key={move.id}>
                           <button
-                            className="press pixel-button w-full px-2 py-2 text-left"
+                            className={`press move-card kind-${move.kind}`}
                             type="button"
                             disabled={commandLocked}
                             aria-disabled={
                               reason !== null && !commandLocked ? true : undefined
                             }
-                            aria-describedby={reason ? reasonId : undefined}
+                            aria-describedby={shownReason ? reasonId : undefined}
                             onClick={() => {
                               if (reason !== null) return;
                               void runAction(session.id, move.id, session.turnNumber);
                             }}
                           >
                             <span className="flex items-baseline justify-between gap-2">
-                              <strong className="battle-server-copy text-[9px] leading-relaxed">{move.name}</strong>
-                              <span className="text-[7px] opacity-60">{move.kind}</span>
+                              <span className="battle-server-copy move-name">
+                                {move.name}
+                              </span>
+                              {/* The move's category, kept because it is a real
+                                  field of the record and because it is how a
+                                  player learns that "signature" means the big
+                                  one they are saving Sun for. */}
+                              <span className="move-kind">{move.kind}</span>
                             </span>
-                            <span className="mt-1.5 grid grid-cols-2 gap-x-2 text-[8px] font-normal opacity-75">
-                              <span>Power {move.power}</span>
-                              <span>Accuracy {move.accuracy}%</span>
-                              <span>Sun gain {move.energyGain}</span>
-                              <span>Sun cost {move.energyCost}</span>
+                            {/* Without this, Guard advertises "Power 0" and
+                                nothing else — the stat row cannot express the
+                                only thing the move does. */}
+                            <span className="move-effect mt-1 block">
+                              {moveDescription(move)}
+                            </span>
+                            {/*
+                              Every public field stays on the card — the record
+                              is meant to be complete. The ones that cannot
+                              change this turn's decision (no power, a certain
+                              hit, a free move) recede instead of disappearing.
+                            */}
+                            <span className="mt-2 flex flex-wrap gap-1.5">
+                              <span
+                                className={`move-stat${move.power > 0 ? '' : ' is-muted'}`}
+                              >
+                                Power {move.power}
+                              </span>
+                              <span
+                                className={`move-stat${move.accuracy < 100 ? '' : ' is-muted'}`}
+                              >
+                                Accuracy {move.accuracy}%
+                              </span>
+                              <span
+                                className={`move-stat${move.energyGain > 0 ? '' : ' is-muted'}`}
+                              >
+                                Sun gain {move.energyGain}
+                              </span>
+                              <span
+                                className={`move-stat${move.energyCost > 0 ? '' : ' is-muted'}`}
+                              >
+                                Sun cost {move.energyCost}
+                              </span>
                             </span>
                           </button>
-                          {reason && (
-                            <span
-                              className="mt-1 block text-[9px] leading-relaxed opacity-70"
-                              id={reasonId}
-                            >
-                              {reason}
-                            </span>
-                          )}
+                          {/* Always rendered so the row's height is reserved
+                              whether or not there is anything to say. */}
+                          <span className="move-reason" id={reasonId}>
+                            {shownReason}
+                          </span>
                         </div>
                       );
                     })}
                   </div>
 
+                  {/*
+                    Quitting is not a move. Full-width solid red gave it more
+                    visual weight than the four moves above it, which is exactly
+                    backwards for the one control a player should rarely want.
+                  */}
                   <button
-                    className="press pixel-button mt-3 w-full px-2 py-2 text-[9px]"
-                    style={{ background: 'var(--color-hp-low)', color: '#fff' }}
+                    className="mt-3 w-full py-2 text-[12px] font-semibold underline underline-offset-2 disabled:opacity-45"
+                    style={{ color: 'var(--color-hp-low)' }}
                     type="button"
                     disabled={commandLocked || sessionCommandFailed}
                     onClick={() => void runAbandon(session.id)}
@@ -861,42 +1072,63 @@ export default function BattlePage() {
                   </div>
                 </div>
               )}
-            </div>
+              </div>
 
-            <Combatant
-              role="Your plant"
-              name={session.player.name}
-              currentHp={session.player.currentHp}
-              maxHp={session.player.maxHp}
-              energy={playerEnergy}
-              align="start"
-              visual={<PlantAvatar avatar={playerAvatar} large />}
-            />
-
-            <section className="pixel-panel p-3">
-              <p className="font-pixel text-[8px] opacity-60">Server record</p>
-              <h2 className="font-pixel mt-2 text-xs leading-relaxed">Battle log</h2>
-              <ol
-                className="mt-3 max-h-72 space-y-2 overflow-y-auto"
-                role="log"
-                aria-label="Battle log"
-              >
-                {session.log.map((event, index) => (
-                  <li
-                    key={`${event.turnNumber}-${event.type}-${event.actor}-${index}`}
-                    className="border-2 border-black/15 px-2 py-1.5"
-                  >
-                    <div className="font-pixel flex flex-wrap gap-x-2 text-[7px] opacity-60">
-                      <span>
-                        {event.turnNumber === 0 ? 'Opening' : `Turn ${event.turnNumber}`}
-                      </span>
-                      <span>{actorLabel(event)}</span>
-                      <span>{EVENT_LABELS[event.type]}</span>
-                    </div>
-                    <p className="battle-server-copy mt-1 text-[10px] leading-relaxed">{event.message}</p>
-                  </li>
-                ))}
-              </ol>
+            <section className="pixel-panel px-3 py-1">
+              {/*
+                Closed by default. During a turn the player is reading the
+                intent and their four moves; the record matters after a
+                surprise, not during one — and open, it was most of the page's
+                length and pushed the action bar off the first screen.
+              */}
+              <details>
+                <summary className="log-toggle">
+                  Battle log ({session.log.length})
+                </summary>
+                <ol
+                  className="mt-1 mb-2 max-h-64 space-y-2 overflow-y-auto"
+                  role="log"
+                  aria-label="Battle log"
+                >
+                {session.log.map((event, index) => {
+                  const targetLine = eventTargetLine(
+                    event,
+                    session.player.name,
+                    session.bot.name
+                  );
+                  return (
+                    <li
+                      key={`${event.turnNumber}-${event.type}-${event.actor}-${index}`}
+                      className="border-2 border-black/15 px-2 py-1.5"
+                    >
+                      <div className="font-pixel flex flex-wrap gap-x-2 text-[7px] opacity-60">
+                        <span>
+                          {event.turnNumber === 0 ? 'Opening' : `Turn ${event.turnNumber}`}
+                        </span>
+                        <span>{actorLabel(event)}</span>
+                        <span>{EVENT_LABELS[event.type]}</span>
+                      </div>
+                      <p className="battle-server-copy mt-1 text-[10px] leading-relaxed">{event.message}</p>
+                      {targetLine && (
+                        <p
+                          className="mt-0.5 text-[10px] leading-relaxed font-semibold"
+                          style={{
+                            color:
+                              event.type === 'healed'
+                                ? 'var(--color-hp-high)'
+                                : event.actor === 'player'
+                                  ? 'var(--color-hp-high)'
+                                  : 'var(--color-hp-low)',
+                          }}
+                        >
+                          {targetLine}
+                        </p>
+                      )}
+                    </li>
+                  );
+                })}
+                </ol>
+              </details>
             </section>
           </>
         )}
@@ -907,8 +1139,14 @@ export default function BattlePage() {
 
 /**
  * One side of the arena: the sprite, then a panel carrying the name, the HP bar
- * and the Sun readout. Mirrored for the opponent so the two face each other, as
- * the Android battle screen laid them out.
+ * and the Sun readout.
+ *
+ * Both sides use the same left-to-right order. The opponent used to be mirrored
+ * with `flex-row-reverse` so the two faced each other, which put the two health
+ * bars on opposite edges of the screen with only a 7px role label to tell them
+ * apart — so a losing turn and a winning one looked the same. Reading down one
+ * axis, with the role stated at a legible size, is what makes the bars
+ * comparable at a glance.
  */
 function Combatant({
   role,
@@ -916,36 +1154,88 @@ function Combatant({
   currentHp,
   maxHp,
   energy,
-  align,
+  side,
   visual,
+  feedback,
 }: {
   role: string;
   name: string;
   currentHp: number;
   maxHp: number;
   energy: { current: number; max: number };
-  align: 'start' | 'end';
+  side: 'player' | 'opponent';
   visual: React.ReactNode;
+  /** What just happened to this combatant this turn, if anything. */
+  feedback: TurnFeedback | null;
 }) {
   return (
-    <section
-      className={`flex items-center gap-3 ${align === 'end' ? 'flex-row-reverse' : ''}`}
-    >
-      <div className="shrink-0">{visual}</div>
+    <section className={`combatant is-${side}`}>
+      {feedback && (
+        <span
+          key={feedback.id}
+          className={`damage-float${
+            feedback.kind === 'heal'
+              ? ' is-heal'
+              : feedback.kind === 'miss'
+                ? ' is-miss'
+                : ''
+          }`}
+          aria-hidden="true"
+        >
+          {feedback.kind === 'heal'
+            ? `+${feedback.amount}`
+            : feedback.kind === 'miss'
+              ? 'MISS'
+              : `-${feedback.amount}`}
+        </span>
+      )}
 
-      <article className="pixel-panel min-w-0 flex-1 px-3 py-2">
-        <p className="font-pixel text-[7px] opacity-60">{role}</p>
-        <h2 className="battle-server-copy font-pixel mt-1 truncate text-[10px]">{name}</h2>
-        <div className="mt-2">
+      <div
+        key={feedback?.kind === 'damage' ? `hit-${feedback.id}` : 'idle'}
+        className={`combatant-visual shrink-0${
+          feedback?.kind === 'damage' ? ' hit-shake' : ''
+        }`}
+      >
+        {visual}
+      </div>
+
+      <div className="combatant-readout">
+        <p className="combatant-role">{role}</p>
+        <h2 className="battle-server-copy combatant-name mt-0.5 truncate">{name}</h2>
+        <div className="mt-1.5">
           <HealthBar label={`${name} HP`} current={currentHp} max={maxHp} />
         </div>
-        <p
-          className="font-pixel mt-1.5 text-[8px]"
-          aria-label={`${name} Sun ${energy.current} of ${energy.max}`}
-        >
-          Sun {energy.current} / {energy.max}
-        </p>
-      </article>
+        <div className="mt-1.5">
+          <SunTrack current={energy.current} max={energy.max} name={name} />
+        </div>
+      </div>
     </section>
+  );
+}
+
+/** Stored Sun as pips rather than "Sun 1 / 2" — whether the signature move is
+ *  affordable becomes a glance instead of a fraction to parse. */
+function SunTrack({
+  current,
+  max,
+  name,
+}: {
+  current: number;
+  max: number;
+  name: string;
+}) {
+  return (
+    <span className="sun-track" role="img" aria-label={`${name} Sun ${current} of ${max}`}>
+      {Array.from({ length: max }, (_, index) => (
+        <span
+          key={index}
+          className={index < current ? 'sun-pip is-filled' : 'sun-pip'}
+          aria-hidden="true"
+        />
+      ))}
+      <span className="ml-1 text-[11px] font-semibold text-white/70" aria-hidden="true">
+        Sun
+      </span>
+    </span>
   );
 }

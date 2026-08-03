@@ -426,6 +426,533 @@ body {
 }
 
 /* ============================================================================
+   Arena — the PVE battle stage
+   ----------------------------------------------------------------------------
+   A turn used to resolve in silence: the numbers changed and nothing else did,
+   so a hit, a miss and a guarded hit were indistinguishable. Everything here
+   exists to make one turn legible as an event — what happened, to whom, and
+   how much it cost. Feedback is layered so no single channel carries it alone:
+   the bar moves, the number flies, the sprite reacts, the log records.
+
+   Press Start 2P is display-only (see --font-pixel). It names things here;
+   every number and label a player has to read quickly is set in the body face.
+   ========================================================================== */
+
+/*
+  The stage. A battle is a face-off, so the two combatants occupy the left and
+  right of the horizontal axis and the move console sits between them — the
+  place a player's eyes already are. Stacking all three vertically (the earlier
+  layout) pushed the moves below the fold on a phone and left two empty gutters
+  on a desktop, and it never read as two things fighting.
+
+  One DOM order (player, console, opponent) serves both breakpoints via named
+  areas: side-by-side combatants with the console beneath on a phone, three
+  columns across on a laptop.
+*/
+/*
+  Opponent upper-right, your plant lower-left, the empty diagonal between them.
+  Facing rows put both fighters on one horizontal line, which reads as a lineup;
+  offsetting them on a diagonal is what gives the depth a battle scene needs and
+  is the composition Pokémon GO uses for the same reason.
+
+  minmax(0, 1fr), never a bare 1fr: a bare 1fr floors at min-content, and the
+  health readout ("124 / 124", Press Start 2P, nowrap) is wide enough that the
+  cells refused to shrink and pushed the board off a 375px viewport.
+*/
+.battle-stage {
+  display: grid;
+  gap: 0.5rem 0.75rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    '. opponent'
+    'player .';
+  align-items: stretch;
+}
+
+.battle-stage > .stage-player {
+  grid-area: player;
+}
+.battle-stage > .stage-opponent {
+  grid-area: opponent;
+}
+
+/* On a tall phone the diagonal costs two rows of height that the action bar
+   needs more. Below 24rem of width the offset collapses to a facing pair. */
+@media (max-width: 24rem) {
+  .battle-stage {
+    grid-template-areas: 'player opponent';
+  }
+}
+
+/*
+  The flank is a single surface, not a box inside a box. It previously carried
+  its own border and shadow around a .combatant that carried another — two
+  nested frames per side, which is the nested-card mistake and also stole width
+  from the sprite. One frame, and the art gets the room.
+*/
+.arena {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+/*
+  A combatant now owns a column, so it stacks: sprite above, then the readouts.
+  The two columns are mirror images of one another about the console, which is
+  what makes the pair read as a match rather than as two stacked status cards.
+*/
+.combatant {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  /* The sprite takes the slack and the readouts sit at the foot of the column,
+     so the two sides' health bars line up even when the art differs in size. */
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem 0.625rem;
+  /* The single frame for this side — .arena above is now only a grid cell. */
+  border: 3px solid #1a1a1a;
+  box-shadow: 4px 4px 0 rgb(0 0 0 / 0.35);
+  background:
+    radial-gradient(120% 70% at 50% 30%, rgb(255 255 255 / 0.12), transparent 65%),
+    rgb(12 8 42 / 0.82);
+  height: 100%;
+  min-width: 0;
+}
+
+/* Team colour on the inner edge of the frame only, so the two sides are
+   distinguishable without a second nested box. */
+.combatant.is-opponent {
+  border-color: color-mix(in srgb, var(--color-hp-low) 70%, #1a1a1a);
+}
+
+.combatant.is-player {
+  border-color: color-mix(in srgb, var(--color-hp-high) 70%, #1a1a1a);
+}
+
+/* The specimen is the hero (PRODUCT.md principle 1): give the art the cell's
+   spare height rather than letting the readouts crowd it. Fixed rather than
+   min-, so the board's height never changes as state does. */
+.combatant-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  height: 5.5rem;
+}
+
+@media (min-width: 48rem) {
+  .combatant-visual {
+    height: 7.5rem;
+  }
+}
+
+/* --- Action bar --------------------------------------------------------- */
+/* Four moves, two up. A single column pushed the fourth move under the fold on
+   a phone, which is the whole reason the board scrolled. */
+.move-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/*
+  Reserves the line the unavailability note occupies.
+
+  Committing a move sets every button to "another command is being saved", so
+  four notes appeared at once, the console grew by four lines, and the stage —
+  stretched to match it — visibly lurched. Holding the row means state can
+  change without the board moving under the player's thumb.
+*/
+.move-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.move-reason {
+  display: block;
+  min-height: 1.1rem;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: rgb(26 26 26 / 0.75);
+}
+
+/* --- Collapsed log ------------------------------------------------------ */
+/* The log is the server's record, useful after a surprise and noise the rest of
+   the time. Closed by default, and native <details> so it needs no JS and stays
+   keyboard-operable. */
+.log-toggle {
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.5rem 0.25rem;
+  list-style: none;
+}
+
+.log-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.log-toggle::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 0.4rem;
+  transition: transform 150ms ease-out;
+}
+
+details[open] > .log-toggle::before {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .log-toggle::before {
+    transition: none;
+  }
+}
+
+/* In a narrow flank the bar and its readout cannot share a line: the pixel-face
+   numbers are nowrap and would force the column wider than the viewport. Bar on
+   its own row, label and figures beneath it. */
+.combatant .health-meter {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem 0.4rem;
+}
+
+.combatant .health-meter > div {
+  flex: 1 1 100%;
+}
+
+/* The two face each other. The sprite art is symmetrical enough to flip, and
+   the opposing stances are most of what sells the confrontation. */
+.combatant.is-opponent .combatant-visual {
+  transform: scaleX(-1);
+}
+
+.combatant-readout {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+/* Marks whose turn the readout belongs to without relying on colour alone. */
+.combatant-role {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.combatant.is-opponent .combatant-role {
+  color: #ff9b93;
+}
+
+.combatant.is-player .combatant-role {
+  color: #9fe6a2;
+}
+
+.combatant-name {
+  font-family: var(--font-pixel);
+  letter-spacing: -0.04em;
+  font-size: 0.6875rem;
+  line-height: 1.6;
+  color: #fff;
+}
+
+/* --- Sun (energy) ------------------------------------------------------- */
+/* "Sun 1 / 2" made the player parse a fraction to learn whether the signature
+   move was available. Pips answer it without reading. */
+.sun-track {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.sun-pip {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid #1a1a1a;
+  background: rgb(255 255 255 / 0.25);
+}
+
+.sun-pip.is-filled {
+  background: var(--color-hp-mid);
+  box-shadow: 0 0 6px rgb(255 193 7 / 0.85);
+}
+
+/* --- Health, with a damage trail ---------------------------------------- */
+/* The trail lags the fill, so the size of the hit stays on screen for a beat
+   after the bar has already dropped. */
+.health-meter > div {
+  position: relative;
+}
+
+.health-meter .trail {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  height: 100%;
+  background: rgb(255 255 255 / 0.55);
+  transition: width 620ms cubic-bezier(0.22, 1, 0.36, 1) 180ms;
+}
+
+.health-meter i {
+  position: relative;
+  z-index: 1;
+}
+
+/* --- Turn feedback ------------------------------------------------------ */
+@keyframes damage-float {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0.25rem) scale(0.85);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -0.35rem) scale(1.06);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -2.75rem) scale(1);
+  }
+}
+
+/* Sits over the struck combatant. aria-hidden in the markup — the log and the
+   bar's own aria-valuenow already carry this to assistive tech. */
+.damage-float {
+  position: absolute;
+  left: 50%;
+  top: 0.25rem;
+  z-index: 2;
+  font-family: var(--font-pixel);
+  font-size: 1rem;
+  letter-spacing: -0.04em;
+  color: #fff;
+  text-shadow:
+    -2px -2px 0 #000,
+    2px -2px 0 #000,
+    -2px 2px 0 #000,
+    2px 2px 0 #000;
+  pointer-events: none;
+  animation: damage-float 1100ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.damage-float.is-heal {
+  color: #9bd547;
+}
+
+.damage-float.is-miss {
+  color: #c7f7f2;
+  font-size: 0.75rem;
+}
+
+@keyframes hit-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15% {
+    transform: translateX(-0.375rem);
+  }
+  32% {
+    transform: translateX(0.3125rem);
+  }
+  50% {
+    transform: translateX(-0.25rem);
+  }
+  70% {
+    transform: translateX(0.1875rem);
+  }
+  85% {
+    transform: translateX(-0.0625rem);
+  }
+}
+
+.hit-shake {
+  animation: hit-shake 420ms ease-out;
+}
+
+/* --- Move cards --------------------------------------------------------- */
+/* Four identical text blocks reading "Power 22 / Accuracy 100%" gave no way to
+   tell an attack from a shield at a glance. Kind is carried by fill and by a
+   worded effect line, never by colour alone. */
+.move-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.625rem 0.75rem;
+  border: 3px solid #1a1a1a;
+  box-shadow: 3px 3px 0 rgb(0 0 0 / 0.35);
+  background: #fff;
+  color: #1a1a1a;
+  /* 44px minimum touch target (PRODUCT.md accessibility). */
+  min-height: 2.75rem;
+  transition:
+    transform 120ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.move-card:hover:not(:disabled):not([aria-disabled='true']) {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 rgb(0 0 0 / 0.4);
+}
+
+.move-card:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 rgb(0 0 0 / 0.35);
+}
+
+.move-card.kind-quick {
+  background: #fdfdf5;
+}
+.move-card.kind-guard {
+  background: #eef6ff;
+}
+.move-card.kind-signature {
+  background: #fff4e8;
+}
+.move-card.kind-heal {
+  background: #eefaef;
+}
+
+/* Unavailable, but still readable — a player needs to know what they are
+   saving Sun *for*. */
+.move-card[aria-disabled='true'] {
+  opacity: 0.55;
+  box-shadow: 1px 1px 0 rgb(0 0 0 / 0.25);
+  cursor: not-allowed;
+}
+
+.move-name {
+  font-family: var(--font-pixel);
+  letter-spacing: -0.04em;
+  font-size: 0.625rem;
+  line-height: 1.7;
+}
+
+/* Data set in the body face, not Press Start 2P: these are numbers a player
+   compares under time pressure. */
+.move-stat {
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.0625rem 0.375rem;
+  border: 2px solid rgb(26 26 26 / 0.28);
+}
+
+/* A stat that cannot change this turn's decision — no power, a certain hit, a
+   free move. Still present and still legible; it just stops competing with the
+   figures that do decide.
+   0.68, not the 0.58 this started at: measured against the lightest card fill
+   (.kind-guard, #eef6ff) 0.58 gives 4.19:1, under the 4.5:1 floor for 12px
+   text. 0.68 measures 5.8:1 there and higher on the other three fills. */
+.move-stat.is-muted {
+  border-color: rgb(26 26 26 / 0.14);
+  color: rgb(26 26 26 / 0.68);
+  font-weight: 500;
+}
+
+/* Category label. Set in the body face at a readable size rather than 7px
+   Press Start 2P, which is where this text was previously illegible. */
+.move-kind {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgb(26 26 26 / 0.6);
+  white-space: nowrap;
+}
+
+.move-effect {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: rgb(26 26 26 / 0.82);
+}
+
+/* --- Turn banner -------------------------------------------------------- */
+@keyframes turn-banner {
+  0% {
+    opacity: 0;
+    transform: translateY(-0.5rem);
+  }
+  12%,
+  80% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
+}
+
+.turn-banner {
+  animation: turn-banner 1500ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* --- Ranking rows ------------------------------------------------------- */
+/* Rank is a numeral in a fixed-width slot, not a medal emoji: PRODUCT.md names
+   emoji-as-iconography as an anti-reference, and a numeral keeps ranks past
+   third legible in the same column. */
+.rank-slot {
+  font-family: var(--font-pixel);
+  letter-spacing: -0.04em;
+  font-size: 0.75rem;
+  min-width: 2.25rem;
+  padding: 0.25rem 0;
+  text-align: center;
+  border: 2px solid rgb(26 26 26 / 0.25);
+}
+
+.rank-slot.is-podium {
+  border-color: #1a1a1a;
+  background: var(--color-hp-mid);
+}
+
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.625rem;
+  border: 3px solid rgb(26 26 26 / 0.16);
+  background: rgb(255 255 255 / 0.5);
+}
+
+/* The caller's own row: border weight and a fill, so it survives greyscale. */
+.rank-row.is-caller {
+  border-color: var(--color-hp-high);
+  background: color-mix(in srgb, var(--color-hp-high) 16%, #fff);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .damage-float,
+  .hit-shake,
+  .turn-banner {
+    animation: none;
+  }
+
+  /* The float still needs to be seen, just not flown in. */
+  .damage-float {
+    opacity: 1;
+    transform: translate(-50%, -1.5rem);
+  }
+
+  .health-meter .trail,
+  .move-card {
+    transition: none;
+  }
+}
+
+/* ============================================================================
    Studio — scoped dark console
    ----------------------------------------------------------------------------
    Everything below applies only inside .studio-root. The studio's components
