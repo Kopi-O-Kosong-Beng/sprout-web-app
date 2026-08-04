@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import BackButton from '../components/common/BackButton';
+import { useToast } from '../hooks/useToast';
 import {
   PipelineRequestError,
   streamPipeline,
@@ -78,8 +79,11 @@ type Status =
       name: string;
       probability: number;
       threshold: number;
-    }
-  | { kind: 'error'; message: string };
+    };
+
+// There is no 'error' variant: every scan failure is raised as a toast, so
+// there is no per-screen error state to hold. Keeping one would mean a second
+// surface that nothing writes to.
 
 /**
  * What to tell the player when a run could not start or finish.
@@ -88,6 +92,11 @@ type Status =
  * the one that matters most here: a scan is the one screen a user is likely to
  * open away from wifi, standing in front of a plant.
  */
+function isOfflineFailure(error: unknown): boolean {
+  if (error instanceof PipelineRequestError) return error.kind === 'offline';
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
 function scanErrorMessage(error: unknown): string {
   if (error instanceof PipelineRequestError) {
     switch (error.kind) {
@@ -148,6 +157,7 @@ function captureFrame(video: HTMLVideoElement): string {
 }
 
 export default function ScanPage() {
+  const { showToast } = useToast();
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -298,6 +308,8 @@ export default function ScanPage() {
       // The server stops before generating when it is not sure enough, so a
       // missing sprite here is expected rather than a fault.
       if (lowConfidence) {
+        // No toast here: NotSureDialog is modal and has room for the advice
+        // that actually helps. Two surfaces for one message is noise.
         setStatus({ kind: 'lowConfidence', ...lowConfidence });
         return;
       }
@@ -320,12 +332,25 @@ export default function ScanPage() {
       // as "please sign in" — Firebase's token refresh fails with a network
       // error before any request is sent, so the user was told to do the one
       // thing that could not help.
-      setStatus({ kind: 'error', message: scanErrorMessage(error) });
+      // Toast rather than an inline line: the progress overlay covers the
+      // screen while a run is going, so a message painted underneath it is one
+      // the player never sees. The toast also carries the way out.
+      const message = scanErrorMessage(error);
+      setStatus({ kind: 'idle' });
+      showToast({
+        tone: 'error',
+        message,
+        action: isOfflineFailure(error)
+          ? { label: 'Retry', onSelect: () => void runPipeline(jpegDataUrl, source, customName) }
+          : undefined,
+      });
     } finally {
       processingRef.current = false;
       abortRef.current = null;
     }
-  }, []);
+    // showToast is stable (memoised in ToastProvider), but declared so the
+    // dependency is honest rather than implicitly assumed.
+  }, [showToast]);
 
   const onCapture = useCallback(() => {
     // Live preview available: grab a frame. Otherwise open the native camera.
@@ -342,13 +367,16 @@ export default function ScanPage() {
       try {
         void runPipeline(await fileToJpegDataUrl(file), source);
       } catch (error) {
-        setStatus({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Could not read that image.',
+        // The thrown text here is a DOM/FileReader message — not something to
+        // put in front of a player.
+        if (import.meta.env.DEV) console.warn('Could not read the picked file:', error);
+        showToast({
+          tone: 'error',
+          message: 'That image could not be opened. Try another photo.',
         });
       }
     },
-    [runPipeline]
+    [runPipeline, showToast]
   );
 
   const onTestImage = useCallback(async () => {
@@ -407,11 +435,6 @@ export default function ScanPage() {
 
       {/* Error / camera-hint line (the busy state uses the full overlay below) */}
       <div className="px-6 text-center">
-        {status.kind === 'error' && (
-          <p className="pixel-panel inline-block px-3 py-2 text-[9px] leading-relaxed text-red-700">
-            {status.message}
-          </p>
-        )}
         {status.kind === 'idle' && cameraError && (
           <p className="pixel-panel inline-block px-3 py-2 text-[9px]">{cameraError}</p>
         )}

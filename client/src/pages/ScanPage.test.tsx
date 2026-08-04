@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+import { ToastProvider } from '../components/common/Toast';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   PipelineRequestError,
@@ -94,7 +95,9 @@ async function startScan() {
   const user = userEvent.setup();
   render(
     <MemoryRouter>
-      <ScanPage />
+      <ToastProvider>
+        <ScanPage />
+      </ToastProvider>
     </MemoryRouter>
   );
   const trigger = await screen.findByRole('button', { name: /^test$/i });
@@ -159,7 +162,8 @@ describe('ScanPage save outcome', () => {
     );
     await startScan();
 
-    expect(await screen.findByText(/sign in/i)).toBeInTheDocument();
+    // Surfaced as a toast — the only place a scan failure appears now.
+    expect(await screen.findByText(/sign in to scan/i)).toBeInTheDocument();
     expect(screen.queryByText(/Pipeline API HTTP 401/i)).not.toBeInTheDocument();
   });
 
@@ -176,6 +180,8 @@ describe('ScanPage save outcome', () => {
 
     expect(await screen.findByText(/reconnect to wifi/i)).toBeInTheDocument();
     expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
+    // Offline is the one the player can fix, so the toast carries the way out.
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 
   it('does not mistake an unrelated error mentioning 401 for a sign-in problem', async () => {
