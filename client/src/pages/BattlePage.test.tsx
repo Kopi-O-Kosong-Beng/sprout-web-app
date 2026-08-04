@@ -128,7 +128,7 @@ function battleSession(options: SessionOptions = {}): BattleSession {
   const bot = {
     id: 'thornback-v1',
     name: 'Thornback',
-    spriteUrl: '',
+    spriteUrl: '/sprites/thornback.png',
     stats: { hp: 140, attack: 66, defense: 72, speed: 43 },
     currentHp: 118,
     maxHp: 140,
@@ -224,6 +224,9 @@ function RouteStateHarness() {
 }
 
 async function enterActiveBattle(session = battleSession()) {
+  // An earlier battle in the same test leaves its resume pointer behind, and
+  // this helper's contract is the roster → Start Match path, not a resume.
+  sessionStorage.removeItem('sprout.battle.sessionId');
   apiMocks.startPveBattle.mockResolvedValueOnce(session);
   const view = renderBattle({ avatarId: 'fern-1' });
   await view.user.click(
@@ -240,6 +243,9 @@ async function enterActiveBattle(session = battleSession()) {
 describe('BattlePage', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // A finished test's battle leaves its resume pointer behind; without this
+    // the next test would mount into a resumed session instead of the roster.
+    sessionStorage.clear();
     apiMocks.listOwnedAvatars.mockResolvedValue(rosterPage);
     apiMocks.startPveBattle.mockResolvedValue(battleSession());
     apiMocks.getPveBattle.mockResolvedValue(battleSession());
@@ -561,13 +567,13 @@ describe('BattlePage', () => {
     expect(screen.getByRole('img', { name: /fern ward sun 5 of 5/i })).toBeVisible();
     expect(screen.getByRole('img', { name: /thornback sun 0 of 3/i })).toBeVisible();
     expect(screen.getByText(/committed to a decisive action/i)).toBeVisible();
-    // No sprite on the bot: the pot is drawn on its own. Scoped to
-    // .plant-sprite because the pot itself is now a painted <img>.
+    // The serializer now publishes Thornback's rendered art, so the opponent
+    // stands in its pot as a real sprite <img>, not a bare pot.
     expect(
       screen
         .getByRole('img', { name: /thornback avatar/i })
-        .querySelector('.plant-sprite')
-    ).toBeNull();
+        .querySelector('img.plant-sprite')
+    ).not.toBeNull();
 
     const moves = screen.getByRole('group', { name: /battle moves/i });
     expect(within(moves).getByRole('button', { name: /vine tap.*quick.*power 18.*accuracy 100%.*sun gain 1.*sun cost 0/i })).toBeVisible();
@@ -910,5 +916,55 @@ describe('BattlePage', () => {
       ['battle-1'],
       ['battle-1'],
     ]);
+  });
+
+  it('resumes a stored active battle instead of showing the roster', async () => {
+    sessionStorage.setItem('sprout.battle.sessionId', 'battle-1');
+    apiMocks.getPveBattle.mockResolvedValue(battleSession({ turnNumber: 6 }));
+
+    renderBattle();
+
+    expect(
+      await screen.findByRole('heading', { name: /turn 6/i })
+    ).toBeVisible();
+    expect(apiMocks.getPveBattle).toHaveBeenCalledWith('battle-1');
+    expect(apiMocks.startPveBattle).not.toHaveBeenCalled();
+  });
+
+  it('drops a stored pointer to a finished battle and lands on the roster', async () => {
+    sessionStorage.setItem('sprout.battle.sessionId', 'battle-1');
+    apiMocks.getPveBattle.mockResolvedValue(battleSession({ status: 'won' }));
+
+    renderBattle();
+
+    expect(
+      await screen.findByRole('button', { name: /select fern ward/i })
+    ).toBeVisible();
+    expect(sessionStorage.getItem('sprout.battle.sessionId')).toBeNull();
+  });
+
+  it('drops a stored pointer the server no longer recognises', async () => {
+    sessionStorage.setItem('sprout.battle.sessionId', 'battle-gone');
+    apiMocks.getPveBattle.mockRejectedValue(new Error('Not found.'));
+
+    renderBattle();
+
+    expect(
+      await screen.findByRole('button', { name: /select fern ward/i })
+    ).toBeVisible();
+    expect(sessionStorage.getItem('sprout.battle.sessionId')).toBeNull();
+  });
+
+  it('stores the session pointer while a battle is live and clears it at the end', async () => {
+    apiMocks.submitPveAction.mockResolvedValue(
+      actionResult(battleSession({ status: 'won', xpAwarded: 20 }))
+    );
+    const { user } = await enterActiveBattle();
+    expect(sessionStorage.getItem('sprout.battle.sessionId')).toBe('battle-1');
+
+    await user.click(screen.getByRole('button', { name: /vine tap/i }));
+    await screen.findByRole('heading', { name: /victory/i });
+
+    expect(sessionStorage.getItem('sprout.battle.sessionId')).toBeNull();
   });
 });

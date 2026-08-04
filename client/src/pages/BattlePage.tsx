@@ -17,6 +17,7 @@ import {
 import { extractApiError } from '../services/apiClient';
 import {
   abandonPveBattle,
+  getPveBattle,
   listOwnedAvatars,
   startPveBattle,
   submitPveAction,
@@ -31,6 +32,42 @@ import { useNavigationLock } from '../hooks/useNavigationLock';
 import { toPlantAvatarData } from '../utils/avatarPresentation';
 
 const ROSTER_PAGE_SIZE = 100;
+
+/** Where the id of an in-progress battle survives a reload. The session lives
+ *  in Firestore either way; this is only the pointer back to it, so a refresh
+ *  resumes the fight instead of silently dumping the player at the roster
+ *  while the server still counts the battle as active. */
+const ACTIVE_SESSION_STORAGE_KEY = 'sprout.battle.sessionId';
+
+function readStoredSessionId(): string | null {
+  try {
+    return window.sessionStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSessionId(sessionId: string | null): void {
+  try {
+    if (sessionId === null) {
+      window.sessionStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+    } else {
+      window.sessionStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, sessionId);
+    }
+  } catch {
+    // Storage blocked (private mode) — resume degrades, battles still work.
+  }
+}
+
+/** True when the environment cannot or should not animate: the user asked for
+ *  reduced motion, or matchMedia is absent (jsdom). The battle then resolves
+ *  turns instantly — the same end state, none of the choreography. */
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return true;
+  }
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
 type BattleView =
   | 'loading'
@@ -180,58 +217,154 @@ const RESOLVED_EVENTS = new Set<BattleEventType>([
   'healed',
 ]);
 
+type CombatantSide = 'player' | 'opponent';
+
 /**
- * What to show floating over each combatant after a turn resolves.
- *
- * Read back off the server's own log rather than diffed from HP, so the display
- * cannot disagree with the record — a miss and a fully-guarded hit both leave
- * HP looking similar, and only the log distinguishes them. A miss floats over
- * the intended *target*, since that is where the player is looking.
+ * One beat of the turn's choreography: an actor's move and its outcome, played
+ * back in the server's own speed order. `hpDelta` is signed from the target's
+ * point of view (damage negative, heal positive) so the displayed bars can
+ * drain step by step instead of jumping to the final state.
  */
-function deriveTurnFeedback(session: BattleSession): {
-  player: TurnFeedback | null;
-  opponent: TurnFeedback | null;
-} {
+interface TurnBeat {
+  id: string;
+  actor: CombatantSide;
+  target: CombatantSide;
+  feedback: TurnFeedback;
+  hpDelta: number;
+  /** The attack line ("Fern Ward used Vine Tap."), when the log carries one. */
+  useMessage: string | null;
+  /** The outcome line ("Opponent dealt 17 damage."). */
+  outcomeMessage: string;
+  /** Set for player beats so the resolving move card can light up. */
+  moveId: string | null;
+}
+
+/**
+ * The latest resolved turn, read back off the server's own log rather than
+ * diffed from HP, so the display cannot disagree with the record — a miss and
+ * a fully-guarded hit both leave HP looking similar, and only the log
+ * distinguishes them. A miss lands on the intended *target*, since that is
+ * where the player is looking. Events arrive in true speed order (move_used
+ * then its outcome, faster combatant first), which is exactly the playback
+ * script.
+ */
+function deriveTurnScript(session: BattleSession): TurnBeat[] {
   let latestTurn: number | null = null;
   for (const event of session.log) {
     if (RESOLVED_EVENTS.has(event.type)) latestTurn = event.turnNumber;
   }
-  if (latestTurn === null) return { player: null, opponent: null };
+  if (latestTurn === null) return [];
 
-  let player: TurnFeedback | null = null;
-  let opponent: TurnFeedback | null = null;
+  const beats: TurnBeat[] = [];
+  let pendingUse: { actor: CombatantSide; message: string; moveId: string | null } | null =
+    null;
 
   for (const event of session.log) {
     if (event.turnNumber !== latestTurn) continue;
-    const actedByPlayer = event.actor === 'player';
+    if (event.actor === 'system') continue;
+    const actor: CombatantSide = event.actor === 'player' ? 'player' : 'opponent';
+    const other: CombatantSide = actor === 'player' ? 'opponent' : 'player';
 
+    if (event.type === 'move_used') {
+      pendingUse = {
+        actor,
+        message: event.message,
+        // Narrowed on event.actor: only the player variant carries moveId —
+        // the serializer redacts the bot's.
+        moveId: event.actor === 'player' && event.moveId ? event.moveId : null,
+      };
+      continue;
+    }
+
+    let beat: TurnBeat | null = null;
     if (event.type === 'damage_dealt' && event.amount !== undefined) {
-      const hit: TurnFeedback = {
-        id: `${latestTurn}-${event.actor}-damage-${event.amount}`,
-        kind: 'damage',
-        amount: event.amount,
+      beat = {
+        id: `${latestTurn}-${beats.length}-${actor}-damage-${event.amount}`,
+        actor,
+        target: other,
+        feedback: {
+          id: `${latestTurn}-${actor}-damage-${event.amount}`,
+          kind: 'damage',
+          amount: event.amount,
+        },
+        hpDelta: -event.amount,
+        useMessage: null,
+        outcomeMessage: event.message,
+        moveId: null,
       };
-      if (actedByPlayer) opponent = hit;
-      else player = hit;
     } else if (event.type === 'healed' && event.amount !== undefined) {
-      const heal: TurnFeedback = {
-        id: `${latestTurn}-${event.actor}-heal-${event.amount}`,
-        kind: 'heal',
-        amount: event.amount,
+      beat = {
+        id: `${latestTurn}-${beats.length}-${actor}-heal-${event.amount}`,
+        actor,
+        target: actor,
+        feedback: {
+          id: `${latestTurn}-${actor}-heal-${event.amount}`,
+          kind: 'heal',
+          amount: event.amount,
+        },
+        hpDelta: event.amount,
+        useMessage: null,
+        outcomeMessage: event.message,
+        moveId: null,
       };
-      if (actedByPlayer) player = heal;
-      else opponent = heal;
     } else if (event.type === 'move_missed') {
-      const miss: TurnFeedback = {
-        id: `${latestTurn}-${event.actor}-miss`,
-        kind: 'miss',
-        amount: 0,
+      beat = {
+        id: `${latestTurn}-${beats.length}-${actor}-miss`,
+        actor,
+        target: other,
+        feedback: {
+          id: `${latestTurn}-${actor}-miss`,
+          kind: 'miss',
+          amount: 0,
+        },
+        hpDelta: 0,
+        useMessage: null,
+        outcomeMessage: event.message,
+        moveId: null,
       };
-      if (actedByPlayer) opponent = miss;
-      else player = miss;
+    }
+
+    if (beat) {
+      if (pendingUse && pendingUse.actor === actor) {
+        beat.useMessage = pendingUse.message;
+        beat.moveId = pendingUse.moveId;
+        pendingUse = null;
+      }
+      beats.push(beat);
     }
   }
 
+  return beats;
+}
+
+/** The reduced-motion (and test) rendering of a script: the final floats for
+ *  each side at once, exactly what the pre-cinematic battle screen showed. */
+function aggregateScript(beats: TurnBeat[]): {
+  player: TurnFeedback | null;
+  opponent: TurnFeedback | null;
+} {
+  let player: TurnFeedback | null = null;
+  let opponent: TurnFeedback | null = null;
+  for (const beat of beats) {
+    if (beat.target === 'player') player = beat.feedback;
+    else opponent = beat.feedback;
+  }
+  return { player, opponent };
+}
+
+/** Where each side's HP bar stood before the turn's script ran, recovered by
+ *  undoing the script against the final session values. Clamping is left to
+ *  the HealthBar, which already bounds display to [0, max]. */
+function hpBeforeScript(
+  session: BattleSession,
+  beats: TurnBeat[]
+): { player: number; opponent: number } {
+  let player = session.player.currentHp;
+  let opponent = session.bot.currentHp;
+  for (const beat of beats) {
+    if (beat.target === 'player') player -= beat.hpDelta;
+    else opponent -= beat.hpDelta;
+  }
   return { player, opponent };
 }
 
@@ -360,6 +493,15 @@ export default function BattlePage() {
     player: TurnFeedback | null;
     opponent: TurnFeedback | null;
   }>({ player: null, opponent: null });
+  /** The turn cinematic. While non-null the arena is replaying the server's
+   *  script: bars drain beat by beat, the narration strip speaks, and the
+   *  acting side lunges. Null the rest of the time — the session is truth. */
+  const [cinematic, setCinematic] = useState<{
+    narration: string;
+    actingSide: CombatantSide;
+    resolvingMoveId: string | null;
+    displayedHp: { player: number; opponent: number };
+  } | null>(null);
 
   const beginRequest = useCallback((): number | null => {
     if (inFlight.current) return null;
@@ -406,15 +548,82 @@ export default function BattlePage() {
     }
   }, [beginRequest, finishRequest, preferredAvatarId]);
 
+  /** Refills the roster without touching view or session state — used behind a
+   *  resumed battle so Change Plant has plants to change to. Deliberately
+   *  outside the beginRequest lock: it must not block the player's first move,
+   *  and setRecords is safe to apply whenever it lands. */
+  const refreshRosterQuietly = useCallback(async () => {
+    const version = requestVersion.current;
+    try {
+      const fetchedRecords = await fetchAllOwnedAvatars(
+        () => version === requestVersion.current
+      );
+      if (version !== requestVersion.current) return;
+      setRecords(fetchedRecords.filter((record) => record.battleEligible));
+    } catch {
+      // The roster panel reloads itself when the player returns to selection.
+    }
+  }, []);
+
+  /** A reload mid-battle used to dump the player at the roster while the
+   *  server still counted the session as active. If a session id survived in
+   *  storage, pick the battle back up from the un-rate-limited GET first. */
+  const resumeStoredSession = useCallback(
+    async (sessionId: string) => {
+      const request = beginRequest();
+      if (request === null) return;
+      setView('loading');
+      setError(null);
+      setRetryCommand(null);
+      setNotice(null);
+
+      try {
+        const storedSession = await getPveBattle(sessionId);
+        if (request !== requestVersion.current) return;
+        if (storedSession.status === 'active') {
+          setSession(storedSession);
+          setView('active');
+          finishRequest(request);
+          void refreshRosterQuietly();
+          return;
+        }
+        writeStoredSessionId(null);
+        finishRequest(request);
+        void loadRoster();
+      } catch {
+        if (request !== requestVersion.current) return;
+        // A dead pointer (expired session, signed-out elsewhere) is not an
+        // error worth showing — the roster is the right place to land.
+        writeStoredSessionId(null);
+        finishRequest(request);
+        void loadRoster();
+      }
+    },
+    [beginRequest, finishRequest, loadRoster, refreshRosterQuietly]
+  );
+
   useEffect(() => {
-    void loadRoster();
+    const storedSessionId = readStoredSessionId();
+    if (storedSessionId) {
+      void resumeStoredSession(storedSessionId);
+    } else {
+      void loadRoster();
+    }
     return () => {
       requestVersion.current += 1;
       inFlight.current = false;
       releaseNavigationLock.current?.();
       releaseNavigationLock.current = null;
     };
-  }, [loadRoster]);
+  }, [loadRoster, resumeStoredSession]);
+
+  /** The stored pointer follows the session: written while a battle is live,
+   *  cleared the moment it ends, so a reload can only ever resume something
+   *  the server still considers active. */
+  useEffect(() => {
+    if (!session) return;
+    writeStoredSessionId(session.status === 'active' ? session.id : null);
+  }, [session]);
 
   const runStart = useCallback(
     async (avatarId: string, kind: 'start' | 'replay') => {
@@ -512,6 +721,9 @@ export default function BattlePage() {
       try {
         const abandonedSession = await abandonPveBattle(sessionId);
         if (request !== requestVersion.current) return;
+        // setSession(null) skips the pointer-follows-session effect, so the
+        // stored id is dropped here — an abandoned battle must not resume.
+        writeStoredSessionId(null);
         setSession(null);
         setNotice({
           kind: 'abandoned',
@@ -555,23 +767,81 @@ export default function BattlePage() {
   };
 
   /*
-    Floats and the hit reaction are transient: they replay whenever the server
-    returns a new session, then clear themselves so a player returning to the
-    tab does not find a stale "-21" hanging over their plant.
+    The turn cinematic. When the server returns a resolved turn, its log is a
+    speed-ordered script — move used, then its outcome, faster combatant first.
+    With motion available each beat plays in sequence: the acting side lunges,
+    the narration strip speaks the server's own lines, the float lands on the
+    target and only that beat's HP drains. Under reduced motion (or jsdom) the
+    whole script collapses to the final state with both floats at once, which
+    is exactly what this screen showed before it learned to choreograph.
+
+    Feedback is transient either way: it replays whenever the server returns a
+    new session, then clears itself so a player returning to the tab does not
+    find a stale "-21" hanging over their plant.
   */
   useEffect(() => {
     if (!session) {
       setTurnFeedback({ player: null, opponent: null });
+      setCinematic(null);
       return;
     }
-    const next = deriveTurnFeedback(session);
-    setTurnFeedback(next);
-    if (!next.player && !next.opponent) return;
-    const timer = window.setTimeout(
-      () => setTurnFeedback({ player: null, opponent: null }),
-      1300
+    const script = deriveTurnScript(session);
+    if (script.length === 0) {
+      setTurnFeedback({ player: null, opponent: null });
+      setCinematic(null);
+      return;
+    }
+
+    if (prefersReducedMotion()) {
+      setCinematic(null);
+      setTurnFeedback(aggregateScript(script));
+      const timer = window.setTimeout(
+        () => setTurnFeedback({ player: null, opponent: null }),
+        1300
+      );
+      return () => window.clearTimeout(timer);
+    }
+
+    const BEAT_MS = 1250;
+    const timers: number[] = [];
+    const hp = hpBeforeScript(session, script);
+    setTurnFeedback({ player: null, opponent: null });
+    // Bars start the playback at their pre-turn values, not the final state —
+    // otherwise the outcome leaks a frame before the first beat lands.
+    setCinematic({
+      narration: '',
+      actingSide: script[0].actor,
+      resolvingMoveId: null,
+      displayedHp: { ...hp },
+    });
+
+    script.forEach((beat, index) => {
+      timers.push(
+        window.setTimeout(() => {
+          hp[beat.target === 'player' ? 'player' : 'opponent'] += beat.hpDelta;
+          setCinematic({
+            narration: beat.useMessage
+              ? `${beat.useMessage} ${beat.outcomeMessage}`
+              : beat.outcomeMessage,
+            actingSide: beat.actor,
+            resolvingMoveId: beat.moveId,
+            displayedHp: { ...hp },
+          });
+          setTurnFeedback({
+            player: beat.target === 'player' ? beat.feedback : null,
+            opponent: beat.target === 'opponent' ? beat.feedback : null,
+          });
+        }, index * BEAT_MS)
+      );
+    });
+    timers.push(
+      window.setTimeout(() => {
+        setCinematic(null);
+        setTurnFeedback({ player: null, opponent: null });
+      }, script.length * BEAT_MS + 400)
     );
-    return () => window.clearTimeout(timer);
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [session]);
 
   const avatars = useMemo(() => records.map(toPlantAvatarData), [records]);
@@ -641,7 +911,7 @@ export default function BattlePage() {
       </div>
 
       <div className="px-4 pt-1 text-center">
-        <p className="font-pixel text-outline text-[8px] text-white">PVE battle lab</p>
+        <p className="font-pixel text-outline text-[9px] text-white">PVE battle lab</p>
         <h1
           className={`font-pixel text-outline mt-2 text-sm leading-relaxed text-white${
             session ? ' battle-server-copy' : ''
@@ -722,7 +992,7 @@ export default function BattlePage() {
 
             <section className="flex flex-col gap-3">
               <div className="pixel-panel p-3">
-                <p className="font-pixel text-[8px] opacity-60">Owned roster</p>
+                <p className="font-pixel text-[9px] opacity-60">Owned roster</p>
                 <h2 className="font-pixel mt-2 text-xs leading-relaxed">Choose your plant</h2>
                 <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {avatars.map((avatar) => (
@@ -740,12 +1010,12 @@ export default function BattlePage() {
                       onClick={() => selectAvatar(avatar.id)}
                     >
                       {avatar.isDemo && (
-                        <span className="font-pixel border-2 border-black bg-[color:var(--color-hp-mid)] px-1 text-[7px]">
+                        <span className="font-pixel border-2 border-black bg-[color:var(--color-hp-mid)] px-1 text-[9px]">
                           Demo
                         </span>
                       )}
                       <PlantAvatar avatar={avatar} />
-                      <span className="battle-server-copy font-pixel max-w-full truncate text-[8px]">
+                      <span className="battle-server-copy font-pixel max-w-full truncate text-[9px]">
                         {avatar.name}
                       </span>
                       <small className="battle-server-copy max-w-full truncate text-[9px] opacity-70">
@@ -762,7 +1032,7 @@ export default function BattlePage() {
                     <div className="flex justify-center">
                       <PlantAvatar avatar={selectedAvatar} large />
                     </div>
-                    <p className="font-pixel mt-2 text-[8px] opacity-60">Selected combatant</p>
+                    <p className="font-pixel mt-2 text-[9px] opacity-60">Selected combatant</p>
                     <h2 className="battle-server-copy font-pixel mt-2 text-xs leading-relaxed">
                       {selectedAvatar.name} is ready
                     </h2>
@@ -780,8 +1050,7 @@ export default function BattlePage() {
                       </p>
                     )}
                     <button
-                      className="press pixel-button mt-4 w-full px-3 py-3 text-[9px]"
-                      style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+                      className="press pixel-button is-primary mt-4 w-full px-3 py-3 text-[9px]"
                       type="button"
                       disabled={commandLocked}
                       onClick={() => void runStart(selectedAvatar.id, 'start')}
@@ -795,7 +1064,7 @@ export default function BattlePage() {
                   </>
                 ) : (
                   <>
-                    <p className="font-pixel text-[8px] opacity-60">Match setup</p>
+                    <p className="font-pixel text-[9px] opacity-60">Match setup</p>
                     <h2 className="font-pixel mt-2 text-xs leading-relaxed">
                       Choose an owned plant for this match
                     </h2>
@@ -862,11 +1131,14 @@ export default function BattlePage() {
                 <Combatant
                   role="Your plant"
                   name={session.player.name}
-                  currentHp={session.player.currentHp}
+                  currentHp={
+                    cinematic ? cinematic.displayedHp.player : session.player.currentHp
+                  }
                   maxHp={session.player.maxHp}
                   energy={playerEnergy}
                   side="player"
                   feedback={turnFeedback.player}
+                  acting={cinematic?.actingSide === 'player'}
                   visual={<PlantAvatar avatar={playerAvatar} large />}
                 />
               </div>
@@ -875,17 +1147,34 @@ export default function BattlePage() {
                 <Combatant
                   role="Opponent"
                   name={session.bot.name}
-                  currentHp={session.bot.currentHp}
+                  currentHp={
+                    cinematic ? cinematic.displayedHp.opponent : session.bot.currentHp
+                  }
                   maxHp={session.bot.maxHp}
                   energy={botEnergy}
                   side="opponent"
                   feedback={turnFeedback.opponent}
+                  acting={cinematic?.actingSide === 'opponent'}
                   visual={
                     <BotAvatar name={session.bot.name} spriteUrl={session.bot.spriteUrl} />
                   }
                 />
               </div>
             </div>
+
+            {/* The narration strip: the server's own lines, spoken one beat at
+                a time while the cinematic plays. aria-hidden because the log
+                below carries the same record for assistive tech, and under
+                reduced motion this never renders at all. */}
+            {cinematic && cinematic.narration && (
+              <p
+                key={cinematic.narration}
+                className="battle-narration battle-server-copy"
+                aria-hidden="true"
+              >
+                {cinematic.narration}
+              </p>
+            )}
 
             <div className="pixel-panel p-3">
               {session.status === 'active' ? (
@@ -908,6 +1197,27 @@ export default function BattlePage() {
                     <strong className="battle-server-copy block text-[14px] leading-snug font-semibold">
                       {intentMessage(session.bot.name, session.botIntent)}
                     </strong>
+                  </div>
+
+                  {/* Standing intel the payload always carried but the board
+                      never said: who moves first (speed order is fixed for the
+                      whole battle) and whether the opponent still holds its
+                      once-per-battle recovery. */}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className="battle-server-copy battle-intel">
+                      {session.player.stats.speed >= session.bot.stats.speed
+                        ? `${session.player.name} acts first each round`
+                        : `${session.bot.name} acts first each round`}
+                    </span>
+                    <span
+                      className={`battle-server-copy battle-intel${
+                        session.bot.healUsed ? ' is-spent' : ''
+                      }`}
+                    >
+                      {session.bot.healUsed
+                        ? `${session.bot.name} has spent its recovery`
+                        : `${session.bot.name} still holds a recovery`}
+                    </span>
                   </div>
 
                   {pendingCommand === 'action' && (
@@ -949,7 +1259,11 @@ export default function BattlePage() {
                       return (
                         <div className="move-slot" key={move.id}>
                           <button
-                            className={`press move-card kind-${move.kind}`}
+                            className={`press move-card kind-${move.kind}${
+                              cinematic?.resolvingMoveId === move.id
+                                ? ' is-resolving'
+                                : ''
+                            }`}
                             type="button"
                             disabled={commandLocked}
                             aria-disabled={
@@ -1033,7 +1347,7 @@ export default function BattlePage() {
                 </>
               ) : (
                 <div className="text-center">
-                  <p className="font-pixel text-[8px] opacity-60">Match complete</p>
+                  <p className="font-pixel text-[9px] opacity-60">Match complete</p>
                   <h2 className="font-pixel mt-2 text-sm leading-relaxed">
                     {session.status === 'won'
                       ? 'Victory'
@@ -1064,8 +1378,7 @@ export default function BattlePage() {
                   )}
                   <div className="mt-4 flex flex-col gap-2">
                     <button
-                      className="press pixel-button w-full px-2 py-3 text-[9px]"
-                      style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+                      className="press pixel-button is-primary w-full px-2 py-3 text-[9px]"
                       type="button"
                       disabled={commandLocked || sessionCommandFailed}
                       onClick={() => void runStart(session.avatarId, 'replay')}
@@ -1112,7 +1425,7 @@ export default function BattlePage() {
                       key={`${event.turnNumber}-${event.type}-${event.actor}-${index}`}
                       className="border-2 border-black/15 px-2 py-1.5"
                     >
-                      <div className="font-pixel flex flex-wrap gap-x-2 text-[7px] opacity-60">
+                      <div className="font-pixel flex flex-wrap gap-x-2 text-[9px] opacity-60">
                         <span>
                           {event.turnNumber === 0 ? 'Opening' : `Turn ${event.turnNumber}`}
                         </span>
@@ -1168,6 +1481,7 @@ function Combatant({
   side,
   visual,
   feedback,
+  acting = false,
 }: {
   role: string;
   name: string;
@@ -1178,6 +1492,8 @@ function Combatant({
   visual: React.ReactNode;
   /** What just happened to this combatant this turn, if anything. */
   feedback: TurnFeedback | null;
+  /** True while the cinematic says this side is the one delivering its move. */
+  acting?: boolean;
 }) {
   return (
     <section className={`combatant is-${side}`}>
@@ -1205,7 +1521,7 @@ function Combatant({
         key={feedback?.kind === 'damage' ? `hit-${feedback.id}` : 'idle'}
         className={`combatant-visual shrink-0${
           feedback?.kind === 'damage' ? ' hit-shake' : ''
-        }`}
+        }${acting ? ' is-acting' : ''}`}
       >
         {visual}
       </div>
