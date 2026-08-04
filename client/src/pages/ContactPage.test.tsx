@@ -25,9 +25,16 @@ describe('ContactPage notification copy', () => {
     const user = userEvent.setup();
     render(<ContactPage />);
 
-    expect(screen.getByText(
-      /Sprout stores a ticket.*then attempts a confirmation email and a team notification/i
-    )).toBeInTheDocument();
+    // The copy is now a three-step list rather than one sentence, but the
+    // distinction it exists to protect is unchanged: storage is stated as done,
+    // email only as attempted, and the team notification as following it.
+    expect(screen.getByText(/your ticket is saved/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/then attempts a confirmation email/i)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/the team is notified/i)).toBeInTheDocument();
+    // Nothing may claim the email was actually delivered.
+    expect(screen.queryByText(/email (was )?sent/i)).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/^name$/i), 'Ada Lovelace');
     await user.type(screen.getByLabelText(/^email$/i), 'ada@example.com');

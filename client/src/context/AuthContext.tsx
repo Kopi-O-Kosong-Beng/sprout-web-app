@@ -155,7 +155,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the previous account is confusing.
       provider.setCustomParameters({ prompt: 'select_account' });
       const credential = await signInWithPopup(getSproutFirebaseAuth(), provider);
-      await recordSessionLogin(await credential.user.getIdToken());
+      // The session record is an audit row, not part of authentication — the
+      // user is signed in either way. Awaiting it as a hard failure meant a
+      // transient backend blip surfaced as "Google sign-in failed" on an
+      // account that was, in fact, signed in. Tolerated the same way logout
+      // tolerates its own audit write.
+      await recordSessionLogin(await credential.user.getIdToken()).catch((err) => {
+        if (import.meta.env.DEV) console.warn('Failed to record login audit', err);
+      });
     } catch (err) {
       throw new Error(mapFirebaseLoginError(err));
     }

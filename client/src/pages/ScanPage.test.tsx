@@ -1,177 +1,155 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PipelineEvent } from '../services/pipelineStream';
-import ScanPage from './ScanPage';
+import ScanPage, { type ScanDiscovery } from './ScanPage';
 
-const mocks = vi.hoisted(() => ({
-  streamPipeline: vi.fn(),
-  createAvatar: vi.fn(),
-}));
+const streamPipeline = vi.hoisted(() => vi.fn());
+vi.mock('../services/pipelineStream', () => ({ streamPipeline }));
 
-vi.mock('../services/pipelineStream', () => ({
-  streamPipeline: mocks.streamPipeline,
-}));
-vi.mock('../services/sproutApi', () => ({ createAvatar: mocks.createAvatar }));
-
-const SPRITE_B64 = 'iVBORw0KGgo=';
-const SPRITE_DATA_URL = `data:image/png;base64,${SPRITE_B64}`;
-/** What the stubbed canvas returns for both the pipeline and archive copies. */
-const PHOTO_DATA_URL = 'data:image/jpeg;base64,photo';
-
-/** The events a successful run delivers, in the order the pipeline sends them. */
-const COMPLETED_RUN: PipelineEvent[] = [
-  {
-    event: 'step_done',
-    step: '1',
-    result: { name: 'Monstera deliciosa' },
-  } as unknown as PipelineEvent,
-  {
-    event: 'complete',
-    finalSpriteB64: SPRITE_B64,
-    finalPlant: {
-      name: 'Monstera deliciosa',
-      taxonomy: { Kingdom: 'Plantae', Family: 'Araceae' },
-      common_names: ['Swiss cheese plant'],
-      description: 'A climbing aroid.',
-      probability: 0.91,
-    },
-  } as unknown as PipelineEvent,
-];
-
-/**
- * Runs a scan and waits for the result dialog.
- *
- * `via: 'upload'` takes the "Test" button, which fetches the bundled photo —
- * a file off disk, so a web upload. `via: 'camera'` fires the hidden
- * capture="environment" input, which is the path the capture ring falls back to
- * when getUserMedia is unavailable, as it is in jsdom. Fetch, createImageBitmap
- * and the canvas are all stubbed, since jsdom implements none of them.
- */
-async function runScan(
-  via: 'upload' | 'camera' = 'upload',
-  events: PipelineEvent[] = COMPLETED_RUN
-): Promise<void> {
-  mocks.streamPipeline.mockImplementation(
-    async (
-      _url: string,
-      _body: unknown,
-      onEvent: (event: PipelineEvent) => void
-    ) => {
-      events.forEach(onEvent);
+/** Drives the page's own onEvent callback with a scripted event sequence. */
+function scriptStream(events: PipelineEvent[]) {
+  streamPipeline.mockImplementation(
+    async (_path: string, _body: unknown, onEvent: (event: PipelineEvent) => void) => {
+      for (const event of events) onEvent(event);
     }
   );
-
-  render(
-    <MemoryRouter>
-      <ScanPage />
-    </MemoryRouter>
-  );
-
-  if (via === 'upload') {
-    await userEvent.click(screen.getByRole('button', { name: 'Test' }));
-  } else {
-    const cameraInput = document.querySelector('input[capture="environment"]');
-    fireEvent.change(cameraInput!, {
-      target: { files: [new File(['photo'], 'plant.jpg', { type: 'image/jpeg' })] },
-    });
-  }
-  await screen.findByText('Done!');
 }
 
-beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob())));
+/**
+ * The `complete` frame as the server actually writes it.
+ *
+ * This fixture once carried a discovery block the server had never sent: the
+ * route put the raw dex record on the wire (`firstDiscoveredBy`, a UID) while
+ * this file asserted against the resolved shape, so both discovery tests passed
+ * green against a payload that did not exist. Two anchors now hold the fixture
+ * to reality, one at each end:
+ *
+ *  - `discovery` is typed as ScanDiscovery, the interface the page itself
+ *    reads, so a field that drifts from the consumer is a typecheck failure
+ *    here rather than a silent pass;
+ *  - server/tests/pipeline-complete-event.test.ts asserts the emitted frame
+ *    carries firstDiscoveredByName/isFirstDiscoverer and no firstDiscoveredBy,
+ *    which is the only place a *server-side* regression can be caught — a
+ *    client test driving a mocked stream cannot see the server at all.
+ */
+const DISCOVERY: ScanDiscovery = {
+  firstDiscoveredByName: 'Justin',
+  firstDiscoveredAt: '2026-08-02T00:00:00.000Z',
+  discoveryCount: 3,
+  isFirstDiscoverer: false,
+};
+
+function completeEvent(overrides: Partial<PipelineEvent> = {}): PipelineEvent {
+  return {
+    event: 'complete',
+    finalPlant: { name: 'Fern' },
+    finalSpriteB64: 'AAAA',
+    totalTimeMs: 1200,
+    avatarId: 'avatar-1',
+    saved: true,
+    discovery: DISCOVERY,
+    ...overrides,
+  } as PipelineEvent;
+}
+
+/**
+ * The page's real scan trigger is the "Test" button (onTestImage), which —
+ * before it ever touches the pipeline — fetches a demo JPEG and runs it
+ * through createImageBitmap + canvas to build a data URL. None of those
+ * browser APIs exist in jsdom, so they're stubbed here purely as plumbing to
+ * reach the (mocked) pipeline call; the pipeline itself is driven entirely by
+ * the `streamPipeline` mock, never by mocking `fetch` for the pipeline call.
+ */
+function stubDemoImageLoading() {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue({
+      blob: () => Promise.resolve(new Blob(['fake-jpeg'], { type: 'image/jpeg' })),
+    })
+  );
   vi.stubGlobal(
     'createImageBitmap',
-    vi.fn(async () => ({ width: 800, height: 600, close: vi.fn() }))
+    vi.fn().mockResolvedValue({ width: 10, height: 10, close: vi.fn() })
   );
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     drawImage: vi.fn(),
   } as unknown as CanvasRenderingContext2D);
   vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue(
-    'data:image/jpeg;base64,photo'
+    'data:image/jpeg;base64,ZmFrZQ=='
   );
-  // getUserMedia is absent in jsdom, which is the "no live preview" path.
-  mocks.createAvatar.mockReset();
-});
+}
 
-describe('scan result dialog', () => {
-  it('saves the finished sprite and identification to the archive', async () => {
-    mocks.createAvatar.mockResolvedValue({ id: 'created-1' });
-    await runScan('camera');
+/** Triggers the page's own scan entry point: the "Test" button. */
+async function startScan() {
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter>
+      <ScanPage />
+    </MemoryRouter>
+  );
+  const trigger = await screen.findByRole('button', { name: /^test$/i });
+  await user.click(trigger);
+}
 
-    expect(screen.getByText('IRL Scan')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Save to archive' }));
-
-    await waitFor(() => expect(mocks.createAvatar).toHaveBeenCalledTimes(1));
-    expect(mocks.createAvatar).toHaveBeenCalledWith({
-      speciesName: 'Monstera deliciosa',
-      speciesFamily: 'Araceae',
-      spriteDataUrl: SPRITE_DATA_URL,
-      photoDataUrl: PHOTO_DATA_URL,
-      source: 'mobile',
-      metadata: {
-        taxonomy: { Kingdom: 'Plantae', Family: 'Araceae' },
-        commonNames: ['Swiss cheese plant'],
-        description: 'A climbing aroid.',
-        confidence: 0.91,
-      },
-    });
-
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Saved to your archive.'
-    );
-    expect(screen.getByRole('link', { name: 'Open it' })).toHaveAttribute(
-      'href',
-      '/archive'
-    );
-    expect(
-      screen.queryByRole('button', { name: 'Save to archive' })
-    ).not.toBeInTheDocument();
+describe('ScanPage save outcome', () => {
+  beforeEach(() => {
+    streamPipeline.mockReset();
+    stubDemoImageLoading();
   });
 
-  // A file off disk could be any picture of anything, so it is a trial run:
-  // the dialog says so before the save, not after the plant vanishes.
-  it('saves a picked file as an expiring web upload', async () => {
-    mocks.createAvatar.mockResolvedValue({ id: 'created-2' });
-    await runScan('upload');
-
-    expect(screen.getByText('Web Upload')).toBeInTheDocument();
-    expect(
-      screen.getByText(/expires 24 hours after you save it/i)
-    ).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Save to archive' }));
-
-    await waitFor(() => expect(mocks.createAvatar).toHaveBeenCalledTimes(1));
-    expect(mocks.createAvatar).toHaveBeenCalledWith(
-      expect.objectContaining({ source: 'web' })
-    );
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it('reports a failed save and leaves the button available to retry', async () => {
-    mocks.createAvatar.mockRejectedValue(new Error('Firestore is unavailable.'));
-    await runScan();
+  it('shows who first discovered the species', async () => {
+    scriptStream([completeEvent()]);
+    await startScan();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Save to archive' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Firestore is unavailable.'
-    );
-    expect(
-      screen.getByRole('button', { name: 'Save to archive' })
-    ).toBeEnabled();
+    expect(await screen.findByText(/Justin/)).toBeInTheDocument();
+    // The dex counts scans, not scanners (repeat scans by one user included),
+    // so the label must not claim a number of people.
+    expect(screen.getByText(/scanned 3 times/i)).toBeInTheDocument();
+    expect(screen.queryByText(/explorers/i)).not.toBeInTheDocument();
   });
 
-  // The download is what "Save sprite" used to be, and on its own it is why a
-  // scanned plant never reached the archive. It stays, as the secondary action.
-  it('still offers the sprite as a download', async () => {
-    await runScan();
+  it('calls out the caller when they discovered it first', async () => {
+    const discovery: ScanDiscovery = {
+      firstDiscoveredByName: 'Zhi Feng',
+      firstDiscoveredAt: '2026-08-02T00:00:00.000Z',
+      discoveryCount: 1,
+      isFirstDiscoverer: true,
+    };
+    scriptStream([completeEvent({ discovery } as Partial<PipelineEvent>)]);
+    await startScan();
 
-    const download = screen.getByRole('link', { name: 'Download sprite' });
-    expect(download).toHaveAttribute('href', SPRITE_DATA_URL);
-    expect(download).toHaveAttribute('download', 'monstera-deliciosa.png');
-    expect(mocks.createAvatar).not.toHaveBeenCalled();
+    expect(await screen.findByText(/you discovered this first/i)).toBeInTheDocument();
+  });
+
+  it('tells the user when the scan could not be saved', async () => {
+    // The server maps every save fault onto this fixed line. Raw Firestore and
+    // Cloud Storage messages name the bucket, project and service account, so
+    // they must never reach the dialog.
+    scriptStream([
+      completeEvent({
+        saved: false,
+        avatarId: null,
+        saveError: 'Please try scanning it again.',
+      } as Partial<PipelineEvent>),
+    ]);
+    await startScan();
+
+    expect(await screen.findByText(/could not be saved/i)).toBeInTheDocument();
+    expect(screen.getByText(/please try scanning it again/i)).toBeInTheDocument();
+  });
+
+  it('asks the user to sign in when the server rejects the request', async () => {
+    streamPipeline.mockRejectedValue(new Error('Pipeline API HTTP 401'));
+    await startScan();
+
+    expect(await screen.findByText(/sign in/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Pipeline API HTTP 401/i)).not.toBeInTheDocument();
   });
 });

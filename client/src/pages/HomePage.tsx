@@ -1,4 +1,6 @@
 import { Link } from 'react-router-dom';
+import BackButton from '../components/common/BackButton';
+import { SproutMark } from '../components/common/PlantVisuals';
 import { useArchive } from '../hooks/useArchive';
 
 /**
@@ -32,6 +34,7 @@ export default function HomePage() {
         : avatars.length === 0
           ? 'No plants yet'
           : `${avatars.length} collected`,
+      wide: false,
     },
     {
       to: '/battle',
@@ -39,6 +42,15 @@ export default function HomePage() {
       icon: '/img/ic_nav_adventure.png',
       // Battle turns away an empty archive; say so here rather than on arrival.
       detail: !ready ? 'Loading…' : battleReady ? 'Battle the bot' : 'Scan a plant first',
+      wide: false,
+    },
+    {
+      to: '/leaderboard',
+      label: 'Ranking',
+      icon: '/img/ic_nav_adventure.png',
+      detail: 'Experience and first finds',
+      // Spans the pair above rather than orphaning a half-width third tile.
+      wide: true,
     },
   ];
 
@@ -65,6 +77,23 @@ export default function HomePage() {
        * The middle stays clear so the painted scene still reads.
        */}
       <div className="from-sprout/90 via-sprout/25 to-sprout/85 absolute inset-0 -z-10 bg-gradient-to-b" />
+
+      {/*
+        The hub renders under GameLayout, which has no AppHeader — so without
+        these two controls /home is a dead end: every other game screen's Back
+        falls through to here, and there is nothing that leaves for `/` or
+        reaches log out. Back pops real history; the brand is the fixed exit.
+      */}
+      <div className="safe-top flex items-center justify-between gap-2 px-3">
+        <BackButton fallback="/" />
+        <Link
+          to="/"
+          className="press pixel-button flex items-center gap-1.5 px-3 py-2 text-xs"
+        >
+          <SproutMark />
+          <span>Sprout site</span>
+        </Link>
+      </div>
 
       <div className="mx-auto flex w-full max-w-md flex-1 flex-col px-4">
         {/* min-h-0 lets the hero absorb the slack, and give it back on short screens. */}
@@ -123,12 +152,20 @@ export default function HomePage() {
             <Link
               key={destination.to}
               to={destination.to}
-              className="press pixel-panel pixel-panel-brand flex flex-col items-center gap-1.5 p-3 text-center"
+              className={`press pixel-panel pixel-panel-brand flex items-center gap-1.5 p-3 text-center ${
+                destination.wide
+                  ? 'col-span-2 flex-row justify-center gap-3'
+                  : 'flex-col'
+              }`}
             >
               <img
                 src={destination.icon}
                 alt=""
-                className="pixelated h-14 w-14 object-contain"
+                className={
+                  destination.wide
+                    ? 'pixelated h-10 w-10 shrink-0 object-contain'
+                    : 'pixelated h-14 w-14 object-contain'
+                }
               />
               <span className="font-pixel text-sprout text-[11px]">{destination.label}</span>
               <span className="text-sprout/70 text-[11px] leading-snug">{destination.detail}</span>

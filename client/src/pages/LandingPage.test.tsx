@@ -39,15 +39,8 @@ const SEA_HOLLY = {
 
 const TEMBUSU_DETAIL = {
   ...TEMBUSU,
-  spriteUrl: 'data:image/png;base64,sprite',
+  spriteUrl: 'https://cdn.test/sprites/fagraea_fragrans/v1.png',
   stats: { hp: 140, attack: 60, defense: 70, speed: 40 },
-  description:
-    'A large evergreen tree of lowland forest, long planted along Singapore streets for its fragrant cream flowers and dense crown. '.repeat(
-      4
-    ),
-  commonNames: ['Tembusu'],
-  taxonomy: { Family: 'Gentianaceae', Genus: 'Fagraea', Order: 'Gentianales' },
-  confidence: 0.94,
 };
 
 const ALMANAC = {
@@ -108,24 +101,7 @@ describe('landing page almanac', () => {
       await screen.findByAltText('Pixel-art sprite of Fagraea fragrans')
     ).toBeInTheDocument();
     expect(screen.getByText('140')).toBeInTheDocument();
-    expect(screen.getByText('Gentianales')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /sign in/i })).toBeInTheDocument();
-  });
-
-  // Plant.id prose runs to paragraphs; the card takes the opening and marks it.
-  it('shortens a long description rather than running the card off the page', async () => {
-    apiMocks.getAlmanacEntry.mockResolvedValue(TEMBUSU_DETAIL);
-    const user = userEvent.setup();
-    renderLanding();
-
-    await user.click(await screen.findByRole('button', { name: /Fagraea fragrans/ }));
-    await screen.findByAltText('Pixel-art sprite of Fagraea fragrans');
-
-    const shown = screen.getByText(/A large evergreen tree of lowland forest/);
-    expect(shown.textContent!.length).toBeLessThan(
-      TEMBUSU_DETAIL.description.length
-    );
-    expect(shown.textContent!.length).toBeLessThanOrEqual(241);
   });
 
   it('names the finder once signed in', async () => {
@@ -134,7 +110,7 @@ describe('landing page almanac', () => {
       ...TEMBUSU_DETAIL,
       discoveredByName: 'NatTheBotanist',
       discoveredAt: '2026-08-01T00:00:00.000Z',
-      photoUrl: 'data:image/jpeg;base64,photo',
+      isFirstDiscoverer: false,
     });
     const user = userEvent.setup();
     renderLanding();
@@ -142,9 +118,6 @@ describe('landing page almanac', () => {
     await user.click(await screen.findByRole('button', { name: /Fagraea fragrans/ }));
 
     expect(await screen.findByText('NatTheBotanist')).toBeInTheDocument();
-    expect(
-      screen.getByAltText('Photograph of Fagraea fragrans by NatTheBotanist')
-    ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /sign in/i })).not.toBeInTheDocument();
   });
 

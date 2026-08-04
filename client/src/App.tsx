@@ -12,6 +12,7 @@ import ContactPage from './pages/ContactPage';
 import ArchivePage from './pages/ArchivePage';
 import ScanPage from './pages/ScanPage';
 import BattlePage from './pages/BattlePage';
+import LeaderboardPage from './pages/LeaderboardPage';
 import BackendTestPage from './pages/BackendTestPage';
 import AdminPage from './pages/AdminPage';
 import StudioPage from './pages/StudioPage';
@@ -96,6 +97,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <BattlePage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/leaderboard"
+                element={
+                  <ProtectedRoute>
+                    <LeaderboardPage />
                   </ProtectedRoute>
                 }
               />

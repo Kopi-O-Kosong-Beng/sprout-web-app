@@ -238,36 +238,6 @@ export async function listOwnedAvatars(
   return data;
 }
 
-/** What the Scan screen banks after a run: the identification, the finished
- *  sprite, and the details worth keeping. Stats are the server's to derive. */
-export interface NewAvatarInput {
-  speciesName: string;
-  speciesFamily?: string | null;
-  /** The finished 192x192 PNG, as `data:image/png;base64,...`. */
-  spriteDataUrl: string;
-  /** The photo it was made from, downscaled, as `data:image/jpeg;base64,...`. */
-  photoDataUrl?: string;
-  /**
-   * How it was captured, which decides how long it lives: `mobile` is an IRL
-   * camera scan and is kept, `web` is a file upload and expires in 24 hours.
-   */
-  source: 'mobile' | 'web';
-  metadata?: {
-    taxonomy?: Record<string, string>;
-    commonNames?: string[];
-    description?: string;
-    confidence?: number;
-  };
-}
-
-/** Saves a scanned plant into the caller's archive (POST /api/avatar → 201). */
-export async function createAvatar(
-  input: NewAvatarInput
-): Promise<AvatarRecord> {
-  const { data } = await apiClient.post<AvatarRecord>('/api/avatar', input);
-  return data;
-}
-
 /** Removes one owned avatar for good (DELETE /api/avatar/:id → 204).
  *  The archive's shovel; the server answers 404 for anyone else's record. */
 export async function deleteAvatar(avatarId: string): Promise<void> {
@@ -301,20 +271,17 @@ export interface AlmanacEntry {
 /**
  * One species opened up.
  *
- * The sprite, stats and botanical record come back for anyone — they describe
- * the plant. The three optional fields describe the *person* who found it and
- * are present only when the request carried a login.
+ * The sprite and stats come back for anyone — they describe the plant. The
+ * finder's name and the discovery date describe a *person* and are present only
+ * when the request carried a login.
  */
 export interface AlmanacEntryDetail extends AlmanacEntry {
   spriteUrl: string | null;
-  stats: AvatarStats | null;
-  description: string | null;
-  commonNames: string[];
-  taxonomy: Record<string, string>;
-  confidence: number | null;
+  stats: AvatarStats;
   discoveredByName?: string | null;
   discoveredAt?: string | null;
-  photoUrl?: string | null;
+  /** True when the signed-in caller is the one who found it first. */
+  isFirstDiscoverer?: boolean;
 }
 
 export interface AlmanacSummary {
@@ -538,5 +505,65 @@ export async function verifyPasswordReset(input: {
     '/api/auth/verify-reset',
     input
   );
+  return data;
+}
+
+/* ---------------------------------------------------------------------------
+   Leaderboards
+
+   Authenticated: every row is a display name bound to a play record. Rows carry
+   `isCaller` rather than a uid, so the client can highlight your own standing
+   without ever holding another player's identifier.
+   ------------------------------------------------------------------------- */
+
+export interface XpLeaderboardEntry {
+  rank: number;
+  displayName: string;
+  xp: number;
+  wins: number;
+  losses: number;
+  bestWinStreak: number;
+  isCaller: boolean;
+}
+
+export interface DiscoveryLeaderboardEntry {
+  rank: number;
+  displayName: string;
+  discoveries: number;
+  isCaller: boolean;
+}
+
+/** The caller's true standing across all players, not their index in the
+ *  visible slice — `rank` is null when they do not appear on that board. */
+export interface CallerXpStanding {
+  rank: number | null;
+  displayName: string;
+  xp: number;
+  wins: number;
+  losses: number;
+  bestWinStreak: number;
+}
+
+export interface CallerDiscoveryStanding {
+  rank: number | null;
+  displayName: string;
+  discoveries: number;
+}
+
+export interface Leaderboards {
+  xp: {
+    entries: XpLeaderboardEntry[];
+    caller: CallerXpStanding;
+    totalPlayers: number;
+  };
+  discovery: {
+    entries: DiscoveryLeaderboardEntry[];
+    caller: CallerDiscoveryStanding;
+    totalPlayers: number;
+  };
+}
+
+export async function getLeaderboards(): Promise<Leaderboards> {
+  const { data } = await apiClient.get<Leaderboards>('/api/leaderboard');
   return data;
 }

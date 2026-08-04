@@ -15,12 +15,13 @@ import {
   type DemoAvatarTemplate,
 } from '../data/demo-avatar-templates';
 import { retentionForSource } from '../data/capture-source';
+import { sanitizeSpeciesKey } from '../pipeline/dex';
 import { plantAssetUrl } from '../data/sprite-catalog';
 import type {
   AvatarRecord,
   AvatarRepository,
-  NewAvatarInput,
   PaginatedAvatars,
+  ScanUpsertInput,
 } from '../models/avatar';
 import {
   invalidFirestoreDocument,
@@ -247,6 +248,18 @@ function demoAvatarConflictError(): DemoAvatarConflictError {
   return error;
 }
 
+interface EmptySpeciesNameError extends Error {
+  status: 400;
+}
+
+function emptySpeciesNameError(): EmptySpeciesNameError {
+  const error = new Error(
+    'speciesName must contain at least one alphanumeric character'
+  ) as EmptySpeciesNameError;
+  error.status = 400;
+  return error;
+}
+
 const firestoreAvatarRepository: AvatarRepository = {
   async listByUser(
     userId: string,
@@ -294,12 +307,54 @@ const firestoreAvatarRepository: AvatarRepository = {
     });
   },
 
-  async createForUser(
-    userId: string,
-    input: NewAvatarInput,
-    now: Date = new Date()
-  ): Promise<AvatarRecord> {
+  async upsertFromScan(userId: string, input: ScanUpsertInput) {
     const db = getDb();
+    const speciesKey = sanitizeSpeciesKey(input.speciesName);
+    if (!speciesKey) {
+      throw emptySpeciesNameError();
+    }
+
+    // The repository already filters by userId and works in memory rather than
+    // adding a composite index (see the note at the top of this file). Matching
+    // the sanitized name here follows that same trade-off, and avoids a schema
+    // migration for the seeded demo records, which carry no species key.
+    //
+    // Known limit: this only inspects the caller's most recent 1000 records
+    // (listByUser page size below). A user with more than 1000 distinct
+    // species would get a duplicate record instead of a de-duplication error.
+    // Deliberately deferred per spec decision D3 (no composite index, no
+    // transaction) — see the design spec discussion for this trade-off.
+    const existingPage = await this.listByUser(userId, 1, 1000);
+    const match = existingPage.items.find(
+      (candidate) => sanitizeSpeciesKey(candidate.speciesName) === speciesKey
+    );
+
+    const now = new Date().toISOString();
+
+    if (match) {
+      // A match means the user has now genuinely scanned this species, so a
+      // camera scan upgrades a temporary record to permanent — spec decision
+      // D2's intent, kept.
+      //
+      // A re-scan never *downgrades*, though: uploading a file of a plant you
+      // already caught with the camera must not put your kept record on a
+      // 24-hour clock. So an upload leaves an existing permanent record alone
+      // and only refreshes lastSeenAt.
+      const metadata = { ...(match.metadata ?? {}), lastSeenAt: now };
+      const retention =
+        input.source === 'mobile' || !match.isTemporary
+          ? { isTemporary: false, expiresAt: null }
+          : retentionForSource(input.source, new Date(now));
+      await db
+        .collection('avatar_records')
+        .doc(match.id)
+        .update({ metadata, ...retention });
+      return {
+        record: { ...match, metadata, ...retention },
+        created: false,
+      };
+    }
+
     const ref = db.collection('avatar_records').doc();
     const record: AvatarRecord = {
       id: ref.id,
@@ -307,19 +362,19 @@ const firestoreAvatarRepository: AvatarRepository = {
       speciesName: input.speciesName,
       speciesFamily: input.speciesFamily,
       spriteUrl: input.spriteUrl,
-      discoveredAt: now.toISOString(),
+      discoveredAt: now,
       source: input.source,
-      isTemporary: input.isTemporary,
-      expiresAt: input.expiresAt,
-      stats: { ...input.stats },
+      // A camera scan is a discovery and is kept; a file upload is a trial run
+      // and expires in 24h (Req 6.12). One rule, in data/capture-source.ts.
+      // This reverses spec decision D2, which made every scan permanent so
+      // nothing could expire mid-showcase — raised with the change.
+      ...retentionForSource(input.source, new Date(now)),
+      stats: input.stats,
       metadata: input.metadata,
     };
-
-    // The document stores everything but the id, which is the document key —
-    // toRecord() reads it back off the snapshot.
-    const { id: _id, ...document } = record;
+    const { id, ...document } = record;
     await ref.create(document);
-    return record;
+    return { record, created: true };
   },
 
   async ensureDemoSet(userId: string): Promise<PaginatedAvatars> {
@@ -343,7 +398,7 @@ const firestoreAvatarRepository: AvatarRepository = {
           throw demoAvatarConflictError();
         }
         // It is a demo record, but the template moved under it — the sprite URL
-        // changed when the pre-made set landed, for instance. Every field here
+        // changed when the hand-made art landed, for instance. Every field here
         // is ours to own, so refresh it rather than making the user toggle the
         // set off and on to pick the new one up.
         if (!isExactDemoRecord(document.data(), userId, template)) {

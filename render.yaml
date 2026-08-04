@@ -25,7 +25,16 @@ services:
         value: smtp
       - key: EMAIL_FROM
         value: hello.sprout.team@gmail.com
+      # Two different jobs, not a typo for each other:
+      #   ADMIN_EMAIL  (singular) -> where UC8 contact tickets are sent
+      #                              (ticket.service.ts:10)
+      #   ADMIN_EMAILS (plural)   -> the admin-privilege allowlist
+      #                              (admin.middleware.ts:18)
+      # Only the singular was declared, so every admin route denied the very
+      # account this file named.
       - key: ADMIN_EMAIL
+        value: hello.sprout.team@gmail.com
+      - key: ADMIN_EMAILS
         value: hello.sprout.team@gmail.com
       - key: SMTP_HOST
         value: smtp.gmail.com
@@ -45,3 +54,8 @@ services:
         sync: false
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
+      # Every scan writes its species sprite here. sprite-storage.ts throws
+      # without it, which fails the whole scan-to-archive path (UC6 -> UC4).
+      # Bucket live since 2026-07-21; see server/FIREBASE_SETUP.md.
+      - key: FIREBASE_STORAGE_BUCKET
+        value: sprout-dev-66f08.firebasestorage.app

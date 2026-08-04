@@ -1,5 +1,7 @@
 import request from 'supertest';
 import { ALMANAC_SPECIES, almanacIdForSpecies, findAlmanacSpecies } from '../data/almanac';
+import { sanitizeSpeciesKey } from '../pipeline/dex';
+import { deriveSpeciesStats } from '../data/species-stats';
 import { getDb } from '../firebase';
 import { clearFirestore } from './firestore-test-utils';
 
@@ -13,9 +15,8 @@ jest.mock('../firebase', () => {
 import app from '../app';
 
 const FINDER_ID = 'almanac-finder';
-const SPRITE_DATA_URL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-const PHOTO_DATA_URL = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ==';
+/** Sprite storage is canonical per species; the dex records the URL it wrote. */
+const SPRITE_URL = 'https://cdn.test/sprites/fagraea_fragrans/v1.png';
 /** A species the checklist selection is guaranteed to contain. */
 const TEMBUSU = 'Fagraea fragrans';
 
@@ -35,26 +36,23 @@ async function seedProfile(userId: string, displayName: string): Promise<void> {
   });
 }
 
-async function saveScan(
+async function seedDiscovery(
   speciesName: string,
   userId = FINDER_ID,
-  withPhoto = true
-): Promise<request.Response> {
-  return request(app)
-    .post('/api/avatar')
-    .set('Authorization', authorization(userId))
-    .send({
+  overrides: Record<string, unknown> = {}
+): Promise<void> {
+  const speciesKey = sanitizeSpeciesKey(speciesName);
+  await getDb()
+    .collection('dex')
+    .doc(speciesKey)
+    .set({
+      speciesKey,
       speciesName,
-      speciesFamily: 'Gentianaceae',
-      spriteDataUrl: SPRITE_DATA_URL,
-      ...(withPhoto ? { photoDataUrl: PHOTO_DATA_URL } : {}),
-      source: 'mobile',
-      metadata: {
-        taxonomy: { Family: 'Gentianaceae', Genus: 'Fagraea' },
-        commonNames: ['Tembusu'],
-        description: 'A large evergreen tree with fragrant cream flowers.',
-        confidence: 0.94,
-      },
+      firstDiscoveredBy: userId,
+      firstDiscoveredAt: '2026-08-02T00:00:00.000Z',
+      discoveryCount: 1,
+      spriteUrl: SPRITE_URL,
+      ...overrides,
     });
 }
 
@@ -108,7 +106,7 @@ describe('almanac taxonomy', () => {
 describe('public almanac', () => {
   it('is readable without a login and names nobody', async () => {
     await seedProfile(FINDER_ID, 'NatTheBotanist');
-    await saveScan(TEMBUSU);
+    await seedDiscovery(TEMBUSU);
 
     const response = await request(app).get('/api/almanac');
 
@@ -125,13 +123,11 @@ describe('public almanac', () => {
       discovered: true,
       discoveryCount: 1,
     });
-    // The privacy line: no finder, no date, no photograph, anywhere in the body.
+    // The privacy line: no finder, no uid, anywhere in the body.
     expect(tembusu).not.toHaveProperty('discoveredByName');
-    expect(tembusu).not.toHaveProperty('photoUrl');
     const body = JSON.stringify(response.body);
     expect(body).not.toContain('NatTheBotanist');
     expect(body).not.toContain(FINDER_ID);
-    expect(body).not.toContain('data:image/jpeg');
   });
 
   it('shows undiscovered species as undiscovered', async () => {
@@ -145,10 +141,10 @@ describe('public almanac', () => {
   });
 
   // The card the landing page opens: the species and what the game made of it,
-  // for anybody, with no login and nothing about the player who found it.
-  it('gives an anonymous caller the sprite, stats and botanical record', async () => {
+  // for anybody, with nothing about the player who found it.
+  it('gives an anonymous caller the sprite and stats', async () => {
     await seedProfile(FINDER_ID, 'NatTheBotanist');
-    await saveScan(TEMBUSU);
+    await seedDiscovery(TEMBUSU);
 
     const response = await request(app).get('/api/almanac/fagraea-fragrans');
 
@@ -156,31 +152,19 @@ describe('public almanac', () => {
     expect(response.body).toMatchObject({
       speciesName: TEMBUSU,
       discovered: true,
-      spriteUrl: SPRITE_DATA_URL,
-      description: 'A large evergreen tree with fragrant cream flowers.',
-      commonNames: ['Tembusu'],
-      taxonomy: { Family: 'Gentianaceae', Genus: 'Fagraea' },
-      confidence: 0.94,
+      spriteUrl: SPRITE_URL,
     });
-    expect(response.body.stats).toMatchObject({
-      hp: expect.any(Number),
-      attack: expect.any(Number),
-      defense: expect.any(Number),
-      speed: expect.any(Number),
-    });
-
-    // The person stays behind the login even though the plant does not.
+    // Stats are derived from the species key, so they match the archive's.
+    expect(response.body.stats).toEqual(
+      deriveSpeciesStats(sanitizeSpeciesKey(TEMBUSU))
+    );
     expect(response.body.discoveredByName).toBeUndefined();
-    expect(response.body.photoUrl).toBeUndefined();
-    const body = JSON.stringify(response.body);
-    expect(body).not.toContain('NatTheBotanist');
-    expect(body).not.toContain(FINDER_ID);
-    expect(body).not.toContain('data:image/jpeg');
+    expect(JSON.stringify(response.body)).not.toContain('NatTheBotanist');
   });
 
-  it('adds the finder, the date and the photo once signed in', async () => {
+  it('adds the finder and the date once signed in', async () => {
     await seedProfile(FINDER_ID, 'NatTheBotanist');
-    await saveScan(TEMBUSU);
+    await seedDiscovery(TEMBUSU);
 
     const signedIn = await request(app)
       .get('/api/almanac/fagraea-fragrans')
@@ -188,12 +172,21 @@ describe('public almanac', () => {
 
     expect(signedIn.status).toBe(200);
     expect(signedIn.body).toMatchObject({
-      speciesName: TEMBUSU,
-      discovered: true,
       discoveredByName: 'NatTheBotanist',
-      photoUrl: PHOTO_DATA_URL,
+      isFirstDiscoverer: false,
     });
     expect(Date.parse(signedIn.body.discoveredAt)).not.toBeNaN();
+  });
+
+  it('tells the first discoverer that it was them', async () => {
+    await seedProfile(FINDER_ID, 'NatTheBotanist');
+    await seedDiscovery(TEMBUSU);
+
+    const response = await request(app)
+      .get('/api/almanac/fagraea-fragrans')
+      .set('Authorization', authorization(FINDER_ID));
+
+    expect(response.body.isFirstDiscoverer).toBe(true);
   });
 
   it('answers 404 for a species outside the taxonomy', async () => {
@@ -202,53 +195,12 @@ describe('public almanac', () => {
     expect(response.status).toBe(404);
     expect(response.body).toEqual({ error: 'Species not found.' });
   });
-});
 
-describe('recording a discovery', () => {
-  it('credits the first finder and only counts the rest', async () => {
-    await seedProfile(FINDER_ID, 'FirstFinder');
-    await seedProfile('almanac-second', 'SecondFinder');
+  // Anything scanned that the 200 does not carry is the signal to extend it.
+  it('surfaces an off-taxonomy discovery to admins only', async () => {
+    await seedDiscovery('Monstera deliciosa', FINDER_ID, { discoveryCount: 3 });
 
-    const first = await saveScan(TEMBUSU);
-    const second = await saveScan(TEMBUSU, 'almanac-second');
-
-    expect(first.body.almanac).toEqual({
-      speciesId: 'fagraea-fragrans',
-      commonName: 'Tembusu',
-      firstDiscovery: true,
-    });
-    expect(second.body.almanac).toMatchObject({ firstDiscovery: false });
-
-    const entry = await request(app)
-      .get('/api/almanac/fagraea-fragrans')
-      .set('Authorization', authorization());
-    expect(entry.body).toMatchObject({
-      discoveredByName: 'FirstFinder',
-      discoveryCount: 2,
-    });
-  });
-
-  it('saves an off-taxonomy scan without claiming it is a discovery', async () => {
-    await seedProfile(FINDER_ID, 'FirstFinder');
-
-    const saved = await saveScan('Monstera deliciosa');
-
-    expect(saved.status).toBe(201);
-    expect(saved.body.almanac).toBeNull();
     const almanac = await request(app).get('/api/almanac');
     expect(almanac.body.discovered).toBe(0);
-  });
-
-  // The uid is the finder's identity; the display name is a snapshot taken at
-  // discovery time so a later rename cannot rewrite who found what.
-  it('keeps the credit when the finder renames themselves', async () => {
-    await seedProfile(FINDER_ID, 'OriginalName');
-    await saveScan(TEMBUSU);
-    await getDb().collection('users').doc(FINDER_ID).update({ displayName: 'NewName' });
-
-    const entry = await request(app)
-      .get('/api/almanac/fagraea-fragrans')
-      .set('Authorization', authorization());
-    expect(entry.body.discoveredByName).toBe('OriginalName');
   });
 });

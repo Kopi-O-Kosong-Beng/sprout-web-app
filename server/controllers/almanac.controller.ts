@@ -20,10 +20,9 @@ export const handleGetAlmanac: RequestHandler = async (_req, res, next) => {
 export const handleGetAlmanacEntry: RequestHandler = async (req, res, next) => {
   try {
     // req.user is set only when the caller presented a usable token; the route
-    // uses optional auth, so anonymous callers arrive here too.
-    const entry = await getAlmanacEntry(req.params.speciesId, {
-      signedIn: Boolean(req.user),
-    });
+    // uses optional auth, so anonymous callers arrive here too. Passing the uid
+    // rather than a flag lets the service say whether *this* caller was first.
+    const entry = await getAlmanacEntry(req.params.speciesId, req.user?.uid);
     if (!entry) {
       res.status(404).json({ error: 'Species not found.' });
       return;

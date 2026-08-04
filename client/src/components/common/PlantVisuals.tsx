@@ -295,6 +295,13 @@ export function HealthBar({
     >
       <span>HP</span>
       <div>
+        {/*
+          Same width as the fill, but a slower transition with a delay — so on
+          a hit the white trail hangs behind the coloured bar for a beat and
+          the size of the damage stays readable after the bar has dropped.
+          Decorative: the value is already on the progressbar above.
+        */}
+        <span className="trail" style={{ width: `${percentage}%` }} aria-hidden="true" />
         <i style={{ width: `${percentage}%` }} />
       </div>
       <strong>

@@ -12,13 +12,8 @@
  */
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { summarise } from '../../utils/text';
 import type { AlmanacEntryDetail } from '../../services/sproutApi';
 import { PlantSilhouette } from './AlmanacGrid';
-
-/** Ranks worth showing, in the order a botanist reads them. Plant.id returns a
- *  dozen; the card is not the place for all of them. */
-const TAXONOMY_RANKS = ['Family', 'Genus', 'Order', 'Class'] as const;
 
 export function AlmanacSpecimen({
   entry,
@@ -49,8 +44,6 @@ export function AlmanacSpecimen({
     );
   }
 
-  const description = summarise(entry.description);
-  const ranks = TAXONOMY_RANKS.filter((rank) => entry.taxonomy[rank]);
 
   return (
     <section
@@ -82,7 +75,7 @@ export function AlmanacSpecimen({
                 {entry.speciesName}
               </h3>
               <p className="mt-1 text-sm text-white/60">
-                {[entry.commonName ?? entry.commonNames[0], entry.family, entry.growthForm]
+                {[entry.commonName, entry.family, entry.growthForm]
                   .filter(Boolean)
                   .join(' · ')}
               </p>
@@ -96,23 +89,9 @@ export function AlmanacSpecimen({
             </button>
           </div>
 
-          {description && (
-            <p className="mt-4 text-sm leading-relaxed text-white/70">{description}</p>
-          )}
-
-          {ranks.length > 0 && (
-            <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-              {ranks.map((rank) => (
-                <div key={rank} className="flex gap-2">
-                  <dt className="font-pixel text-[8px] text-white/40">{rank}</dt>
-                  <dd className="truncate text-white/70">{entry.taxonomy[rank]}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-
-          {entry.stats && (
-            <dl className="mt-5 grid grid-cols-4 gap-2">
+          {/* Derived from the species key, exactly as the archive derives
+              them, so the almanac and the game never disagree. */}
+          <dl className="mt-5 grid grid-cols-4 gap-2">
               {(
                 [
                   ['HP', entry.stats.hp],
@@ -125,28 +104,19 @@ export function AlmanacSpecimen({
                   <dt className="font-pixel text-[8px] text-white/40">{label}</dt>
                   <dd className="font-pixel mt-1 text-sm">{value}</dd>
                 </div>
-              ))}
-            </dl>
-          )}
+            ))}
+          </dl>
 
           <p className="mt-5 text-xs leading-relaxed text-white/50">
-            Found {entry.discoveryCount} time{entry.discoveryCount === 1 ? '' : 's'}
-            {entry.confidence !== null
-              ? ` · identified at ${Math.round(entry.confidence * 100)}% confidence`
-              : ''}
-            .
+            {/* The dex counts scans, not scanners — repeat scans by one player
+                are included — so this must never be read as a headcount. */}
+            Scanned {entry.discoveryCount} time
+            {entry.discoveryCount === 1 ? '' : 's'}.
           </p>
 
           {/* The person, not the plant — the half that needs an account. */}
           {signedIn ? (
-            <div className="mt-3 flex items-center gap-3">
-              {entry.photoUrl && (
-                <img
-                  src={entry.photoUrl}
-                  alt={`Photograph of ${entry.speciesName} by ${entry.discoveredByName ?? 'the finder'}`}
-                  className="h-16 w-16 shrink-0 border-2 border-white/20 object-cover"
-                />
-              )}
+            <div className="mt-3">
               <p className="text-xs leading-relaxed text-white/60">
                 First found by{' '}
                 <span className="text-white">{entry.discoveredByName ?? 'a Sprout player'}</span>
@@ -158,7 +128,7 @@ export function AlmanacSpecimen({
                       timeZone: 'UTC',
                     }).format(Date.parse(entry.discoveredAt))}`
                   : ''}
-                .
+                {entry.isFirstDiscoverer ? ' — that was you.' : '.'}
               </p>
             </div>
           ) : (
@@ -166,7 +136,7 @@ export function AlmanacSpecimen({
               <Link to="/login" className="underline">
                 Sign in
               </Link>{' '}
-              to see who found it first and the photo they took.
+              to see who found it first.
             </p>
           )}
         </div>
