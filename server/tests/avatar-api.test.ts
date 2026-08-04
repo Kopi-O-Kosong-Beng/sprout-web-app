@@ -274,3 +274,117 @@ describe('verified avatar archive API', () => {
     expect(JSON.stringify(foreign.body)).not.toContain('Private Foreign Fern');
   });
 });
+
+describe('DELETE /api/avatar/:avatarId (the archive shovel)', () => {
+  it('deletes an owned avatar and answers 204 with no body', async () => {
+    await seedAvatar({ id: 'shovel-target', speciesName: 'Doomed Fern' });
+
+    const response = await request(app)
+      .delete('/api/avatar/shovel-target')
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(204);
+    expect(response.body).toEqual({});
+
+    const doc = await getDb()
+      .collection('avatar_records')
+      .doc('shovel-target')
+      .get();
+    expect(doc.exists).toBe(false);
+  });
+
+  it("answers 404 for someone else's avatar and leaves it in place", async () => {
+    await seedAvatar({
+      id: 'foreign-avatar',
+      userId: FOREIGN_ID,
+      speciesName: 'Foreign Fern',
+    });
+
+    const response = await request(app)
+      .delete('/api/avatar/foreign-avatar')
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+
+    const doc = await getDb()
+      .collection('avatar_records')
+      .doc('foreign-avatar')
+      .get();
+    expect(doc.exists).toBe(true);
+  });
+
+  it('answers 404 for an id that never existed', async () => {
+    const response = await request(app)
+      .delete('/api/avatar/never-existed')
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+  });
+
+  it('answers 404 — not 500 — for a percent-encoded slash in the id', async () => {
+    // Express decodes a%2Fb to 'a/b'; unguarded, Firestore's doc() throws on
+    // the multi-component path and the route leaked a 500 instead of holding
+    // its indistinguishable-404 contract.
+    const response = await request(app)
+      .delete('/api/avatar/a%2Fb')
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+  });
+
+  it('rejects an unauthenticated delete without touching the record', async () => {
+    await seedAvatar({ id: 'kept-avatar', speciesName: 'Kept Fern' });
+
+    const response = await request(app).delete('/api/avatar/kept-avatar');
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: 'Unauthorised.' });
+
+    const doc = await getDb().collection('avatar_records').doc('kept-avatar').get();
+    expect(doc.exists).toBe(true);
+  });
+});
+
+/**
+ * `.doc()` throws synchronously on an id Firestore cannot address, so an id
+ * typed straight into the URL used to escape the repository as a 500. A wrong
+ * id is a 404 — a reserved-looking one must not read as a server fault, nor
+ * hint that it addressed anything.
+ */
+describe('an avatar id Firestore cannot address', () => {
+  // '.' and '..' are deliberately absent: the URL is path-normalised before it
+  // reaches the router, so `/api/avatar/.` resolves to the list route and
+  // `/api/avatar/..` falls outside it entirely. They never arrive as an id, so
+  // asserting on them here would test Express, not the guard. The repository
+  // still rejects them for any non-HTTP caller.
+  const UNADDRESSABLE = ['__proto__', '__name__', 'a/b', 'x'.repeat(1501)];
+
+  it.each(UNADDRESSABLE)('answers 404 rather than 500 for GET %s', async (id) => {
+    const response = await request(app)
+      .get(`/api/avatar/${encodeURIComponent(id)}`)
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+  });
+
+  it.each(UNADDRESSABLE)('answers 404 rather than 500 for DELETE %s', async (id) => {
+    const response = await request(app)
+      .delete(`/api/avatar/${encodeURIComponent(id)}`)
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+  });
+
+  it('still serves an id at the 1500-byte boundary', async () => {
+    const response = await request(app)
+      .get(`/api/avatar/${'x'.repeat(1500)}`)
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+  });
+});

@@ -118,7 +118,7 @@ function hashSeed(seed: string): number {
 }
 
 /** Ink colors for the drawn fallback, keyed by the record's palette class so
- *  the plant matches the tint ellipse behind its pot. */
+ *  each record keeps a stable colour identity across renders. */
 const FALLBACK_TONES: Record<string, { leaf: string; dark: string; glow: string }> = {
   emerald: { leaf: '#57a15e', dark: '#33693f', glow: '#a9d98b' },
   violet: { leaf: '#8a63b5', dark: '#5d3f85', glow: '#c7a6ea' },
@@ -203,7 +203,7 @@ const BRAMBLE_SILHOUETTE: string[] = [
  *  load. Inline SVG cannot 404, so the shelf never shows a bare pot again —
  *  this symptom shipped twice (first /static/sprites/, then uncommitted art),
  *  both times as silently-empty pots. Deterministic per record: same seed,
- *  same silhouette, same tones as the tint behind the pot. */
+ *  same silhouette, same tones. */
 function PixelPlantFallback({
   seed,
   tone,
@@ -300,9 +300,12 @@ function PottedSprite({
 export function PlantAvatar({
   avatar,
   large = false,
+  wiggle = false,
 }: {
   avatar: PlantAvatarData;
   large?: boolean;
+  /** Shovel mode: the sprite squirms in its pot to say "tap me to dig". */
+  wiggle?: boolean;
 }) {
   const showSprite = Boolean(avatar.spriteUrl?.trim());
 
@@ -316,6 +319,7 @@ export function PlantAvatar({
     >
       <PottedSprite
         spriteUrl={avatar.spriteUrl}
+        wiggle={wiggle}
         fallbackSeed={avatar.id}
         tone={avatar.color}
       />

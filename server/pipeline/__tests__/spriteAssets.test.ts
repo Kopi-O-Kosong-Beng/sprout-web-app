@@ -7,8 +7,9 @@
  *  every <img> 404'd and the archive silently degraded to bare pots.
  *
  *  Lives beside the pipeline suites because the pipeline is what renders these
- *  files (generate-sprites.ts, generate-demo-plants.ts), and because this
- *  vitest config is the standalone no-emulator suite where an fs check belongs.
+ *  files (generate-sprites.ts covers Thornback and the demo plants alike), and
+ *  because this vitest config is the standalone no-emulator suite where an fs
+ *  check belongs.
  *
  *  Demo photo files (IMG_*.jpg) are deliberately not asserted — the specimen
  *  card omits a missing photograph by design, and no photographs have ever

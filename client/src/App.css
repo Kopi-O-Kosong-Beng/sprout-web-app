@@ -748,58 +748,25 @@
   image-rendering: pixelated;
 }
 
-/* The sprite stands in the pot, painted above it with its feet inside the rim. */
+/* The sprite stands in the pot, painted above it with its feet inside the rim.
+   Centred with the standalone translate property, not transform, so the shovel
+   wiggle (which animates transform: rotate) composes with the centring instead
+   of overwriting it and lurching the sprite half its width to the right. */
 .plant-avatar .plant-sprite,
 .bot-avatar .plant-sprite {
   position: absolute;
   bottom: 28%;
   left: 50%;
-  transform: translateX(-50%);
+  translate: -50%;
   width: 78%;
   height: auto;
   object-fit: contain;
   image-rendering: pixelated;
 }
 
-/*
- * Palette tints. The species keeps a stable colour across the app (assigned in
- * avatarPresentation), which is the only way to tell two sprite-less records
- * apart — so it lights the ground behind the pot rather than the pot itself.
- */
-.plant-avatar::before {
-  content: "";
-  position: absolute;
-  inset: 12% 6% 6%;
-  border-radius: 999px;
-  opacity: 0.4;
-  filter: blur(6px);
-}
-
-.plant-avatar.emerald::before {
-  background: var(--color-f24-teal);
-}
-.plant-avatar.violet::before {
-  background: var(--color-f24-magenta);
-}
-.plant-avatar.sage::before {
-  background: var(--color-f24-teal-deep);
-}
-.plant-avatar.lime::before {
-  background: var(--color-f24-lime);
-}
-.plant-avatar.clay::before {
-  background: var(--color-f24-tan);
-}
-
-.bot-avatar::before {
-  content: "";
-  position: absolute;
-  inset: 12% 6% 6%;
-  border-radius: 999px;
-  background: var(--color-f24-brick);
-  opacity: 0.4;
-  filter: blur(6px);
-}
+/* No ground tint or backdrop behind the pots: the shelf art itself carries
+   the contrast (drawn dark on purpose), so the sprites sit directly on the
+   painted scene. */
 
 /* Three pots resting on a shelf plank. */
 .mini-archive {

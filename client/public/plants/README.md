@@ -6,11 +6,12 @@ it was drawn from, which the archive shows on the specimen card.
 
 The committed sprites are pipeline renders — hand-made art never landed here,
 which left every seeded avatar 404ing to a bare pot. Until someone draws them
-by hand, regenerate them with:
+by hand, regenerate them with the one generator that covers demo plants and
+Thornback alike:
 
 ```
-npm run sprites:generate:demo -w server            # anything still missing
-npm run sprites:generate:demo -w server -- --force # re-render
+npm run sprites:generate -w server            # anything still missing
+npm run sprites:generate -w server -- --force # re-render
 ```
 
 Dropping in a hand-drawn `SPRITE_<Key>.png` simply replaces the render; the
@@ -29,10 +30,10 @@ different extension — or you swap in a different species for one of the five �
 edit that template's `spriteFile` / `photoFile` in
 `server/data/demo-avatar-templates.ts`, which is the only place they are named.
 
-Sprites should be PNG with a transparent background so the pot shows through
-behind the feet; 192×192 matches what the scan pipeline produces, and the
-archive scales whatever it gets. A missing file is not fatal: the plant renders
-as an empty pot, and the specimen card simply omits the photo.
+Hand-made sprites should be PNG with a transparent background so the pot shows
+through behind the feet; 192×192 matches what the scan pipeline produces, and
+the archive scales whatever it gets. A missing file is not fatal: the plant
+renders as an empty pot, and the specimen card simply omits the photo.
 
 The stats, species and habitat text for each plant live beside the filenames in
 `demo-avatar-templates.ts` — art here, numbers there.

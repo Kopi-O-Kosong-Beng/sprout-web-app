@@ -64,6 +64,10 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              {/* The backend test bench drives real endpoints against the real
+                  project — account signup among them — so it sits behind the
+                  same operator allowlist as /admin rather than being open to
+                  the web. */}
               <Route
                 path="/test"
                 element={

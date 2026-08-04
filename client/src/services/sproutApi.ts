@@ -242,6 +242,12 @@ export async function listOwnedAvatars(
   return data;
 }
 
+/** Removes one owned avatar for good (DELETE /api/avatar/:id → 204).
+ *  The archive's shovel; the server answers 404 for anyone else's record. */
+export async function deleteAvatar(avatarId: string): Promise<void> {
+  await apiClient.delete(`/api/avatar/${encodeURIComponent(avatarId)}`);
+}
+
 export async function setDemoAvatars(
   enabled: boolean
 ): Promise<PaginatedAvatars> {

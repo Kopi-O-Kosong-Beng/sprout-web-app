@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   applyStyleScaffold,
+  descriptionBudgetFor,
   negativeClauseFor,
   stripNegativeTerms,
   POSITIVE_STYLE,
@@ -121,6 +122,26 @@ describe("Flux's 800-character prompt limit", () => {
 
     expect(truncated).toBe(true);
     expect(prompt.length).toBeLessThanOrEqual(PROVIDER_PROMPT_LIMIT.flux!);
+  });
+
+  /**
+   * The exported budget is the number the craft stage compresses against, so
+   * it must be exactly the boundary the scaffold enforces: at the budget the
+   * description survives whole, one char past it the trim engages. Words are
+   * used (not a solid run of x's) because fitWithin backtracks to a word break.
+   */
+  it("[white-box: boundary] descriptionBudgetFor is the scaffold's exact trim threshold", () => {
+    const budget = descriptionBudgetFor("flux")!;
+    const atBudget = "word ".repeat(Math.ceil(budget / 5)).slice(0, budget);
+
+    const kept = applyStyleScaffold(atBudget, "flux");
+    expect(kept.truncated).toBe(false);
+    expect(kept.prompt.length).toBeLessThanOrEqual(PROVIDER_PROMPT_LIMIT.flux!);
+
+    const over = applyStyleScaffold(`${atBudget}x`, "flux");
+    expect(over.truncated).toBe(true);
+
+    expect(descriptionBudgetFor("gemini")).toBeNull();
   });
 
   it("[black-box: spec] trimming sacrifices the description, never the style clause", () => {
