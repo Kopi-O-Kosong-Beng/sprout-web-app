@@ -24,7 +24,7 @@ const navItems: NavItem[] = [
   { to: '/studio', label: 'Studio', requiresAuth: true },
   { to: '/admin', label: 'Admin', requiresAuth: true, requiresAdmin: true },
   { to: '/contact', label: 'Contact', requiresAuth: false },
-  { to: '/test', label: 'API Test', requiresAuth: false },
+  { to: '/test', label: 'API Test', requiresAuth: true, requiresAdmin: true },
 ];
 
 export default function AppHeader() {

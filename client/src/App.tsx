@@ -64,7 +64,17 @@ function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route path="/test" element={<BackendTestPage />} />
+              {/* The backend test bench drives real endpoints against the real
+                  project — account signup among them — so it sits behind the
+                  same allowlist as /admin rather than being open to the web. */}
+              <Route
+                path="/test"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <BackendTestPage />
+                  </ProtectedRoute>
+                }
+              />
             </Route>
 
             <Route element={<GameLayout />}>
