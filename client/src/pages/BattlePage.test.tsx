@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   MemoryRouter,
@@ -6,7 +6,7 @@ import {
   Routes,
   useNavigate,
 } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AvatarRecord,
   BattleActionResult,
@@ -567,6 +567,10 @@ describe('BattlePage', () => {
     expect(screen.getByRole('img', { name: /fern ward sun 5 of 5/i })).toBeVisible();
     expect(screen.getByRole('img', { name: /thornback sun 0 of 3/i })).toBeVisible();
     expect(screen.getByText(/committed to a decisive action/i)).toBeVisible();
+    // Standing intel: turn order from the speed comparison (57 vs 43 here,
+    // ties go to the player) and the opponent's once-per-battle recovery.
+    expect(screen.getByText('Fern Ward acts first each round')).toBeVisible();
+    expect(screen.getByText('Thornback still holds a recovery')).toBeVisible();
     // The serializer now publishes Thornback's rendered art, so the opponent
     // stands in its pot as a real sprite <img>, not a bare pot.
     expect(
@@ -585,6 +589,18 @@ describe('BattlePage', () => {
     expect(screen.queryByText(/dealt 34 special damage/i)).not.toBeInTheDocument();
     expect(screen.queryByText('82%')).not.toBeInTheDocument();
     expect(screen.queryByText('58%')).not.toBeInTheDocument();
+  });
+
+  it('marks the slower plant and the spent recovery in the intel chips', async () => {
+    await enterActiveBattle(
+      battleSession({
+        player: { stats: { hp: 132, attack: 54, defense: 88, speed: 22 } },
+        bot: { healUsed: true },
+      })
+    );
+
+    expect(screen.getByText('Thornback acts first each round')).toBeVisible();
+    expect(screen.getByText('Thornback has spent its recovery')).toBeVisible();
   });
 
   it('renders invalid public energy boundaries defensively', async () => {
@@ -943,9 +959,16 @@ describe('BattlePage', () => {
     expect(sessionStorage.getItem('sprout.battle.sessionId')).toBeNull();
   });
 
-  it('drops a stored pointer the server no longer recognises', async () => {
+  it('drops a stored pointer the server definitively no longer recognises', async () => {
     sessionStorage.setItem('sprout.battle.sessionId', 'battle-gone');
-    apiMocks.getPveBattle.mockRejectedValue(new Error('Not found.'));
+    // A 404 is the server's verdict that the session is gone — unlike a
+    // network error, which must keep the pointer for a later retry.
+    apiMocks.getPveBattle.mockRejectedValue(
+      Object.assign(new Error('Not found.'), {
+        isAxiosError: true,
+        response: { status: 404 },
+      })
+    );
 
     renderBattle();
 
@@ -966,5 +989,231 @@ describe('BattlePage', () => {
     await screen.findByRole('heading', { name: /victory/i });
 
     expect(sessionStorage.getItem('sprout.battle.sessionId')).toBeNull();
+  });
+
+  it('keeps the pointer when the resume fetch fails transiently', async () => {
+    sessionStorage.setItem('sprout.battle.sessionId', 'battle-1');
+    apiMocks.getPveBattle.mockRejectedValue(new Error('Network Error'));
+
+    renderBattle();
+
+    // Lands on the roster, but a network blip is not proof the battle is
+    // dead — the pointer survives so the next visit retries the resume.
+    expect(
+      await screen.findByRole('button', { name: /select fern ward/i })
+    ).toBeVisible();
+    expect(sessionStorage.getItem('sprout.battle.sessionId')).toBe('battle-1');
+  });
+
+  it('lets an explicit route avatar outrank a stored session', async () => {
+    sessionStorage.setItem('sprout.battle.sessionId', 'battle-1');
+
+    renderBattle({ avatarId: 'fern-1' });
+
+    // The player is mid-gesture from the Archive's Battle button: they get
+    // the roster with their plant preselected, not a surprise resume. The
+    // pointer stays for the next direct visit.
+    expect(
+      await screen.findByRole('heading', { name: /fern ward is ready/i })
+    ).toBeVisible();
+    expect(apiMocks.getPveBattle).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('sprout.battle.sessionId')).toBe('battle-1');
+  });
+
+  it('recovers the roster when abandoning a resumed battle whose quiet refresh failed', async () => {
+    sessionStorage.setItem('sprout.battle.sessionId', 'battle-1');
+    apiMocks.getPveBattle.mockResolvedValue(battleSession());
+    apiMocks.listOwnedAvatars
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue(rosterPage);
+    const { user } = renderBattle();
+
+    await screen.findByRole('heading', { name: /turn 1/i });
+    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+
+    // The abandon receipt must not be hostage to the roster's arrival…
+    expect(
+      await screen.findByRole('status', { name: /battle abandoned/i })
+    ).toHaveTextContent(/0 xp awarded/i);
+    // …and the empty-roster fallback refetch repopulates the selection.
+    expect(
+      await screen.findByRole('button', { name: /select fern ward/i })
+    ).toBeVisible();
+  });
+
+  /*
+    jsdom has no matchMedia, so every other test exercises the reduced-motion
+    (instant) path. This block stubs motion ON and lets the real beat clock run
+    (0ms / 1250ms / +400ms) — the only automated coverage the cinematic has.
+  */
+  describe('turn cinematic with motion enabled', () => {
+    beforeEach(() => {
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn().mockReturnValue({
+          matches: false,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        })
+      );
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('plays the resolved turn beat by beat before settling on the final state', async () => {
+      const resolved = battleSession({
+        turnNumber: 2,
+        player: { currentHp: 89 },
+        bot: { currentHp: 101 },
+        log: [
+          {
+            turnNumber: 1,
+            type: 'move_used',
+            actor: 'player',
+            moveId: 'vine-tap',
+            message: 'Fern Ward used Vine Tap.',
+          },
+          {
+            turnNumber: 1,
+            type: 'damage_dealt',
+            actor: 'player',
+            amount: 17,
+            message: 'Fern Ward dealt 17 damage.',
+          },
+          {
+            turnNumber: 1,
+            type: 'damage_dealt',
+            actor: 'bot',
+            amount: 12,
+            message: 'Opponent dealt 12 damage.',
+          },
+        ],
+      });
+      apiMocks.submitPveAction.mockResolvedValue(actionResult(resolved));
+
+      const view = await enterActiveBattle();
+      const narration = () => view.container.querySelector('.battle-narration');
+      await view.user.click(screen.getByRole('button', { name: /vine tap/i }));
+
+      // Beat 1: the player's move narrates and only Thornback's bar has moved.
+      await waitFor(
+        () =>
+          expect(narration()?.textContent).toContain('Fern Ward used Vine Tap.'),
+        { timeout: 2000 }
+      );
+      expect(
+        screen.getByRole('progressbar', { name: /thornback hp 101 of 140/i })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('progressbar', { name: /fern ward hp 101 of 132/i })
+      ).toBeInTheDocument();
+
+      // Beat 2 (t=1250ms): the counterattack lands and the player's bar drains.
+      await waitFor(
+        () =>
+          expect(narration()?.textContent).toContain('Opponent dealt 12 damage.'),
+        { timeout: 2500 }
+      );
+      expect(
+        screen.getByRole('progressbar', { name: /fern ward hp 89 of 132/i })
+      ).toBeInTheDocument();
+
+      // Playback over: the strip clears and the session values stand.
+      await waitFor(() => expect(narration()).toBeNull(), { timeout: 2500 });
+      expect(
+        screen.getByRole('progressbar', { name: /fern ward hp 89 of 132/i })
+      ).toBeInTheDocument();
+    }, 15000);
+
+    it('gives a silent guard its own beat instead of skipping it', async () => {
+      const resolved = battleSession({
+        turnNumber: 2,
+        player: { currentHp: 95 },
+        log: [
+          {
+            turnNumber: 1,
+            type: 'move_used',
+            actor: 'player',
+            moveId: 'guard-root',
+            message: 'Fern Ward used Guard Root.',
+          },
+          {
+            turnNumber: 1,
+            type: 'move_used',
+            actor: 'bot',
+            message: 'Opponent moved.',
+          },
+          {
+            turnNumber: 1,
+            type: 'damage_dealt',
+            actor: 'bot',
+            amount: 6,
+            message: 'Opponent dealt 6 damage.',
+          },
+        ],
+      });
+      apiMocks.submitPveAction.mockResolvedValue(actionResult(resolved));
+
+      const view = await enterActiveBattle();
+      const narration = () => view.container.querySelector('.battle-narration');
+      await view.user.click(screen.getByRole('button', { name: /guard root/i }));
+
+      // The guard's beat exists: it narrates even though no outcome followed.
+      await waitFor(
+        () =>
+          expect(narration()?.textContent).toContain('Fern Ward used Guard Root.'),
+        { timeout: 2000 }
+      );
+
+      await waitFor(
+        () =>
+          expect(narration()?.textContent).toContain('Opponent dealt 6 damage.'),
+        { timeout: 2500 }
+      );
+
+      await waitFor(() => expect(narration()).toBeNull(), { timeout: 2500 });
+    }, 15000);
+
+    it('holds the outcome panel until the final turn finishes playing', async () => {
+      const won = battleSession({
+        status: 'won',
+        xpAwarded: 20,
+        bot: { currentHp: 0 },
+        log: [
+          {
+            turnNumber: 1,
+            type: 'move_used',
+            actor: 'player',
+            moveId: 'vine-tap',
+            message: 'Fern Ward used Vine Tap.',
+          },
+          {
+            turnNumber: 1,
+            type: 'damage_dealt',
+            actor: 'player',
+            amount: 17,
+            message: 'Fern Ward dealt 17 damage.',
+          },
+        ],
+      });
+      apiMocks.submitPveAction.mockResolvedValue(actionResult(won));
+
+      const { user } = await enterActiveBattle();
+      await user.click(screen.getByRole('button', { name: /vine tap/i }));
+
+      // Mid-playback: no spoiler, no clickable Replay.
+      expect(await screen.findByText(/final turn is resolving/i)).toBeVisible();
+      expect(screen.queryByRole('heading', { name: /victory/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /replay/i })).not.toBeInTheDocument();
+
+      // One-beat script: the panel reveals at ~1650ms when the cinematic ends.
+      expect(
+        await screen.findByRole('heading', { name: /victory/i }, { timeout: 3000 })
+      ).toBeVisible();
+      expect(screen.getByText('20 XP awarded')).toBeVisible();
+      expect(screen.getByRole('button', { name: /replay/i })).toBeEnabled();
+    }, 15000);
   });
 });

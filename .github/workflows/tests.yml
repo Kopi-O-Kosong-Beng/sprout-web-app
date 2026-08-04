@@ -83,6 +83,13 @@ jobs:
       - name: 'Group 7: admin account management + auth/query/email'
         run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/admin-api.test.ts tests/auth.test.ts tests/query.test.ts tests/email.test.ts"
 
+      # The sprite-asset pact lives in the pipeline's vitest half (it guards
+      # files the pipeline renders). No emulator, no Java, a few ms — but
+      # without this step the guard never ran in CI and seeded URLs could
+      # drift from disk again unnoticed.
+      - name: 'Group 9: sprite-asset pact (vitest, no emulator)'
+        run: npm exec -- vitest run pipeline/__tests__/spriteAssets.test.ts --coverage.enabled=false
+
   client-focused:
     name: Client focused suites (Vitest + Testing Library)
     runs-on: ubuntu-latest

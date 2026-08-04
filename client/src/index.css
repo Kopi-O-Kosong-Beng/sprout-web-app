@@ -281,6 +281,17 @@ body {
   color: var(--color-ink);
 }
 
+/* Anchors and spans don't centre a line inside min-height the way <button>
+   does — the Save-sprite download link and the locked Return-to-Archive span
+   sat top-aligned in their 44px box. Element-qualified so it stays below the
+   class rules in specificity games. */
+a.pixel-button,
+span.pixel-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .pixel-button:disabled {
   opacity: 0.45;
   box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
@@ -288,9 +299,12 @@ body {
 
 /*
  * Focus is part of the chrome, not only of forms. The teal-deep ring matches
- * the form controls' (App.css) and measures 8.2:1 on the white panels most of
- * these sit on; controls drawn on the dark green header get a white ring
- * below, where teal-deep would vanish into the art.
+ * the form controls' (App.css), and the white halo underneath it is what
+ * keeps the indicator visible on the dark painted boards — teal-deep alone
+ * measures ~1.4:1 against the forest backdrops. On a white panel the halo
+ * disappears and the teal ring carries it, so one rule serves both grounds.
+ * The halo replaces the element's offset shadow for the focused moment,
+ * which is an acceptable trade for an indicator that always shows.
  */
 .pixel-button:focus-visible,
 .press:focus-visible,
@@ -298,6 +312,7 @@ body {
 .details-link:focus-visible {
   outline: 3px solid var(--color-f24-teal-deep);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 0.95);
 }
 
 .nav-link:focus-visible,
@@ -932,6 +947,9 @@ details[open] > .log-toggle::before {
   font-weight: 600;
   line-height: 1.5;
   padding: 0.625rem 0.875rem;
+  /* Two lines of copy: one- and two-line beats then occupy the same box, so
+     the console below does not bounce as the script speaks. */
+  min-height: 3.6rem;
   animation: narration-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -948,16 +966,10 @@ details[open] > .log-toggle::before {
 
 .battle-intel.is-spent {
   border-color: rgb(26 26 26 / 0.14);
-  color: rgb(26 26 26 / 0.6);
+  /* 0.68, same floor rationale as .move-stat.is-muted: 0.6 measured ~4.3:1 on
+     the 0.94-alpha console fill, under the 4.5:1 floor for 12px text. */
+  color: rgb(26 26 26 / 0.68);
   text-decoration: line-through;
-}
-
-/* The card whose move is resolving right now, lit for the beat it plays. */
-.move-card.is-resolving {
-  border-color: var(--color-hp-mid);
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--color-hp-mid) 55%, transparent),
-    3px 3px 0 rgb(0 0 0 / 0.35);
 }
 
 /* --- Move cards --------------------------------------------------------- */
@@ -1009,6 +1021,18 @@ details[open] > .log-toggle::before {
   opacity: 0.55;
   box-shadow: 1px 1px 0 rgb(0 0 0 / 0.25);
   cursor: not-allowed;
+}
+
+/* The card whose move is resolving right now, lit for the beat it plays.
+   Declared AFTER the aria-disabled rule on purpose: at equal specificity the
+   later rule wins, and the resolving beat must light the card even when the
+   move has meanwhile become unaffordable for next turn. */
+.move-card.is-resolving {
+  opacity: 1;
+  border-color: var(--color-hp-mid);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-hp-mid) 55%, transparent),
+    3px 3px 0 rgb(0 0 0 / 0.35);
 }
 
 .move-name {

@@ -166,6 +166,37 @@ describe('GET /api/admin/users authorisation', () => {
   });
 });
 
+describe('GET /api/platform authorisation', () => {
+  // The studio's ops portal answers to the same operator tier as /api/admin;
+  // nothing else pins that, and a silent revert to requireAdmin would expose
+  // /config-status (which enumerates provider keys) to every ADMIN_EMAILS
+  // entry.
+  it('rejects an anonymous caller', async () => {
+    const res = await request(app).get('/api/platform/config-status');
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a plain admin — the portal answers to the operator tier', async () => {
+    await seedProfile(PLAIN_ADMIN_UID, PLAIN_ADMIN_EMAIL);
+
+    const res = await request(app)
+      .get('/api/platform/config-status')
+      .set('Authorization', asPlainAdmin());
+
+    expect(res.status).toBe(403);
+  });
+
+  it('admits a super admin', async () => {
+    await seedProfile(ADMIN_UID, ADMIN_EMAIL);
+
+    const res = await request(app)
+      .get('/api/platform/config-status')
+      .set('Authorization', asAdmin());
+
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('GET /api/admin/users listing', () => {
   it('returns every account with newest first and flags admins', async () => {
     await seedProfile(MEMBER_UID, MEMBER_EMAIL, {

@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import axios from 'axios';
 import { Link, useLocation } from 'react-router-dom';
 import BackButton from '../components/common/BackButton';
 import {
@@ -229,7 +230,8 @@ interface TurnBeat {
   id: string;
   actor: CombatantSide;
   target: CombatantSide;
-  feedback: TurnFeedback;
+  /** Null for a move with no outcome event — Guard resolves silently. */
+  feedback: TurnFeedback | null;
   hpDelta: number;
   /** The attack line ("Fern Ward used Vine Tap."), when the log carries one. */
   useMessage: string | null;
@@ -259,6 +261,25 @@ function deriveTurnScript(session: BattleSession): TurnBeat[] {
   let pendingUse: { actor: CombatantSide; message: string; moveId: string | null } | null =
     null;
 
+  /** A move with no outcome event still happened — Guard is exactly that.
+   *  Without this the guarding side never narrated, never lunged, and a
+   *  guard-vs-guard turn played no cinematic at all despite resolving. */
+  function flushPendingUse() {
+    const open = pendingUse;
+    if (!open) return;
+    beats.push({
+      id: `${latestTurn}-${beats.length}-${open.actor}-move`,
+      actor: open.actor,
+      target: open.actor,
+      feedback: null,
+      hpDelta: 0,
+      useMessage: null,
+      outcomeMessage: open.message,
+      moveId: open.moveId,
+    });
+    pendingUse = null;
+  }
+
   for (const event of session.log) {
     if (event.turnNumber !== latestTurn) continue;
     if (event.actor === 'system') continue;
@@ -266,6 +287,7 @@ function deriveTurnScript(session: BattleSession): TurnBeat[] {
     const other: CombatantSide = actor === 'player' ? 'opponent' : 'player';
 
     if (event.type === 'move_used') {
+      flushPendingUse();
       pendingUse = {
         actor,
         message: event.message,
@@ -329,10 +351,15 @@ function deriveTurnScript(session: BattleSession): TurnBeat[] {
         beat.useMessage = pendingUse.message;
         beat.moveId = pendingUse.moveId;
         pendingUse = null;
+      } else {
+        // The outcome belongs to a different actor than the open move — the
+        // open move resolved silently (Guard). Give it its own beat first.
+        flushPendingUse();
       }
       beats.push(beat);
     }
   }
+  flushPendingUse();
 
   return beats;
 }
@@ -346,6 +373,7 @@ function aggregateScript(beats: TurnBeat[]): {
   let player: TurnFeedback | null = null;
   let opponent: TurnFeedback | null = null;
   for (const beat of beats) {
+    if (!beat.feedback) continue; // silent moves (Guard) float nothing
     if (beat.target === 'player') player = beat.feedback;
     else opponent = beat.feedback;
   }
@@ -489,6 +517,10 @@ export default function BattlePage() {
   const requestVersion = useRef(0);
   const inFlight = useRef(false);
   const releaseNavigationLock = useRef<(() => void) | null>(null);
+  /** Cancels the quiet roster refresh on unmount ONLY. It must not share
+   *  requestVersion: every battle command bumps that, which silently killed a
+   *  refresh still in flight and left Change Plant staring at an empty roster. */
+  const rosterEpoch = useRef(0);
   const [turnFeedback, setTurnFeedback] = useState<{
     player: TurnFeedback | null;
     opponent: TurnFeedback | null;
@@ -553,15 +585,16 @@ export default function BattlePage() {
    *  outside the beginRequest lock: it must not block the player's first move,
    *  and setRecords is safe to apply whenever it lands. */
   const refreshRosterQuietly = useCallback(async () => {
-    const version = requestVersion.current;
+    const epoch = rosterEpoch.current;
     try {
       const fetchedRecords = await fetchAllOwnedAvatars(
-        () => version === requestVersion.current
+        () => epoch === rosterEpoch.current
       );
-      if (version !== requestVersion.current) return;
+      if (epoch !== rosterEpoch.current) return;
       setRecords(fetchedRecords.filter((record) => record.battleEligible));
     } catch {
-      // The roster panel reloads itself when the player returns to selection.
+      // Swallowed on purpose; the selection paths below retry it when they
+      // find the roster empty.
     }
   }, []);
 
@@ -590,11 +623,19 @@ export default function BattlePage() {
         writeStoredSessionId(null);
         finishRequest(request);
         void loadRoster();
-      } catch {
+      } catch (caught) {
         if (request !== requestVersion.current) return;
-        // A dead pointer (expired session, signed-out elsewhere) is not an
-        // error worth showing — the roster is the right place to land.
-        writeStoredSessionId(null);
+        // Only a definitive server verdict proves the pointer dead (gone,
+        // foreign, malformed). A network blip or 5xx keeps the pointer so the
+        // next visit retries the resume instead of orphaning a live battle.
+        const status = axios.isAxiosError(caught)
+          ? caught.response?.status
+          : undefined;
+        if (status === 400 || status === 403 || status === 404) {
+          writeStoredSessionId(null);
+        }
+        // Either way the roster is the right place to land — resume failures
+        // are not worth an error screen.
         finishRequest(request);
         void loadRoster();
       }
@@ -604,18 +645,22 @@ export default function BattlePage() {
 
   useEffect(() => {
     const storedSessionId = readStoredSessionId();
-    if (storedSessionId) {
+    // An explicit route avatarId is the player mid-gesture (Archive's Battle
+    // button) — that intent outranks resuming a stored session, which stays
+    // stored for the next direct visit.
+    if (storedSessionId && !preferredAvatarId) {
       void resumeStoredSession(storedSessionId);
     } else {
       void loadRoster();
     }
     return () => {
       requestVersion.current += 1;
+      rosterEpoch.current += 1;
       inFlight.current = false;
       releaseNavigationLock.current?.();
       releaseNavigationLock.current = null;
     };
-  }, [loadRoster, resumeStoredSession]);
+  }, [loadRoster, preferredAvatarId, resumeStoredSession]);
 
   /** The stored pointer follows the session: written while a battle is live,
    *  cleared the moment it ends, so a reload can only ever resume something
@@ -730,6 +775,9 @@ export default function BattlePage() {
           message: `Battle abandoned. ${abandonedSession.xpAwarded} XP awarded.`,
         });
         setView('selecting');
+        // A resumed session may have landed here before its quiet roster
+        // refresh ever succeeded; retry rather than show a false empty state.
+        if (records.length === 0) void refreshRosterQuietly();
       } catch (caught) {
         if (request !== requestVersion.current) return;
         setError(extractApiError(caught, 'Could not abandon this battle.'));
@@ -740,7 +788,7 @@ export default function BattlePage() {
         finishRequest(request);
       }
     },
-    [beginRequest, finishRequest]
+    [beginRequest, finishRequest, records.length, refreshRosterQuietly]
   );
 
   const handleRetry = () => {
@@ -886,6 +934,8 @@ export default function BattlePage() {
     setRetryCommand(null);
     setNotice(null);
     setView('selecting');
+    // A resumed session may never have loaded a roster to change plants from.
+    if (records.length === 0) void refreshRosterQuietly();
   };
 
   return (
@@ -953,6 +1003,19 @@ export default function BattlePage() {
           </section>
         )}
 
+        {/* The abandon receipt renders regardless of roster size: a player
+            whose quiet roster refresh is still in flight (or failed) must not
+            lose the record that the abandon persisted with 0 XP. */}
+        {showSelection && notice?.kind === 'abandoned' && (
+          <p
+            className="pixel-panel px-3 py-2 text-center text-[10px] leading-relaxed"
+            role="status"
+            aria-label="Battle abandoned"
+          >
+            {notice.message}
+          </p>
+        )}
+
         {showSelection && records.length === 0 && retryCommand?.kind !== 'load' && (
           <section className="pixel-panel p-5 text-center">
             <h2 className="font-pixel text-xs leading-relaxed">No battle plants yet</h2>
@@ -965,15 +1028,6 @@ export default function BattlePage() {
 
         {showSelection && records.length > 0 && (
           <>
-            {notice?.kind === 'abandoned' && (
-              <p
-                className="pixel-panel px-3 py-2 text-center text-[10px] leading-relaxed"
-                role="status"
-                aria-label="Battle abandoned"
-              >
-                {notice.message}
-              </p>
-            )}
             {error && retryCommand?.kind !== 'load' && (
               <div className="pixel-panel p-3" role="alert">
                 <strong className="font-pixel block text-[9px] leading-relaxed">
@@ -1163,16 +1217,18 @@ export default function BattlePage() {
             </div>
 
             {/* The narration strip: the server's own lines, spoken one beat at
-                a time while the cinematic plays. aria-hidden because the log
-                below carries the same record for assistive tech, and under
-                reduced motion this never renders at all. */}
-            {cinematic && cinematic.narration && (
+                a time while the cinematic plays. Mounted for the WHOLE playback
+                (a non-breaking space holds the first, wordless beat) so the
+                move console does not jump at every beat. aria-hidden because
+                the log below carries the same record for assistive tech, and
+                under reduced motion this never renders at all. */}
+            {cinematic && (
               <p
-                key={cinematic.narration}
+                key={cinematic.narration || 'pending'}
                 className="battle-narration battle-server-copy"
                 aria-hidden="true"
               >
-                {cinematic.narration}
+                {cinematic.narration || ' '}
               </p>
             )}
 
@@ -1345,6 +1401,19 @@ export default function BattlePage() {
                     Abandon Match
                   </button>
                 </>
+              ) : cinematic ? (
+                /* Hold the result while the final turn's choreography drains
+                   the bars — announcing Victory two beats early spoils the
+                   very sequence the cinematic exists to show. The script's
+                   last timer clears `cinematic`, which reveals the panel.
+                   Reduced motion (and jsdom) never sets `cinematic`, so this
+                   arm is invisible there. */
+                <p
+                  className="pulse-soft py-2 text-center text-[10px] leading-relaxed opacity-80"
+                  role="status"
+                >
+                  The final turn is resolving...
+                </p>
               ) : (
                 <div className="text-center">
                   <p className="font-pixel text-[9px] opacity-60">Match complete</p>

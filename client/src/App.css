@@ -627,6 +627,14 @@
   color: var(--color-sprout);
 }
 
+/* On the white auth plate the game chrome's white focus ring vanishes; these
+   links take the same teal ring the panel's form controls use. */
+.auth-footer .text-link:focus-visible,
+.panel .details-link:focus-visible,
+.auth-panel .details-link:focus-visible {
+  outline-color: var(--color-f24-teal-deep);
+}
+
 .auth-side {
   display: flex;
   flex-direction: column;

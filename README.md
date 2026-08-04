@@ -126,17 +126,18 @@ from a shared inbox. Re-running it is safe and is also how you reset a forgotten
 admin password: the uid, PVE stats and history survive.
 
 Creating the account is not what grants access — the address must also be in
-`ADMIN_EMAILS` in `server/.env`. That allowlist is the only authority (it fails
-closed when empty), and the seed warns if the address is missing from it.
-Restart the backend after editing it.
+`SUPER_ADMIN_EMAILS` in `server/.env`, the operator allowlist that gates
+`/api/admin` and `/api/platform` (`ADMIN_EMAILS` is an advisory badge only).
+The allowlist is the only authority (it fails closed when empty), and the seed
+warns if the address is missing from it. Restart the backend after editing it.
 
 **Where login lands.** Everyone enters at `/`, the public landing page. After a
-successful login an admin goes to `/admin` and everyone else goes to `/home`,
-the in-game hub — unless a protected route bounced them, in which case they
-return to the page they originally asked for. The frontend reads this from the
-`isAdmin` field on `GET /api/auth/me`, which the server computes from
-`ADMIN_EMAILS`; it decides navigation only, and `/api/admin` re-checks the
-allowlist on every request.
+successful login a super admin goes to `/admin` and everyone else goes to
+`/home`, the in-game hub — unless a protected route bounced them, in which case
+they return to the page they originally asked for. The frontend reads this from
+the `isSuperAdmin` field on `GET /api/auth/me`, which the server computes from
+`SUPER_ADMIN_EMAILS`; it decides navigation only, and `/api/admin` re-checks
+the allowlist on every request.
 
 ### Step 3: Create frontend env file
 
@@ -320,9 +321,9 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 | POST | `/api/battle/pve/start` | Bearer token | start a PVE battle with one of your avatars |
 | GET/POST | `/api/battle/pve/:sessionId`(`/action`, `/abandon`) | Bearer token | read a session, take a turn, concede |
 | POST | `/api/pipeline/run-stream` | Bearer token | the 4-hop sprite pipeline, streamed as SSE |
-| GET | `/api/admin/users`, `/api/admin/almanac` | Bearer + `ADMIN_EMAILS` | accounts; taxonomy with finders |
-| POST | `/api/admin/cleanup` | Bearer + `ADMIN_EMAILS` | dry-run / delete expired web uploads |
-| GET | `/api/platform/*` | Bearer + `ADMIN_EMAILS` | pipeline portal: config, live provider health, tests |
+| GET | `/api/admin/users`, `/api/admin/almanac` | Bearer + `SUPER_ADMIN_EMAILS` | accounts; taxonomy with finders |
+| POST | `/api/admin/cleanup` | Bearer + `SUPER_ADMIN_EMAILS` | dry-run / delete expired web uploads |
+| GET | `/api/platform/*` | Bearer + `SUPER_ADMIN_EMAILS` | pipeline portal: config, live provider health, tests |
 
 Two of these are deliberately unlike the rest. `GET /api/almanac` takes no auth
 at all — it is the landing page's centrepiece and is shown to visitors who have

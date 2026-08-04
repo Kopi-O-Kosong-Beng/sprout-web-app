@@ -10,6 +10,8 @@ const authState = vi.hoisted(() => ({
   profile: null as AuthProfile | null,
 }));
 
+const refreshProfile = vi.hoisted(() => vi.fn());
+
 vi.mock('../../hooks/useAuth', () => ({
   useAuth: (): AuthContextValue => ({
     status: authState.status,
@@ -18,7 +20,7 @@ vi.mock('../../hooks/useAuth', () => ({
     login: vi.fn(),
     loginWithGoogle: vi.fn(),
     logout: vi.fn(),
-    refreshProfile: vi.fn(),
+    refreshProfile,
   }),
 }));
 
@@ -114,12 +116,16 @@ describe('ProtectedRoute', () => {
     });
 
     // A transient /api/auth/me failure leaves status 'authenticated' with a
-    // null profile; bouncing a real operator on that blip would be worse than
-    // a blank beat while the profile loads.
-    it('renders nothing while authenticated with no profile yet', () => {
-      const { container } = renderProtected('/admin', 'authenticated', null);
+    // null profile and nothing else refetches it. Bouncing a real operator on
+    // that blip would be wrong; so would a silent blank page. The guard shows
+    // a pending line and retries the profile once.
+    it('shows a pending state and retries the profile while it is missing', () => {
+      refreshProfile.mockClear();
+      renderProtected('/admin', 'authenticated', null);
 
-      expect(container).toBeEmptyDOMElement();
+      expect(screen.getByRole('status')).toHaveTextContent(/checking operator access/i);
+      expect(refreshProfile).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText(/accounts dashboard/i)).not.toBeInTheDocument();
     });
   });
 });
