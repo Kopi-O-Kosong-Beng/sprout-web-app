@@ -1,16 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlmanacGrid } from '../components/common/AlmanacGrid';
-import { AlmanacSpecimen } from '../components/common/AlmanacSpecimen';
-import { useAlmanacFilter } from '../hooks/useAlmanacFilter';
 import { useAuth } from '../hooks/useAuth';
-import {
-  getAlmanac,
-  getAlmanacEntry,
-  type AlmanacEntry,
-  type AlmanacEntryDetail,
-  type AlmanacSummary,
-} from '../services/sproutApi';
 
 /**
  * Public landing page — the marketing overview at /, one step before the game.
@@ -180,9 +169,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ---------- The almanac ---------- */}
-      <AlmanacSection signedIn={signedIn} />
-
       {/* ---------- Closing call to action ---------- */}
       <section className="relative isolate overflow-hidden">
         <img
@@ -225,154 +211,6 @@ export default function LandingPage() {
     </div>
   );
 }
-
-/**
- * The almanac: 200 Singapore flowering plants, and which ones players have
- * brought in.
- *
- * Public, so it shows the species, whether it has been found, and how often —
- * and nothing about who found it. The finder's name, the date and their own
- * photograph need a login, which is what the panel below the grid offers.
- *
- * It renders nothing at all if the API is unreachable. A marketing page that
- * greets a visitor with a red error box about a failed fetch is worse than one
- * that simply has one section fewer.
- */
-function AlmanacSection({ signedIn }: { signedIn: boolean }) {
-  const [almanac, setAlmanac] = useState<AlmanacSummary | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [selected, setSelected] = useState<AlmanacEntryDetail | null>(null);
-  const [loadingSpecies, setLoadingSpecies] = useState(false);
-  const { query, setQuery, foundOnly, setFoundOnly, filtered } = useAlmanacFilter(
-    almanac?.species ?? []
-  );
-
-  useEffect(() => {
-    let live = true;
-    void getAlmanac()
-      .then((data) => live && setAlmanac(data))
-      .catch(() => live && setFailed(true));
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  /* The grid carries no sprite — 200 of them would be megabytes — so opening a
-   * card fetches the one species. Signed-in callers get the finder too, from
-   * the same endpoint. */
-  const openSpecies = useCallback(async (entry: AlmanacEntry) => {
-    setSelected(null);
-    setLoadingSpecies(true);
-    try {
-      setSelected(await getAlmanacEntry(entry.id));
-    } catch {
-      setSelected(null);
-    } finally {
-      setLoadingSpecies(false);
-    }
-  }, []);
-
-  if (failed) return null;
-
-  const percentage = almanac ? Math.round((almanac.discovered / almanac.total) * 100) : 0;
-
-  return (
-    <section className="border-y border-white/10 bg-black/15">
-      <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
-        <SectionHeading
-          eyebrow="The almanac"
-          title="Two hundred plants grow in Singapore. How many have we found?"
-        />
-
-        <p className="mt-5 max-w-2xl text-sm leading-relaxed text-white/60">
-          Every species on this list is one you can walk up to — drawn from the published
-          checklist of Singapore&apos;s flora, filtered to the flowering plants it calls
-          common, naturalised or casual. Scan one nobody has scanned before and your name
-          goes on it.
-        </p>
-
-        {!almanac ? (
-          <p className="font-pixel mt-12 text-[10px] text-white/40" role="status">
-            Loading the almanac…
-          </p>
-        ) : (
-          <>
-            <div className="mt-10 flex flex-wrap items-end justify-between gap-4">
-              <p className="font-pixel text-sm">
-                <span className="text-[color:var(--color-hp-high)]">
-                  {almanac.discovered}
-                </span>
-                <span className="text-white/40"> / {almanac.total} discovered</span>
-              </p>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="sr-only" htmlFor="almanac-search">
-                  Search the almanac
-                </label>
-                <input
-                  id="almanac-search"
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search species, family…"
-                  className="pixel-panel-dark w-52 px-3 py-2 text-xs text-white placeholder:text-white/35"
-                />
-                <button
-                  type="button"
-                  onClick={() => setFoundOnly(!foundOnly)}
-                  aria-pressed={foundOnly}
-                  className="press pixel-button pixel-panel-dark px-3 py-2 text-[9px]"
-                >
-                  {foundOnly ? 'Showing found' : 'Show all'}
-                </button>
-              </div>
-            </div>
-
-            {/* Progress, as a bar rather than only a number. */}
-            <div
-              className="mt-4 h-3 w-full border-2 border-white/20 bg-black/30"
-              role="progressbar"
-              aria-label="Species discovered"
-              aria-valuemin={0}
-              aria-valuemax={almanac.total}
-              aria-valuenow={almanac.discovered}
-            >
-              <div
-                className="h-full bg-[color:var(--color-hp-high)]"
-                style={{ width: `${percentage}%` }}
-              />
-            </div>
-
-            <div className="mt-8">
-              {filtered.length === 0 ? (
-                <p className="text-sm text-white/50">No species match that search.</p>
-              ) : (
-                <AlmanacGrid
-                  species={filtered}
-                  onSelect={(entry) => void openSpecies(entry)}
-                  visibleRows={4}
-                />
-              )}
-            </div>
-
-            {(selected || loadingSpecies) && (
-              <AlmanacSpecimen
-                entry={selected}
-                loading={loadingSpecies}
-                signedIn={signedIn}
-                onClose={() => setSelected(null)}
-              />
-            )}
-
-            <p className="mt-8 text-xs leading-relaxed text-white/35">
-              Taxonomy: {almanac.source}
-            </p>
-          </>
-        )}
-      </div>
-    </section>
-  );
-}
-
 /** Eyebrow label above a section title — the pixel font's job on this page. */
 function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
