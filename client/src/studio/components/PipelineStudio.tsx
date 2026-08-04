@@ -11,7 +11,6 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { db, doc, setDoc, type User } from '../lib/firebase';
 import { studioFetch } from '../lib/api';
 import { SPROUT_PALETTE } from '../pipeline/config';
 import {
@@ -38,7 +37,6 @@ import {
 
 interface PipelineStudioProps {
   route: RouteId;
-  user: User | null;
   dexDocs: DexDoc[];
 }
 
@@ -115,7 +113,7 @@ const STATUS_TONE: Record<StepStatus, Tone> = {
   error: 'danger',
 };
 
-export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dexDocs }) => {
+export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, dexDocs }) => {
   // Input
   const [dragActive, setDragActive] = useState(false);
   const [uploadedImageB64, setUploadedImageB64] = useState<string | null>(null);
@@ -138,6 +136,8 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
 
   // Execution
   const [isProcessing, setIsProcessing] = useState(false);
+  /** Why the last run stopped, when it stopped badly. Null on a clean run. */
+  const [runError, setRunError] = useState<string | null>(null);
   const [totalPipelineTimeMs, setTotalPipelineTimeMs] = useState<number | null>(null);
   const [steps, setSteps] = useState<StepState[]>(freshSteps);
 
@@ -235,6 +235,7 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
     setIdentifiedName(null);
     setIdentifiedSpecies(null);
     setSteps(freshSteps());
+    setRunError(null);
     // Cleared with the rest of the run state, or a re-run would write the
     // previous plant's sprite when the new one fails before step 2d.
     runRef.current = {};
@@ -290,8 +291,27 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
       if (!response.ok) throw new Error(`Pipeline API HTTP ${response.status}`);
       await consumeStream(response);
     } catch (err) {
+      // Show the failure. This used to call runSimulatedFallback(), which
+      // painted a complete successful run out of hardcoded values — a fixed
+      // 1180 ms latency, "probability 0.94" — on any error at all. In a tool
+      // whose entire purpose is to show what the pipeline actually did, a
+      // fabricated green run is worse than no run: it hides an outage, and
+      // anyone reading latencies off this screen was reading invented ones.
+      const message = err instanceof Error ? err.message : String(err);
       console.error('Pipeline SSE stream exception:', err);
-      await runSimulatedFallback();
+      setRunError(message);
+      setSteps((prev) =>
+        prev.map((step) =>
+          step.status === 'processing' || step.status === 'pending'
+            ? {
+                ...step,
+                status: 'error',
+                icon: 'cross',
+                details: step.status === 'processing' ? message : 'Did not run.',
+              }
+            : step
+        )
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -346,38 +366,22 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
         setDexStatus(data.autoApproved ? 'approved' : 'pending');
 
         /*
-         * Persist every finished sprite, approved or pending, and read the
-         * values from runRef rather than from `data`.
+         * The dex row is the server's to write, and it already wrote it.
          *
-         * The step-4 event carries only evalScores and autoApproved — `plant`
-         * arrives on step 3 and `finishedSpriteB64` on 2d — so the previous
-         * guard, `data.autoApproved && user && data.plant`, was never true and
-         * this write never ran. Had it run, spriteUrl would have been the
-         * string "data:image/png;base64,undefined". Gating on autoApproved was
-         * wrong besides: a pending sprite is exactly what the Dex Gate exists
-         * to review.
-         *
-         * A ref rather than component state because each SSE event lands in its
-         * own handler invocation, where reading state risks a stale closure.
+         * This handler used to setDoc() straight into the shared `dex`
+         * collection from the browser, on the same run whose /api/pipeline
+         * call had already persisted it properly. The two disagreed about
+         * nearly everything: this one keyed with its own slug rather than
+         * sanitizeSpeciesKey, omitted speciesName and discoveryCount that
+         * the server's normalizer requires, inlined the sprite as a base64
+         * data URL instead of its storage URL, and wrote the signed-in
+         * user's EMAIL into firstDiscoveredBy — a field whose own model says
+         * "Never an email", in a collection the public almanac reads. With
+         * setDoc and no merge it would have replaced a real discovery
+         * outright. firestore.rules denies all client writes, so in practice
+         * it failed into .catch(console.error) and nobody saw it; that is
+         * luck, not a design.
          */
-        const plant = runRef.current.plant;
-        const spriteB64 = runRef.current.spriteB64;
-        if (plant && user) {
-          const key = plant.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-          setDoc(doc(db, 'dex', key), {
-            speciesKey: key,
-            canonicalName: plant.name,
-            commonNames: plant.common_names || [],
-            // Empty rather than the literal "undefined" when the sprite is
-            // missing, so a malformed record is rejected instead of stored.
-            spriteUrl: spriteB64 ? `data:image/png;base64,${spriteB64}` : '',
-            firstDiscoveredBy: user.email || 'Anonymous Trainer',
-            firstDiscoveredAt: new Date().toISOString(),
-            producedByTier: runRef.current.tier || 'gemma',
-            status: data.autoApproved ? 'approved' : 'pending',
-            evalScores: data.evalScores,
-          }).catch(console.error);
-        }
       }
 
       if (data.awaitingStage2c) setAwaitingStage2cPermission(true);
@@ -437,135 +441,6 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
       stage2cResolverRef.current(false);
       stage2cResolverRef.current = null;
     }
-  };
-
-  const runSimulatedFallback = async () => {
-    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    const updateStep = (id: string, update: Partial<StepState>) =>
-      setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...update } : s)));
-
-    const species = customPlantName || 'Unknown species';
-
-    updateStep('1', { status: 'processing', icon: 'spinner', details: 'Querying Plant.id v3…' });
-    await delay(1200);
-    updateStep('1', {
-      status: 'success',
-      icon: 'tick',
-      latencyMs: 1180,
-      details: `Identified "${species}" at probability 0.94`,
-    });
-
-    updateStep('2a', {
-      status: 'processing',
-      icon: 'spinner',
-      details: 'Tier 1 Gemma 3 27B via NVIDIA…',
-    });
-    await delay(1400);
-
-    const simPrompt = `${species} as a cute pixel art plant monster, thick black outlines (2-4px), flat cel-shading, no gradients, vivid colours based on the plant's real hues, one pair of large expressive eyes with big white highlights, small friendly mouth, soft cheek blush, facial features grow naturally out of the plant's own structures (petals, stamens, leaves) rather than being added on top, subtle leaf vein texture, warm approachable tone, white background, app icon composition, rounded square format`;
-    setCraftedPrompt(simPrompt);
-    setCraftedTier('gemma');
-    updateStep('2a', {
-      status: 'success',
-      icon: 'tick',
-      latencyMs: 1350,
-      details: `Crafted prompt via tier GEMMA`,
-      data: { prompt: simPrompt, tier: 'gemma' },
-    });
-
-    updateStep('2b', {
-      status: 'processing',
-      icon: 'spinner',
-      details: 'Calling Gemini 3.1 Flash Lite Image…',
-    });
-    await delay(1800);
-
-    let simColor = '#7FD3E6';
-    const s = species.toLowerCase();
-    if (s.includes('trumpet') || s.includes('angel') || s.includes('brugmansia'))
-      simColor = '#FFF971';
-    else if (s.includes('melastoma')) simColor = '#DF426E';
-    else if (s.includes('pea') || s.includes('clitoria')) simColor = '#4876BB';
-    else if (s.includes('rose')) simColor = '#FF4F4F';
-
-    const rawSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256"><rect x="64" y="64" width="128" height="128" rx="64" fill="${simColor}" stroke="#0C082A" stroke-width="8"/><circle cx="100" cy="110" r="12" fill="#0C082A"/><circle cx="156" cy="110" r="12" fill="#0C082A"/><circle cx="104" cy="106" r="4" fill="#FFFFFF"/><circle cx="160" cy="106" r="4" fill="#FFFFFF"/><path d="M 112 144 Q 128 160 144 144" fill="none" stroke="#0C082A" stroke-width="6" stroke-linecap="round"/><ellipse cx="96" cy="180" rx="20" ry="12" fill="#51B341" stroke="#0C082A" stroke-width="6"/><ellipse cx="160" cy="180" rx="20" ry="12" fill="#51B341" stroke="#0C082A" stroke-width="6"/></svg>`;
-    const simRawDataUrl = `data:image/svg+xml;base64,${btoa(rawSvg)}`;
-    setRawSpriteB64(simRawDataUrl);
-    updateStep('2b', {
-      status: 'success',
-      icon: 'tick',
-      latencyMs: 2050,
-      details: 'Rendered 1024×1024 raw sprite',
-      data: { prompt: simPrompt },
-    });
-
-    setAwaitingStage2cPermission(true);
-    const proceed = await new Promise<boolean>((resolve) => {
-      stage2cResolverRef.current = resolve;
-    });
-    setAwaitingStage2cPermission(false);
-    if (!proceed) return;
-
-    updateStep('2c', {
-      status: 'processing',
-      icon: 'spinner',
-      details: 'Extracting foreground via withoutBG…',
-    });
-    await delay(1100);
-    setFinishedSpriteB64(simRawDataUrl);
-    updateStep('2c', {
-      status: 'success',
-      icon: 'tick',
-      latencyMs: 1040,
-      details: 'Foreground extracted with alpha channel',
-    });
-
-    updateStep('2d', {
-      status: 'processing',
-      icon: 'spinner',
-      details: 'Snapping to Spica72…',
-    });
-    await delay(600);
-    updateStep('2d', {
-      status: 'success',
-      icon: 'tick',
-      latencyMs: 580,
-      details: 'Resized to 192×192, quantised to 24 colours',
-    });
-
-    updateStep('3', { status: 'processing', icon: 'spinner', details: 'Deriving stats & moves…' });
-    await delay(300);
-    const mockPlant = {
-      name: species,
-      maxHealth: 100,
-      speed: 14,
-      moves: [
-        { id: '1', name: 'Petal Dance', power: 45, type: 'Grass' },
-        { id: '2', name: 'Vine Whip', power: 35, type: 'Grass' },
-        { id: '3', name: 'Synthesis', power: 0, type: 'Grass' },
-        { id: '4', name: 'Tackle', power: 30, type: 'Normal' },
-      ],
-    };
-    setAssembledPlant(mockPlant);
-    updateStep('3', {
-      status: 'success',
-      icon: 'tick',
-      latencyMs: 290,
-      details: `HP ${mockPlant.maxHealth}, speed ${mockPlant.speed}`,
-    });
-
-    updateStep('4', { status: 'processing', icon: 'spinner', details: 'Running eval & judge…' });
-    await delay(800);
-    setEvalScores({ paletteValid: true, dimsOk: true, hasAlpha: true, judgeCute: 4 });
-    setDexStatus('approved');
-    updateStep('4', {
-      status: 'success',
-      icon: 'tick',
-      latencyMs: 790,
-      details: 'All checks passed, cute score ≥ 4 — auto-approved',
-    });
-
-    setTotalPipelineTimeMs(6300);
   };
 
   /* ---------------------------------------------------------------------- */
@@ -1044,6 +919,20 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, user, dex
             </>
           }
         />
+
+        {/* A failed run says so. Before, any error painted a fabricated
+            successful run instead, so an outage looked like a green pipeline. */}
+        {runError && (
+          <div
+            role="alert"
+            className="border-danger/50 bg-danger/12 text-danger mx-4 mt-4 flex items-start gap-2 rounded border px-3 py-2 text-xs"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <strong className="font-semibold">Run failed.</strong> {runError}
+            </span>
+          </div>
+        )}
 
         {/* Horizontal stage rail — scrolls rather than wrapping, so the
             left-to-right reading of pipeline order is never broken. */}

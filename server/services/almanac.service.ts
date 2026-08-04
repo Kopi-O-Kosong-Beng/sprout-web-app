@@ -16,6 +16,7 @@
 import {
   ALMANAC_SOURCE,
   ALMANAC_SPECIES,
+  almanacIdForSpecies,
   almanacSpeciesById,
   type AlmanacSpecies,
 } from '../data/almanac';
@@ -94,9 +95,45 @@ function toPublicDetail(
   };
 }
 
+/**
+ * The dex key a species name reduces to once its authority and any
+ * infraspecific rank are dropped — `Acanthus ilicifolius L.` and
+ * `Acanthus ilicifolius subsp. ilicifolius` both to `acanthus_ilicifolius`.
+ *
+ * Null when the name is not a plausible binomial, which is the honest answer
+ * for "Unknown Plant Species" and the like.
+ */
+function binomialDexKey(speciesName: string): string | null {
+  const id = almanacIdForSpecies(speciesName);
+  return id ? sanitizeSpeciesKey(id) : null;
+}
+
+/**
+ * Dex discoveries, indexed by every key an almanac species might look them up
+ * under.
+ *
+ * The exact `speciesKey` wins, and the binomial-reduced key is only added where
+ * nothing already claims it. Both are needed because the dex keys on whatever
+ * the identifier returned: Plant.id routinely answers with an authority
+ * (`Lantana camara L.`), which sanitises to `lantana_camara_l` and matches no
+ * almanac species at all. That is not a rare edge — it is most real
+ * identifications of the 200, and it is why the almanac sat at 0 discovered
+ * while the dex filled up. Normalising here rather than at write time leaves
+ * the stored key alone, which also names the species' sprite object in storage.
+ */
 async function discoveriesByKey(): Promise<Map<string, DexDiscovery>> {
   const discoveries = await dexRepository.list();
-  return new Map(discoveries.map((discovery) => [discovery.speciesKey, discovery]));
+  const byKey = new Map(
+    discoveries.map((discovery) => [discovery.speciesKey, discovery] as const)
+  );
+
+  for (const discovery of discoveries) {
+    const reduced = binomialDexKey(discovery.speciesName);
+    if (!reduced || byKey.has(reduced)) continue;
+    byKey.set(reduced, discovery);
+  }
+
+  return byKey;
 }
 
 /** The whole almanac, minus anything that identifies a player. */
