@@ -134,9 +134,22 @@ function byScoreThenName<T extends { displayName: string }>(
 }
 
 function buildXpBoard(players: PlayerRow[], callerId: string) {
-  const sorted = [...players].sort(byScoreThenName<PlayerRow>((player) => player.xp));
+  // Only players who have actually played. The discovery board has always said
+  // this — "a board padded with zeros says nothing and buries the players it is
+  // meant to celebrate" — but the XP board listed the whole user collection, so
+  // every account that ever registered and never battled sat on it at 0 XP,
+  // pushing real players down and making totalPlayers a signup count.
+  //
+  // The caller is exempt: someone with no battles yet still needs their own
+  // row, and it reads as unranked rather than as a placing.
+  const ranked = players.filter(
+    (player) => player.xp > 0 || player.wins > 0 || player.losses > 0
+  );
+  const sorted = [...ranked].sort(byScoreThenName<PlayerRow>((player) => player.xp));
   const ranks = assignRanks(sorted, (player) => player.xp);
-  const caller = sorted.find((player) => player.userId === callerId);
+  const caller =
+    sorted.find((player) => player.userId === callerId) ??
+    players.find((player) => player.userId === callerId);
 
   return {
     entries: sorted.slice(0, LEADERBOARD_SIZE).map((player) => ({
