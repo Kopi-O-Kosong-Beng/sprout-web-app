@@ -197,11 +197,11 @@ function Shelf({
                   your plants are on the clock — the card only shows one. */}
               <CaptureBadge source={avatar.source} className="mt-1" />
               {avatar.isDemo && (
-                <span className="font-pixel border-2 border-black bg-[color:var(--color-hp-mid)] px-1 text-[7px]">
+                <span className="font-pixel border-2 border-black bg-[color:var(--color-hp-mid)] px-1 text-[9px]">
                   Demo
                 </span>
               )}
-              <span className="font-pixel text-outline max-w-full truncate px-1 text-[7px] text-white sm:text-[9px]">
+              <span className="font-pixel text-outline max-w-full truncate px-1 text-[9px] text-white sm:text-[9px]">
                 {avatar.name}
               </span>
             </button>
@@ -280,7 +280,7 @@ function SpecimenPhoto({ avatar }: { avatar: PlantAvatarData }) {
         onError={() => setFailed(true)}
         className="block aspect-square w-full border-2 border-black object-cover"
       />
-      <figcaption className="font-pixel mt-1 text-center text-[7px] opacity-60">
+      <figcaption className="font-pixel mt-1 text-center text-[9px] opacity-60">
         Photographed
       </figcaption>
     </figure>
@@ -311,7 +311,7 @@ function SpecimenCard({
         </div>
 
         <div className="min-w-0 flex-1 text-center sm:text-left">
-          <p className="font-pixel text-[8px] opacity-60">Selected plant</p>
+          <p className="font-pixel text-[9px] opacity-60">Selected plant</p>
           <h2 className="font-pixel mt-2 text-sm leading-relaxed">{avatar.name}</h2>
           <p className="mt-2 flex flex-wrap items-center justify-center gap-1.5 sm:justify-start">
             <CaptureBadge source={avatar.source} />
@@ -333,13 +333,13 @@ function SpecimenCard({
             <dl className="mt-3 space-y-1.5 text-xs leading-relaxed">
               {avatar.habitat && (
                 <div>
-                  <dt className="font-pixel inline text-[8px]">Habitat</dt>{' '}
+                  <dt className="font-pixel inline text-[9px]">Habitat</dt>{' '}
                   <dd className="inline opacity-85">{avatar.habitat}</dd>
                 </div>
               )}
               {avatar.conservationStatus && (
                 <div>
-                  <dt className="font-pixel inline text-[8px]">Conservation status</dt>{' '}
+                  <dt className="font-pixel inline text-[9px]">Conservation status</dt>{' '}
                   <dd className="inline opacity-85">{avatar.conservationStatus}</dd>
                 </div>
               )}
@@ -351,8 +351,7 @@ function SpecimenCard({
       <StatGrid avatar={avatar} />
 
       <button
-        className="press pixel-button mt-4 w-full px-2 py-3 text-[9px]"
-        style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+        className="press pixel-button is-primary mt-4 w-full px-2 py-3 text-[9px]"
         type="button"
         disabled={busy}
         onClick={onBattle}

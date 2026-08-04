@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import axios from 'axios';
 import { applyActionCode } from 'firebase/auth';
 import { Link, useSearchParams } from 'react-router-dom';
 import { MiniArchive } from '../components/common/PlantVisuals';
 import { useAuth } from '../hooks/useAuth';
+import { extractApiError } from '../services/apiClient';
 import { getSproutFirebaseAuth } from '../services/firebaseClient';
 import { resendVerification } from '../services/sproutApi';
 
@@ -59,9 +61,14 @@ export default function VerifyEmailPage() {
       const result = await resendVerification();
       setView(result.verificationEmailSent ? 'sent' : 'idle');
       setMessage(result.message);
-    } catch {
+    } catch (err) {
       setView('idle');
-      setMessage('The verification email could not be sent. Try again shortly.');
+      // The backend names the real reason when it can (rate limit, auth) —
+      // a swallowed generic string here hid a broken mail transport for days.
+      // Non-API failures keep the calm generic line.
+      const fallback =
+        'The verification email could not be sent. Try again shortly.';
+      setMessage(axios.isAxiosError(err) ? extractApiError(err, fallback) : fallback);
     }
   }
 

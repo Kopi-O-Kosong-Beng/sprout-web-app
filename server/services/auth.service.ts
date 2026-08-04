@@ -132,8 +132,21 @@ async function deliverVerificationEmail(
       verificationEmailSent: true,
       message: 'Check your email for the verification link.',
     };
-  } catch {
-    console.error('[auth] verification email delivery failed');
+  } catch (err) {
+    // The error class and machine code name the failing stage (Firebase link
+    // generation vs the email transport) — without them nothing distinguishes
+    // "SMTP blocked" from "continue-URL not whitelisted", and this exact
+    // symptom shipped twice with an unexplained generic message. Codes only,
+    // never raw messages: Firebase embeds the recipient address in some of
+    // its message strings, and an email address does not belong in the log.
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : '';
+    const name = err instanceof Error ? err.name : typeof err;
+    console.error(
+      `[auth] verification email delivery failed — ${name}${code ? ` (${code})` : ''}`
+    );
     return {
       verificationEmailSent: false,
       message: failureMessage,

@@ -588,7 +588,7 @@ function ResultDialog({
       <h2 className="text-center text-xs">Done!</h2>
       <img src={sprite} alt="" className="pixelated mx-auto mt-3 h-40 w-40 object-contain" />
       <p className="mt-2 text-center text-[10px] leading-relaxed">{name}</p>
-      <p className="mt-1 text-center text-[8px] leading-relaxed opacity-70">
+      <p className="mt-1 text-center text-[9px] leading-relaxed opacity-70">
         Rendered at 192×192 and snapped to the Florentine24 palette.
       </p>
 
@@ -614,8 +614,7 @@ function ResultDialog({
       <a
         href={sprite}
         download={`${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`}
-        style={{ background: 'var(--color-hp-high)', color: '#fff' }}
-        className="press pixel-button mt-4 block w-full px-2 py-2 text-center text-[9px]"
+        className="press pixel-button is-primary mt-4 block w-full px-2 py-2 text-center text-[9px]"
       >
         Save sprite
       </a>

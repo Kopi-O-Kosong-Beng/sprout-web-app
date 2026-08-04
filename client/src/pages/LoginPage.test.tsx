@@ -33,13 +33,16 @@ vi.mock('../hooks/useAuth', () => ({
 
 vi.mock('../services/sproutApi', () => apiMocks);
 
-function profileFor(isAdmin: boolean): AuthProfile {
+/** The dashboard routing keys off the operator tier: a super admin is also an
+ *  admin (the server's superset rule), and only that tier lands on /admin. */
+function profileFor(isSuperAdmin: boolean): AuthProfile {
   return {
     uid: 'user-1',
-    email: isAdmin ? 'sprout@gmail.com' : 'player@example.com',
-    displayName: isAdmin ? 'Sprout Admin' : 'Player',
+    email: isSuperAdmin ? 'sprout@gmail.com' : 'player@example.com',
+    displayName: isSuperAdmin ? 'Sprout Admin' : 'Player',
     emailVerified: true,
-    isAdmin,
+    isAdmin: isSuperAdmin,
+    isSuperAdmin,
   };
 }
 
@@ -104,6 +107,19 @@ describe('LoginPage auth redirects', () => {
 
     expect(screen.getByText(/in-game hub/i)).toBeInTheDocument();
     expect(screen.queryByText(/public landing page/i)).not.toBeInTheDocument();
+  });
+
+  // The tiers are distinct: a plain ADMIN_EMAILS badge-holder is not an
+  // operator, and sending them to /admin would just bounce them off the
+  // route guard.
+  it('routes a plain admin to the game hub, not the operator dashboard', () => {
+    renderLogin('authenticated', {
+      from: null,
+      profile: { ...profileFor(false), isAdmin: true, isSuperAdmin: false },
+    });
+
+    expect(screen.getByText(/in-game hub/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sprout accounts dashboard/i)).not.toBeInTheDocument();
   });
 
   // A bounce means the user asked for a specific page and was stopped; sending

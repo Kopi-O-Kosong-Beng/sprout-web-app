@@ -54,17 +54,24 @@ function App() {
               <Route path="/signup" element={<SignupPage />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
               <Route path="/contact" element={<ContactPage />} />
-              {/* Signed-in gate only; the server's ADMIN_EMAILS allowlist is
+              {/* Courtesy gate; the server's SUPER_ADMIN_EMAILS allowlist is
                   the real authority and returns 403 to everyone else. */}
               <Route
                 path="/admin"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requireSuperAdmin>
                     <AdminPage />
                   </ProtectedRoute>
                 }
               />
-              <Route path="/test" element={<BackendTestPage />} />
+              <Route
+                path="/test"
+                element={
+                  <ProtectedRoute requireSuperAdmin>
+                    <BackendTestPage />
+                  </ProtectedRoute>
+                }
+              />
             </Route>
 
             <Route element={<GameLayout />}>
@@ -113,7 +120,7 @@ function App() {
               <Route
                 path="/studio"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requireSuperAdmin>
                     <StudioPage />
                   </ProtectedRoute>
                 }

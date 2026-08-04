@@ -71,7 +71,7 @@ export default function LeaderboardPage() {
       </div>
 
       <div className="px-4 pt-1 text-center">
-        <p className="font-pixel text-outline text-[8px] text-white">Standings</p>
+        <p className="font-pixel text-outline text-[9px] text-white">Standings</p>
         <h1 className="font-pixel text-outline mt-2 text-sm leading-relaxed text-white">
           Leaderboards
         </h1>
@@ -180,7 +180,7 @@ function Board({
 }) {
   return (
     <section className="pixel-panel p-3">
-      <p className="font-pixel text-[8px] opacity-60">{eyebrow}</p>
+      <p className="font-pixel text-[9px] opacity-60">{eyebrow}</p>
       <h2 className="font-pixel mt-2 text-xs leading-relaxed">{title}</h2>
 
       {rows.length === 0 ? (
