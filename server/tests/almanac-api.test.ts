@@ -204,3 +204,54 @@ describe('public almanac', () => {
     expect(almanac.body.discovered).toBe(0);
   });
 });
+
+/**
+ * The dex keys on whatever the identifier returned, and Plant.id routinely
+ * answers with an authority or an infraspecific rank. Those sanitise to keys
+ * no almanac species can ever match — `Lantana camara L.` becomes
+ * `lantana_camara_l` — so the almanac read every real discovery of its own 200
+ * as undiscovered. Matching now reduces a dex name to its binomial.
+ */
+describe('matching a dex discovery to its almanac species', () => {
+  const TEMBUSU_ID = almanacIdForSpecies(TEMBUSU)!;
+
+  it.each([
+    ['a bare binomial', TEMBUSU],
+    ['an authority', `${TEMBUSU} L.`],
+    ['an infraspecific rank', `${TEMBUSU} subsp. fragrans`],
+    ['odd capitalisation and spacing', '  fagraea   FRAGRANS  '],
+  ])('counts a discovery recorded with %s', async (_label, recordedName) => {
+    await seedDiscovery(recordedName);
+
+    const response = await request(app).get('/api/almanac');
+
+    expect(response.status).toBe(200);
+    expect(response.body.discovered).toBe(1);
+    const entry = response.body.species.find(
+      (s: { id: string }) => s.id === TEMBUSU_ID
+    );
+    expect(entry).toMatchObject({ discovered: true, discoveryCount: 1 });
+  });
+
+  it('still does not count a species outside the almanac', async () => {
+    await seedDiscovery('Papilionanthe teres');
+
+    const response = await request(app).get('/api/almanac');
+
+    expect(response.body.discovered).toBe(0);
+  });
+
+  it('prefers the exactly-keyed discovery over a reduced one', async () => {
+    // Both reduce to the same binomial; the exact key must win so its own
+    // count and sprite are the ones shown.
+    await seedDiscovery(`${TEMBUSU} L.`, FINDER_ID, { discoveryCount: 9 });
+    await seedDiscovery(TEMBUSU, FINDER_ID, { discoveryCount: 4 });
+
+    const response = await request(app).get('/api/almanac');
+
+    const entry = response.body.species.find(
+      (s: { id: string }) => s.id === TEMBUSU_ID
+    );
+    expect(entry).toMatchObject({ discovered: true, discoveryCount: 4 });
+  });
+});

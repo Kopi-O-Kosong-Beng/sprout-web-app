@@ -1,10 +1,18 @@
 /** Admin account-management and operations routes.
  *
  *  Two gates, in order: a valid verified Firebase ID token (authMiddleware),
- *  then membership of the ADMIN_EMAILS allowlist (requireAdmin). The dev/demo
- *  bypass headers accepted elsewhere are deliberately NOT usable here —
- *  strictUnverifiedAuthMiddleware is not used, and authMiddleware's bypass only
- *  yields a uid with no email, which can never match the allowlist.
+ *  then membership of the ADMIN_EMAILS allowlist (requireAdmin).
+ *
+ *  The dev bypass CAN reach these routes, and deliberately so — it is how the
+ *  local no-password sign-in gets an admin dashboard to work against. It needs
+ *  `x-dev-email` naming an address that is itself on ADMIN_EMAILS, so it grants
+ *  nothing the allowlist has not, and it is inert unless AUTH_DEV_BYPASS=true
+ *  and NODE_ENV !== 'production' (see middleware/auth.middleware.ts). Worth
+ *  stating plainly rather than leaving implied: on a machine where the bypass
+ *  is on, any local process that can reach the port can drive these endpoints,
+ *  destructive ones included. That is the price of the local shortcut, and the
+ *  reason both guards exist. A deployed server sets NODE_ENV=production and
+ *  render.yaml pins AUTH_DEV_BYPASS=false.
  *
  *  The same allowlist gates /api/platform, which serves the live API-health
  *  probes the dashboard shows. Both surfaces answer to one list, so there is
