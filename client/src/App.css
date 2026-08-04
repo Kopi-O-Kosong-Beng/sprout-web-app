@@ -71,7 +71,7 @@
 }
 
 .brand-link:active:not(.is-disabled) {
-  transform: scale(0.9);
+  transform: translate(1px, 1px);
 }
 
 .sprout-mark {
@@ -91,14 +91,16 @@
 
 .nav-link {
   display: inline-block;
-  padding: 0.5rem 0.55rem;
+  /* 9px pixel type and enough padding to clear the 44px touch floor — the bar
+     was 8px type in a ~30px target, under both of the system's own rules. */
+  padding: 0.75rem 0.6rem;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
   color: rgb(255 255 255 / 0.72);
   text-decoration: none;
   border: 3px solid transparent;
-  transition: transform 80ms ease-out;
+  transition: transform 100ms cubic-bezier(0.16, 1, 0.3, 1);
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -107,7 +109,7 @@
 }
 
 .nav-link:active:not(.is-disabled) {
-  transform: scale(0.9);
+  transform: translate(1px, 1px);
 }
 
 /* The active tab is the one lit panel in the bar. */
@@ -194,12 +196,28 @@
   color: rgb(255 255 255 / 0.75);
 }
 
-/* Pixel eyebrow above a page or panel title. */
+/* A section header on the green ground (the admin Accounts intro). Without
+   this an h2 in a .page-heading rendered as a bare browser serif-scale
+   default — the one heading in the app no rule dressed. */
+.page-heading h2 {
+  margin: 0.75rem 0 0;
+  font-family: var(--font-pixel);
+  letter-spacing: -0.04em;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: #ffffff;
+  text-shadow:
+    0 1px 2px rgb(0 0 0 / 0.55),
+    0 2px 10px rgb(32 55 39 / 0.75);
+}
+
+/* Pixel eyebrow above a page or panel title. 9px is this face's legibility
+   floor — the display-only rule the system sets for itself. */
 .eyebrow {
   margin: 0;
   font-family: var(--font-pixel);
   letter-spacing: 0.02em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
   text-transform: uppercase;
   color: var(--color-f24-lime);
 }
@@ -403,14 +421,16 @@
   line-height: 1.5;
 }
 
+/* Status INK comes from the two shared tokens (index.css) — this file had
+   grown four competing greens and reds for the same two meanings. */
 .form-error {
   background: rgb(244 67 54 / 0.14);
-  color: #7f1d1d;
+  color: var(--color-danger-ink);
 }
 
 .form-notice {
   background: rgb(76 175 80 / 0.16);
-  color: #14532d;
+  color: var(--color-ok-ink);
 }
 
 .password-checklist {
@@ -423,11 +443,11 @@
 }
 
 .password-checklist .met {
-  color: #15803d;
+  color: var(--color-ok-ink);
 }
 
 .password-checklist .unmet {
-  color: #b91c1c;
+  color: var(--color-danger-ink);
 }
 
 /* ============================================================================
@@ -442,16 +462,19 @@
   justify-content: center;
   gap: 0.5rem;
   padding: 0.85rem 1rem;
+  min-height: 2.75rem;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
   font-size: 0.5625rem;
   line-height: 1.6;
   text-decoration: none;
   cursor: pointer;
-  border: 3px solid #1a1a1a;
+  border: 3px solid var(--color-ink);
   border-radius: 0;
   box-shadow: 4px 4px 0 rgb(0 0 0 / 0.45);
-  transition: transform 80ms ease-out;
+  transition:
+    transform 100ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 100ms cubic-bezier(0.16, 1, 0.3, 1);
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
@@ -475,10 +498,27 @@
   color: #ffffff;
 }
 
+/* Same press physics as the move cards and pixel buttons: into the shadow,
+   not a squash. One interaction model for the whole app. */
+.primary-cta:hover:not(:disabled),
+.secondary-cta:hover:not(:disabled),
+.danger-action:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 rgb(0 0 0 / 0.5);
+}
+
 .primary-cta:active:not(:disabled),
 .secondary-cta:active:not(:disabled),
 .danger-action:active:not(:disabled) {
-  transform: scale(0.9);
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 rgb(0 0 0 / 0.45);
+}
+
+.primary-cta:focus-visible,
+.secondary-cta:focus-visible,
+.danger-action:focus-visible {
+  outline: 3px solid var(--color-f24-teal-deep);
+  outline-offset: 2px;
 }
 
 .primary-cta:disabled,
@@ -508,12 +548,13 @@
 }
 
 /* Quiet text actions. On the green ground they are white; inside a white plate
-   they take the brand green. */
+   they take the brand green. Block padding lifts the hit area toward the 44px
+   floor — these serve as row actions in the admin table. */
 .text-link,
 .details-link {
   background: none;
   border: none;
-  padding: 0.25rem 0;
+  padding: 0.5rem 0.125rem;
   font-family: inherit;
   font-size: 0.8125rem;
   color: #ffffff;
@@ -566,7 +607,7 @@
   text-align: center;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
   text-transform: uppercase;
   opacity: 0.55;
 }
@@ -793,7 +834,7 @@
 .stat-grid dt {
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.4375rem;
+  font-size: 0.5625rem;
   opacity: 0.7;
 }
 
@@ -821,7 +862,7 @@
   gap: 0.5rem;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
 }
 
 .health-meter > div {
@@ -862,7 +903,7 @@
   align-self: flex-start;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.4375rem;
+  font-size: 0.5625rem;
   padding: 0.15rem 0.3rem;
   border: 2px solid #1a1a1a;
   background: var(--color-hp-mid);
@@ -898,7 +939,7 @@
 .admin-table th {
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
   text-transform: uppercase;
   background: rgb(32 55 39 / 0.1);
 }
@@ -915,7 +956,7 @@
   background: var(--color-f24-lime);
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.4375rem;
+  font-size: 0.5625rem;
   text-transform: uppercase;
 }
 
@@ -926,9 +967,29 @@
   flex-wrap: wrap;
 }
 
+/* The almanac search box. Same control style as every form input — it sits
+   outside a .form-stack, so it names itself instead of inheriting nothing. */
+.admin-search {
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  letter-spacing: normal;
+  padding: 0.6rem 0.65rem;
+  min-height: 2.75rem;
+  border: 3px solid var(--color-ink);
+  border-radius: 0;
+  background: #ffffff;
+  color: var(--color-ink);
+  min-width: 14rem;
+}
+
+.admin-search:focus-visible {
+  outline: 3px solid var(--color-f24-teal-deep);
+  outline-offset: 2px;
+}
+
 .confirm-row .danger-action {
   padding: 0.45rem 0.6rem;
-  font-size: 0.4375rem;
+  font-size: 0.5625rem;
   box-shadow: 3px 3px 0 rgb(0 0 0 / 0.45);
 }
 

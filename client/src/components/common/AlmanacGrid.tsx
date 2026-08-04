@@ -90,7 +90,7 @@ export function AlmanacGrid({
               {entry.commonName ?? entry.family}
             </p>
             <p
-              className={`font-pixel mt-2 text-[7px] ${
+              className={`font-pixel mt-2 text-[9px] ${
                 entry.discovered
                   ? 'text-[color:var(--color-hp-high)]'
                   : dark

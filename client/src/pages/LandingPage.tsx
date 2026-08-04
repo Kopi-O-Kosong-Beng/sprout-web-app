@@ -219,7 +219,7 @@ export default function LandingPage() {
             alt="Sprout"
             className="h-auto w-24 opacity-70"
           />
-          <p className="text-xs text-white/45">Scan real plants. Battle them.</p>
+          <p className="text-xs text-white/70">Scan real plants. Battle them.</p>
         </div>
       </footer>
     </div>
@@ -292,7 +292,7 @@ function AlmanacSection({ signedIn }: { signedIn: boolean }) {
         </p>
 
         {!almanac ? (
-          <p className="font-pixel mt-12 text-[10px] text-white/40" role="status">
+          <p className="font-pixel mt-12 text-[10px] text-white/65" role="status">
             Loading the almanac…
           </p>
         ) : (
@@ -302,7 +302,7 @@ function AlmanacSection({ signedIn }: { signedIn: boolean }) {
                 <span className="text-[color:var(--color-hp-high)]">
                   {almanac.discovered}
                 </span>
-                <span className="text-white/40"> / {almanac.total} discovered</span>
+                <span className="text-white/65"> / {almanac.total} discovered</span>
               </p>
               <div className="flex flex-wrap items-center gap-3">
                 <label className="sr-only" htmlFor="almanac-search">
@@ -314,7 +314,7 @@ function AlmanacSection({ signedIn }: { signedIn: boolean }) {
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search species, family…"
-                  className="pixel-panel-dark w-52 px-3 py-2 text-xs text-white placeholder:text-white/35"
+                  className="pixel-panel-dark w-52 px-3 py-2 text-xs text-white placeholder:text-white/60"
                 />
                 <button
                   type="button"
@@ -363,7 +363,7 @@ function AlmanacSection({ signedIn }: { signedIn: boolean }) {
               />
             )}
 
-            <p className="mt-8 text-xs leading-relaxed text-white/35">
+            <p className="mt-8 text-xs leading-relaxed text-white/60">
               Taxonomy: {almanac.source}
             </p>
           </>
@@ -377,7 +377,7 @@ function AlmanacSection({ signedIn }: { signedIn: boolean }) {
 function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
     <div className="max-w-2xl">
-      <p className="font-pixel text-[10px] tracking-wide text-white/40 uppercase">{eyebrow}</p>
+      <p className="font-pixel text-[10px] tracking-wide text-white/65 uppercase">{eyebrow}</p>
       <h2 className="mt-4 text-2xl leading-tight font-semibold text-balance sm:text-4xl">
         {title}
       </h2>
