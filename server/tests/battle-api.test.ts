@@ -807,3 +807,43 @@ describe('verified PVE battle API', () => {
     ]);
   });
 });
+
+/**
+ * Leaving a battle used to share the move budget, so a player who spent it on
+ * moves could not abandon either — the only two controls a session has,
+ * exhausted together, with no way out but waiting the window down.
+ */
+describe('leaving a battle has its own budget', () => {
+  it('still abandons after the move limiter is exhausted', async () => {
+    const limitedApp = createRateLimitedBattleApp(1);
+    const avatarId = await seedAvatar({ ownerId: userId });
+
+    const started = await request(limitedApp)
+      .post('/api/battle/pve/start')
+      .set('Authorization', authorization(userId))
+      .send({ avatarId });
+    expect(started.status).toBe(201);
+    const { id, turnNumber } = started.body;
+
+    // Spend the single move allowed, then confirm the budget is gone.
+    await request(limitedApp)
+      .post(`/api/battle/pve/${id}/action`)
+      .set('Authorization', authorization(userId))
+      .send({ moveId: started.body.player.moves[0].id, expectedTurn: turnNumber });
+
+    const throttled = await request(limitedApp)
+      .post(`/api/battle/pve/${id}/action`)
+      .set('Authorization', authorization(userId))
+      .send({ moveId: started.body.player.moves[0].id, expectedTurn: turnNumber + 1 });
+    expect(throttled.status).toBe(429);
+
+    // The way out must still be open.
+    const abandoned = await request(limitedApp)
+      .post(`/api/battle/pve/${id}/abandon`)
+      .set('Authorization', authorization(userId))
+      .send({});
+
+    expect(abandoned.status).toBe(200);
+    expect(abandoned.body.status).toBe('abandoned');
+  });
+});
