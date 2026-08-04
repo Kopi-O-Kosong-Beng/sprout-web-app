@@ -67,9 +67,9 @@ export default function AdminPage() {
         <h1>Sprout admin</h1>
         <p>
           Accounts, live API health, Firestore cleanup and the full plant
-          almanac. Everything here is gated by the ADMIN_EMAILS allowlist on the
-          server, so a non-admin who navigates here sees 403s rather than a
-          partial dashboard.
+          almanac. Everything here is gated by the SUPER_ADMIN_EMAILS allowlist
+          on the server, so a non-operator who navigates here sees 403s rather
+          than a partial dashboard.
         </p>
       </section>
 
@@ -198,7 +198,7 @@ function ApiHealthPanel() {
   }, []);
 
   return (
-    <section className="page-heading">
+    <section className="panel">
       <h2>API health</h2>
       <p>
         Contacts Plant.id, Gemini and withoutBG once each and reports what came
@@ -287,7 +287,7 @@ function CleanupPanel() {
   const pendingDeletion = report?.dryRun === true && report.matched > 0;
 
   return (
-    <section className="page-heading">
+    <section className="panel">
       <h2>Firestore cleanup</h2>
       <p>
         Web uploads expire 24 hours after they are saved, but nothing has ever
@@ -375,7 +375,7 @@ function AdminAlmanacPanel() {
   const discoveries = almanac?.species.filter((entry) => entry.discovered) ?? [];
 
   return (
-    <section className="page-heading">
+    <section className="panel">
       <h2>Plant almanac</h2>
       {error && <p className="form-error">{error}</p>}
       {!almanac ? (
@@ -446,6 +446,7 @@ function AdminAlmanacPanel() {
             </label>
             <input
               id="admin-almanac-search"
+              className="admin-search"
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
