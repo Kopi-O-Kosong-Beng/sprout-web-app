@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PlantAvatarData } from '../components/common/PlantVisuals';
 import { extractApiError } from '../services/apiClient';
 import {
+  deleteAvatar,
   listOwnedAvatars,
   setDemoAvatars,
   type AvatarRecord,
@@ -26,6 +27,9 @@ export interface UseArchiveResult {
   error: string | null;
   demoEnabled: boolean;
   setDemoEnabled: (enabled: boolean) => Promise<void>;
+  /** Deletes one plant for good, then refreshes the shelves. Throws on
+   *  failure so the caller's dialog can stay open and say why. */
+  removePlant: (avatarId: string) => Promise<void>;
   retry: () => void;
 }
 
@@ -119,6 +123,27 @@ export function useArchive(): UseArchiveResult {
     }
   }, []);
 
+  const removePlant = useCallback(async (avatarId: string) => {
+    const request = ++requestVersion.current;
+    setStatus('mutating');
+    setError(null);
+    try {
+      await deleteAvatar(avatarId);
+      if (request !== requestVersion.current) return;
+      const nextRecords = await fetchAllOwnedAvatars(
+        () => request === requestVersion.current
+      );
+      if (request !== requestVersion.current) return;
+      setRecords(nextRecords);
+      setStatus('ready');
+    } catch (caught) {
+      // The archive itself is fine — only this removal failed — so the shelves
+      // stay 'ready' and the throw carries the reason to the confirm dialog.
+      if (request === requestVersion.current) setStatus('ready');
+      throw new Error(extractApiError(caught, 'Could not remove that plant.'));
+    }
+  }, []);
+
   const avatars = useMemo(() => records.map(toPlantAvatarData), [records]);
   const demoEnabled = useMemo(() => {
     const templateIds = new Set(
@@ -133,6 +158,7 @@ export function useArchive(): UseArchiveResult {
     error,
     demoEnabled,
     setDemoEnabled,
+    removePlant,
     retry: () => void loadArchive(),
   };
 }

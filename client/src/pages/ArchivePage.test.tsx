@@ -10,6 +10,7 @@ import BattlePage from './BattlePage';
 const apiMocks = vi.hoisted(() => ({
   listOwnedAvatars: vi.fn(),
   setDemoAvatars: vi.fn(),
+  deleteAvatar: vi.fn(),
 }));
 
 vi.mock('../services/sproutApi', () => apiMocks);
@@ -356,6 +357,71 @@ describe('ArchivePage', () => {
 
     expect(await screen.findByText('mutation rejected')).toBeVisible();
     expect(apiMocks.listOwnedAvatars).toHaveBeenCalledTimes(1);
+  });
+
+  it('digs up one plant through the shovel after confirming', async () => {
+    const orchidOnlyPage: PaginatedAvatars = {
+      ...collectedPage,
+      items: collectedPage.items.slice(1),
+      total: 1,
+    };
+    apiMocks.listOwnedAvatars
+      .mockResolvedValueOnce(collectedPage)
+      .mockResolvedValueOnce(orchidOnlyPage);
+    apiMocks.deleteAvatar.mockResolvedValue(undefined);
+    const { user } = renderArchive();
+
+    await user.click(await screen.findByRole('button', { name: /^remove plants$/i }));
+    expect(screen.getByText(/tap a plant to dig it up/i)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: /dig up fern ward/i }));
+    await user.click(
+      screen.getByRole('button', { name: /^dig up$/i })
+    );
+
+    expect(apiMocks.deleteAvatar).toHaveBeenCalledWith('fern-1');
+    expect(await screen.findByRole('heading', { name: 'Orchid Flare' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /dig up fern ward/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the plant when the dig is cancelled', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue(collectedPage);
+    const { user } = renderArchive();
+
+    await user.click(await screen.findByRole('button', { name: /^remove plants$/i }));
+    await user.click(screen.getByRole('button', { name: /dig up fern ward/i }));
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+
+    expect(apiMocks.deleteAvatar).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /dig up fern ward/i })).toBeVisible();
+  });
+
+  it('says why a dig failed and leaves the dialog open', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue(collectedPage);
+    apiMocks.deleteAvatar.mockRejectedValue(new Error('dig rejected'));
+    const { user } = renderArchive();
+
+    await user.click(await screen.findByRole('button', { name: /^remove plants$/i }));
+    await user.click(screen.getByRole('button', { name: /dig up fern ward/i }));
+    await user.click(screen.getByRole('button', { name: /^dig up$/i }));
+
+    expect(await screen.findByText('dig rejected')).toBeVisible();
+    expect(screen.getByRole('alertdialog')).toBeVisible();
+    // Only the first load — a failed dig must not silently reshuffle shelves.
+    expect(apiMocks.listOwnedAvatars).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no shovel over an empty archive', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue(emptyPage);
+    renderArchive();
+
+    expect(await screen.findByText(/no plants collected yet/i)).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /^remove plants$/i })
+    ).not.toBeInTheDocument();
   });
 
   it('shows retry after an archive request fails', async () => {

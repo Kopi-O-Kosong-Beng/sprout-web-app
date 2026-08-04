@@ -175,6 +175,25 @@ export const handleCreateAvatar: RequestHandler = async (req, res, next) => {
   }
 };
 
+/** DELETE /api/avatar/:avatarId — the archive's shovel. Ownership is checked
+ *  in the repository, so someone else's id answers the same 404 as a missing
+ *  one and the route confirms nothing about other players' records. */
+export const handleDeleteAvatar: RequestHandler = async (req, res, next) => {
+  try {
+    const deleted = await avatarRepository.deleteOwned(
+      req.user!.uid,
+      req.params.avatarId
+    );
+    if (!deleted) {
+      res.status(404).json({ error: 'Avatar not found.' });
+      return;
+    }
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const handleEnableDemoAvatars: RequestHandler = async (req, res, next) => {
   try {
     const result = await avatarRepository.ensureDemoSet(req.user!.uid);

@@ -435,3 +435,64 @@ describe('saving a scanned avatar', () => {
     expect(response.body).toEqual({ error: 'Unauthorised.' });
   });
 });
+
+describe('DELETE /api/avatar/:avatarId (the archive shovel)', () => {
+  it('deletes an owned avatar and answers 204 with no body', async () => {
+    await seedAvatar({ id: 'shovel-target', speciesName: 'Doomed Fern' });
+
+    const response = await request(app)
+      .delete('/api/avatar/shovel-target')
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(204);
+    expect(response.body).toEqual({});
+
+    const doc = await getDb()
+      .collection('avatar_records')
+      .doc('shovel-target')
+      .get();
+    expect(doc.exists).toBe(false);
+  });
+
+  it("answers 404 for someone else's avatar and leaves it in place", async () => {
+    await seedAvatar({
+      id: 'foreign-avatar',
+      userId: FOREIGN_ID,
+      speciesName: 'Foreign Fern',
+    });
+
+    const response = await request(app)
+      .delete('/api/avatar/foreign-avatar')
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+
+    const doc = await getDb()
+      .collection('avatar_records')
+      .doc('foreign-avatar')
+      .get();
+    expect(doc.exists).toBe(true);
+  });
+
+  it('answers 404 for an id that never existed', async () => {
+    const response = await request(app)
+      .delete('/api/avatar/never-existed')
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+  });
+
+  it('rejects an unauthenticated delete without touching the record', async () => {
+    await seedAvatar({ id: 'kept-avatar', speciesName: 'Kept Fern' });
+
+    const response = await request(app).delete('/api/avatar/kept-avatar');
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: 'Unauthorised.' });
+
+    const doc = await getDb().collection('avatar_records').doc('kept-avatar').get();
+    expect(doc.exists).toBe(true);
+  });
+});

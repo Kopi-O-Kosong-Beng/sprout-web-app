@@ -281,6 +281,19 @@ const firestoreAvatarRepository: AvatarRepository = {
     return toRecord(doc);
   },
 
+  async deleteOwned(userId: string, avatarId: string): Promise<boolean> {
+    const db = getDb();
+    const ref = db.collection('avatar_records').doc(avatarId);
+    // Read and delete in one transaction so the ownership check and the
+    // removal cannot straddle a concurrent write to the same document.
+    return db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists || doc.data()?.userId !== userId) return false;
+      transaction.delete(ref);
+      return true;
+    });
+  },
+
   async createForUser(
     userId: string,
     input: NewAvatarInput,

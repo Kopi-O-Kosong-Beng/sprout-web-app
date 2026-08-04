@@ -26,12 +26,42 @@ const SLOTS_PER_SHELF = 3;
 export default function ArchivePage() {
   const navigate = useNavigate();
   const demoToolsEnabled = import.meta.env.VITE_ENABLE_DEMO_TOOLS === 'true';
-  const { avatars, status, error, demoEnabled, setDemoEnabled, retry } = useArchive();
+  const { avatars, status, error, demoEnabled, setDemoEnabled, removePlant, retry } =
+    useArchive();
   const [selectedAvatarId, setSelectedAvatarId] = useState<string | null>(null);
+  const [shovelArmed, setShovelArmed] = useState(false);
+  const [pendingRemoval, setPendingRemoval] = useState<PlantAvatarData | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const selected =
     avatars.find((avatar) => avatar.id === selectedAvatarId) ?? avatars[0] ?? null;
   const demoAction = demoEnabled ? 'Remove demo plants' : 'Add five demo plants';
   const settled = status === 'ready' || status === 'mutating';
+
+  // Derived, so an emptied archive can't leave a stale mode armed (the
+  // plantemon-web garden's rule, kept as-is).
+  const shovelling = shovelArmed && settled && avatars.length > 0;
+
+  async function confirmRemoval() {
+    if (!pendingRemoval) return;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await removePlant(pendingRemoval.id);
+      setPendingRemoval(null);
+    } catch (caught) {
+      setRemoveError(
+        caught instanceof Error ? caught.message : 'Could not remove that plant.'
+      );
+    } finally {
+      setRemoving(false);
+    }
+  }
+
+  function closeRemoveDialog() {
+    setPendingRemoval(null);
+    setRemoveError(null);
+  }
 
   // Pad the final plank so a row of one or two still sits on a full shelf.
   const shelfCount = Math.max(1, Math.ceil(avatars.length / SLOTS_PER_SHELF));
@@ -62,20 +92,35 @@ export default function ArchivePage() {
 
       <div className="safe-top flex items-center justify-between gap-2 px-3">
         <BackButton />
-        {demoToolsEnabled && settled && (
-          <button
-            className="press pixel-button px-3 py-2 text-[9px]"
-            type="button"
-            role="switch"
-            aria-checked={demoEnabled}
-            aria-label={demoAction}
-            aria-busy={status === 'mutating'}
-            disabled={status !== 'ready'}
-            onClick={() => void setDemoEnabled(!demoEnabled)}
-          >
-            {demoAction}
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {demoToolsEnabled && settled && (
+            <button
+              className="press pixel-button px-3 py-2 text-[9px]"
+              type="button"
+              role="switch"
+              aria-checked={demoEnabled}
+              aria-label={demoAction}
+              aria-busy={status === 'mutating'}
+              disabled={status !== 'ready'}
+              onClick={() => void setDemoEnabled(!demoEnabled)}
+            >
+              {demoAction}
+            </button>
+          )}
+          {settled && avatars.length > 0 && (
+            <button
+              type="button"
+              aria-pressed={shovelling}
+              aria-label={shovelling ? 'Stop shovelling' : 'Remove plants'}
+              onClick={() => setShovelArmed((on) => !on)}
+              // Inline background wins over .pixel-button's unlayered shorthand.
+              style={shovelling ? { background: 'var(--color-hp-low)' } : undefined}
+              className="press pixel-button flex h-10 w-10 items-center justify-center text-lg"
+            >
+              🪏
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center justify-center gap-3 px-4">
@@ -87,13 +132,21 @@ export default function ArchivePage() {
         <h1 className="font-pixel text-outline text-xl text-white sm:text-3xl">Archive</h1>
       </div>
 
-      {status === 'mutating' && (
+      {/* The removal dialog narrates its own busy state, so the banner stays
+          the demo switch's alone. */}
+      {status === 'mutating' && !pendingRemoval && (
         <p
           className="pixel-panel mx-auto mt-2 px-3 py-2 text-center text-[10px]"
           role="status"
           aria-label="Updating demo plants"
         >
           Updating demo plants...
+        </p>
+      )}
+
+      {shovelling && (
+        <p className="pixel-panel mx-auto mt-2 px-3 py-2 text-center text-[10px] leading-relaxed">
+          Tap a plant to dig it up. Tap the shovel again to stop.
         </p>
       )}
 
@@ -140,7 +193,9 @@ export default function ArchivePage() {
                 key={index}
                 plants={plants}
                 selectedId={selected.id}
+                shovelling={shovelling}
                 onSelect={setSelectedAvatarId}
+                onDig={setPendingRemoval}
               />
             ))}
           </div>
@@ -156,19 +211,92 @@ export default function ArchivePage() {
           />
         </div>
       )}
+
+      {pendingRemoval && (
+        <RemoveDialog
+          plant={pendingRemoval}
+          busy={removing}
+          error={removeError}
+          onConfirm={() => void confirmRemoval()}
+          onCancel={closeRemoveDialog}
+        />
+      )}
     </main>
   );
 }
 
-/** One plank with three potted slots resting on it. */
+/** Confirms a permanent removal — the delete hits the cloud archive.
+ *  Ported from the plantemon-web garden's dialog, plus an error line so a
+ *  failed delete says why instead of silently staying. */
+function RemoveDialog({
+  plant,
+  busy,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  plant: PlantAvatarData;
+  busy: boolean;
+  error: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/70 p-6">
+      <div
+        className="pixel-panel w-full max-w-xs p-4 text-center"
+        role="alertdialog"
+        aria-label={`Dig up ${plant.name}?`}
+      >
+        <div className="text-3xl">🪏</div>
+        <h2 className="font-pixel mt-2 text-xs leading-relaxed">Dig up {plant.name}?</h2>
+        <p className="mt-2 text-[10px] leading-relaxed opacity-80">
+          This removes it from your archive for good.
+        </p>
+        {error && (
+          <p className="mt-2 text-[10px] leading-relaxed text-red-700" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            style={{ background: 'var(--color-hp-low)', color: '#fff' }}
+            className="press pixel-button flex-1 px-2 py-2 text-[9px]"
+          >
+            {busy ? 'Digging…' : 'Dig up'}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="press pixel-button px-3 py-2 text-[9px]"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One plank with three potted slots resting on it. Shovelling swaps what a
+ *  tap means — dig up instead of select — and sets the sprites squirming so
+ *  the mode is visible on the shelf itself. */
 function Shelf({
   plants,
   selectedId,
+  shovelling,
   onSelect,
+  onDig,
 }: {
   plants: (PlantAvatarData | undefined)[];
   selectedId: string;
+  shovelling: boolean;
   onSelect: (id: string) => void;
+  onDig: (plant: PlantAvatarData) => void;
 }) {
   return (
     <section className="relative">
@@ -179,19 +307,23 @@ function Shelf({
             <button
               key={avatar.id}
               type="button"
-              aria-label={`Select ${avatar.name}${avatar.isDemo ? ' (Demo)' : ''}`}
-              aria-pressed={avatar.id === selectedId}
-              onClick={() => onSelect(avatar.id)}
+              aria-label={
+                shovelling
+                  ? `Dig up ${avatar.name}`
+                  : `Select ${avatar.name}${avatar.isDemo ? ' (Demo)' : ''}`
+              }
+              aria-pressed={shovelling ? undefined : avatar.id === selectedId}
+              onClick={() => (shovelling ? onDig(avatar) : onSelect(avatar.id))}
               className="press flex w-1/3 flex-col items-center"
             >
               <span
                 className={
-                  avatar.id === selectedId
+                  !shovelling && avatar.id === selectedId
                     ? 'relative block rounded-full outline-3 outline-offset-2 outline-[color:var(--color-brand)]'
                     : 'relative block'
                 }
               >
-                <PlantAvatar avatar={avatar} />
+                <PlantAvatar avatar={avatar} wiggle={shovelling} />
               </span>
               {/* On the shelf the badge is how you tell, at a glance, which of
                   your plants are on the clock — the card only shows one. */}

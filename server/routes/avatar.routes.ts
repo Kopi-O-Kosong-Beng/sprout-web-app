@@ -8,6 +8,7 @@ import authMiddleware from '../middleware/auth.middleware';
 import validate from '../middleware/validation.middleware';
 import {
   handleCreateAvatar,
+  handleDeleteAvatar,
   handleDisableDemoAvatars,
   handleEnableDemoAvatars,
   handleListAvatars,
@@ -115,5 +116,6 @@ router.post(
   handleCreateAvatar
 );
 router.get('/:avatarId', handleGetAvatar);
+router.delete('/:avatarId', handleDeleteAvatar);
 
 export default router;

@@ -136,9 +136,12 @@ function PottedSprite({
 export function PlantAvatar({
   avatar,
   large = false,
+  wiggle = false,
 }: {
   avatar: PlantAvatarData;
   large?: boolean;
+  /** Shovel mode: the sprite squirms in its pot to say "tap me to dig". */
+  wiggle?: boolean;
 }) {
   const showSprite = Boolean(avatar.spriteUrl?.trim());
 
@@ -150,7 +153,7 @@ export function PlantAvatar({
       role="img"
       aria-label={`${avatar.name} avatar`}
     >
-      <PottedSprite spriteUrl={avatar.spriteUrl} />
+      <PottedSprite spriteUrl={avatar.spriteUrl} wiggle={wiggle} />
     </span>
   );
 }

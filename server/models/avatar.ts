@@ -48,6 +48,9 @@ export interface AvatarRepository {
   listByUser(userId: string, page: number, pageSize: number): Promise<PaginatedAvatars>;
   /** Returns a single avatar iff it belongs to the caller, else null. */
   getOwned(userId: string, avatarId: string): Promise<AvatarRecord | null>;
+  /** Deletes an avatar iff it belongs to the caller. True when a record was
+   *  removed; false when it never existed or is someone else's. */
+  deleteOwned(userId: string, avatarId: string): Promise<boolean>;
   /** Persists a newly scanned avatar owned by the caller (Req 6.12). */
   createForUser(
     userId: string,
