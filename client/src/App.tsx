@@ -123,7 +123,7 @@ function App() {
               <Route
                 path="/studio"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requireAdmin>
                     <StudioPage />
                   </ProtectedRoute>
                 }

@@ -21,7 +21,7 @@ const navItems: NavItem[] = [
   { to: '/archive', label: 'Archive', requiresAuth: true },
   { to: '/battle', label: 'PVE Battle', requiresAuth: true },
   { to: '/leaderboard', label: 'Ranking', requiresAuth: true },
-  { to: '/studio', label: 'Studio', requiresAuth: true },
+  { to: '/studio', label: 'Studio', requiresAuth: true, requiresAdmin: true },
   { to: '/admin', label: 'Admin', requiresAuth: true, requiresAdmin: true },
   { to: '/contact', label: 'Contact', requiresAuth: false },
   { to: '/test', label: 'API Test', requiresAuth: true, requiresAdmin: true },

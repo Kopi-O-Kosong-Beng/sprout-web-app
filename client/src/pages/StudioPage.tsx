@@ -92,7 +92,7 @@ export default function StudioPage() {
     if (route === TEST_ROUTE) return <UnitTests />;
 
     if (STUDIO_ROUTES.includes(route)) {
-      return <PipelineStudio route={route} user={firebaseUser} dexDocs={dexDocs} />;
+      return <PipelineStudio route={route} dexDocs={dexDocs} />;
     }
 
     if (ADMIN_ROUTES.includes(route)) {
