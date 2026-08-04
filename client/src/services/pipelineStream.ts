@@ -126,12 +126,26 @@ export async function streamPipeline(
     for (const chunk of chunks) {
       const match = chunk.match(/^data:\s*(.*)$/m);
       if (!match) continue;
+      /*
+       * Parse and dispatch are separated on purpose.
+       *
+       * Tolerating a malformed frame is right — one unreadable line is not
+       * worth aborting a minute-long run over. But the guard used to wrap the
+       * onEvent call too, so anything the handler threw was caught here and
+       * logged as a parse failure. The scan screen's handler throws
+       * deliberately on a `pipeline_error` event, which is the server telling
+       * the client the run has failed; that throw was swallowed, the loop ran
+       * on to a clean close, and the player was shown "The pipeline finished
+       * without producing a sprite" instead of the reason the server gave.
+       */
+      let event: PipelineEvent;
       try {
-        onEvent(JSON.parse(match[1]) as PipelineEvent);
+        event = JSON.parse(match[1]) as PipelineEvent;
       } catch {
-        // A malformed frame is not worth aborting a minute-long run over.
         console.warn('Failed to parse SSE event:', chunk);
+        continue;
       }
+      onEvent(event);
     }
   }
 }

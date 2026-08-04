@@ -332,6 +332,13 @@ export default function ScanPage() {
       // as "please sign in" — Firebase's token refresh fails with a network
       // error before any request is sent, so the user was told to do the one
       // thing that could not help.
+      // A run the player cancelled is not a failure and gets no toast — they
+      // know what they did, and telling them is noise.
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setStatus({ kind: 'idle' });
+        return;
+      }
+
       // Toast rather than an inline line: the progress overlay covers the
       // screen while a run is going, so a message painted underneath it is one
       // the player never sees. The toast also carries the way out.
@@ -442,7 +449,12 @@ export default function ScanPage() {
 
       {/* Full-screen progress while the pipeline runs — the long, opaque wait. */}
       {busy && (
-        <ScanProgress step={status.step} plantName={status.plantName} detail={status.detail} />
+        <ScanProgress
+          step={status.step}
+          plantName={status.plantName}
+          detail={status.detail}
+          onCancel={() => abortRef.current?.abort()}
+        />
       )}
 
       {/* Not sure enough to be worth drawing. Asks for a better photo rather
@@ -552,10 +564,15 @@ function ScanProgress({
   step,
   plantName,
   detail,
+  onCancel,
 }: {
   step: ScanStep;
   plantName?: string;
   detail?: string;
+  /** Aborts the run. The overlay is `inset-0 z-30`, so it covers the Back
+   *  button — without this the player is pinned to the screen for the length
+   *  of a run that can take most of a minute, with no way to leave. */
+  onCancel: () => void;
 }) {
   const currentIndex = SCAN_STEPS.findIndex((s) => s.key === step);
 
@@ -595,6 +612,14 @@ function ScanProgress({
         <p className="mt-5 text-center text-[9px] leading-relaxed opacity-60">
           This can take up to a minute. Keep the app open.
         </p>
+
+        <button
+          type="button"
+          onClick={onCancel}
+          className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
+        >
+          Cancel
+        </button>
       </div>
     </div>
   );

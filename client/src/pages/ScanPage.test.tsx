@@ -212,4 +212,38 @@ describe('ScanPage save outcome', () => {
     expect(screen.getByText(/31%/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /scan again/i })).toBeInTheDocument();
   });
+
+  /**
+   * The reader used to wrap the onEvent call in its malformed-frame guard, so
+   * the deliberate throw on a pipeline_error was caught and logged as a parse
+   * failure. The run then closed cleanly and the player was told the pipeline
+   * "finished without producing a sprite" — hiding the reason the server gave.
+   */
+  it('surfaces the reason the server gave for a failed run', async () => {
+    scriptStream([
+      { event: 'step_start', step: '1' },
+      { event: 'pipeline_error', error: 'The image model refused the prompt.' },
+    ]);
+    await startScan();
+
+    expect(
+      await screen.findByText(/The image model refused the prompt\./i)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/finished without producing a sprite/i)
+    ).not.toBeInTheDocument();
+  });
+
+  /** A run the player cancelled is not a failure, so it must not be reported
+   *  to them as one. */
+  it('says nothing when the player cancels the run', async () => {
+    streamPipeline.mockRejectedValue(
+      Object.assign(new DOMException('Aborted', 'AbortError'))
+    );
+    await startScan();
+
+    expect(screen.queryByText(/no connection/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+  });
 });
