@@ -1,8 +1,20 @@
 # Demo plant art
 
-Hand-made art for the five demo plants, served by the client at `/plants/`.
-Each plant is a pair: the sprite that stands in the pot on the shelf, and the
-photograph it was drawn from, which the archive shows on the specimen card.
+Art for the five demo plants, served by the client at `/plants/`. Each plant
+is a pair: the sprite that stands in the pot on the shelf, and the photograph
+it was drawn from, which the archive shows on the specimen card.
+
+The committed sprites are pipeline renders — hand-made art never landed here,
+which left every seeded avatar 404ing to a bare pot. Until someone draws them
+by hand, regenerate them with:
+
+```
+npm run sprites:generate:demo -w server            # anything still missing
+npm run sprites:generate:demo -w server -- --force # re-render
+```
+
+Dropping in a hand-drawn `SPRITE_<Key>.png` simply replaces the render; the
+generator skips files that already exist unless `--force` is passed.
 
 | Plant | Sprite | Photo |
 | --- | --- | --- |

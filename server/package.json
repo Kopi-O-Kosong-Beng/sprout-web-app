@@ -17,6 +17,7 @@
     "seed:firebase-auth-demo": "tsx scripts/seed-firebase-auth-demo.ts",
     "seed:admin": "tsx scripts/seed-admin-account.ts",
     "sprites:generate": "tsx scripts/generate-sprites.ts",
+    "sprites:generate:demo": "tsx scripts/generate-demo-plants.ts",
     "check:email": "tsx scripts/check-email.ts",
     "check:storage": "tsx scripts/check-storage.ts",
     "inspect:firestore": "tsx scripts/inspect-firestore.ts",
