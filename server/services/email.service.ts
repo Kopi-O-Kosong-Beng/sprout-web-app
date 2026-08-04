@@ -110,6 +110,15 @@ function getSmtpTransporter(): Transporter {
         user: requireEnv('SMTP_USER'),
         pass: requireEnv('SMTP_PASS'),
       },
+      // Hosts that block outbound SMTP (Render's free tier, some campus
+      // networks) drop packets rather than refuse the connection, which left
+      // a signup request hanging for minutes and surfacing as an unexplained
+      // failure. Bounded waits turn "hangs forever" into "fails in seconds
+      // with ETIMEDOUT in the log" — the caller already treats a throw as
+      // not-delivered.
+      connectionTimeout: 8_000,
+      greetingTimeout: 8_000,
+      socketTimeout: 15_000,
     });
   }
   return smtpTransporter;

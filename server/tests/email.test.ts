@@ -153,6 +153,11 @@ describe('email.service send() - smtp mode', () => {
       port: 587,
       secure: false,
       auth: { user: 'hello.sprout.team@gmail.com', pass: 'app-password' },
+      // Bounded waits: hosts that blackhole outbound SMTP (Render free tier)
+      // must fail in seconds, not hang a signup request for minutes.
+      connectionTimeout: 8_000,
+      greetingTimeout: 8_000,
+      socketTimeout: 15_000,
     });
     expect(mockSendMail).toHaveBeenCalledWith({
       from: 'hello.sprout.team@gmail.com',
