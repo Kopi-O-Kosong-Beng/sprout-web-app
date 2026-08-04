@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { signOut } from 'firebase/auth';
+import { getDevSession } from './devSession';
 import { getSproutFirebaseAuth, isFirebaseConfigured } from './firebaseClient';
 
 // VITE_API_URL lets this point at a local server today and a deployed one
@@ -15,6 +16,16 @@ const apiClient = axios.create({
 // auto-refreshes it, so this never goes stale. Callers that set their own
 // Authorization header (the /test page's explicit-token flows) win.
 apiClient.interceptors.request.use(async (config) => {
+  // Local-only: a dev session has no Firebase user and therefore no token, so
+  // it identifies itself with the headers AUTH_DEV_BYPASS reads instead. In a
+  // production build getDevSession() is hard-wired to null, so this branch is
+  // never taken and the token path below is the only one that runs.
+  const devSession = getDevSession();
+  if (devSession) {
+    config.headers['x-dev-uid'] = devSession.uid;
+    config.headers['x-dev-email'] = devSession.email;
+    return config;
+  }
   if (!config.headers.Authorization && isFirebaseConfigured()) {
     const token = await getSproutFirebaseAuth().currentUser?.getIdToken();
     if (token) config.headers.Authorization = `Bearer ${token}`;

@@ -30,6 +30,12 @@ import {
   getSproutFirebaseAuth,
   isFirebaseConfigured,
 } from '../services/firebaseClient';
+import {
+  endDevSession,
+  getDevSession,
+  isDevAdminEmail,
+  startDevSession,
+} from '../services/devSession';
 
 export type AuthStatus = 'loading' | 'signed-out' | 'unverified' | 'authenticated';
 
@@ -113,15 +119,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /** Adopts a local dev session: no Firebase user, so the profile (and with it
+   *  the admin flag) comes from /api/auth/me the same way it does for a real
+   *  account — the server derives it from the email the apiClient sends. */
+  const deriveDevState = useCallback(async () => {
+    setFirebaseUser(null);
+    try {
+      setProfile(await getCurrentUser());
+    } catch {
+      // The dev server is unreachable or the bypass is off. Signing them in
+      // with no profile would present an unusable app, so stay signed out.
+      endDevSession();
+      setProfile(null);
+      setStatus('signed-out');
+      return;
+    }
+    setStatus('authenticated');
+  }, []);
+
   useEffect(() => {
+    // Always null in a production build, so Firebase remains the only way in.
+    // Checked before Firebase because a dev session has no Firebase user for
+    // onAuthStateChanged to report.
+    if (getDevSession()) {
+      void deriveDevState();
+      return;
+    }
     if (!isFirebaseConfigured()) return;
     const auth = getSproutFirebaseAuth();
     return onAuthStateChanged(auth, (user) => {
       void deriveState(user);
     });
-  }, [deriveState]);
+  }, [deriveDevState, deriveState]);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(
+    async (email: string, password: string) => {
+    // Local-only shortcut: isDevAdminEmail() is hard-wired to false in a
+    // production build. The password is accepted unread — there is no Firebase
+    // account behind this identity to check it against, which is exactly why
+    // it is fenced to dev.
+    if (isDevAdminEmail(email)) {
+      startDevSession();
+      await deriveDevState();
+      return;
+    }
     if (!isFirebaseConfigured()) {
       throw new Error(
         'Firebase is not configured — fill client/.env.local with the VITE_FIREBASE_* values.'
@@ -137,7 +178,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       throw new Error(mapFirebaseLoginError(err));
     }
-  }, []);
+    },
+    [deriveDevState]
+  );
 
   /** Google sign-in. Google asserts the email is already verified, so these
    *  users skip the verification-link step entirely — no outbound email is
@@ -169,6 +212,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // A dev session has no Firebase user to sign out of, so it is cleared here
+    // and the state set directly. Never taken in a production build.
+    if (getDevSession()) {
+      endDevSession();
+      setFirebaseUser(null);
+      setProfile(null);
+      setStatus('signed-out');
+      return;
+    }
     if (!isFirebaseConfigured()) return;
     const token = await getSproutFirebaseAuth().currentUser?.getIdToken();
     await recordSessionLogout(token).catch((err) => {

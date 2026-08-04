@@ -61,6 +61,8 @@ export default function ProtectedRoute({
         </p>
       );
     }
+    // Home rather than /login: they are signed in, so the login page would
+    // bounce them straight back and read as a loop.
     if (!profile.isSuperAdmin) return <Navigate to="/home" replace />;
   }
   return <>{children}</>;

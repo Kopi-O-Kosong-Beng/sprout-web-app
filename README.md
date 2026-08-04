@@ -236,6 +236,59 @@ See the database anytime:
 npm run inspect:firestore -w server
 ```
 
+### Signing in locally without a password
+
+You do not need a real Firebase account to click through the app. On the login
+page, enter:
+
+```
+email:     test@sprout.com
+password:  anything at all — it is not read
+```
+
+That takes a local-only shortcut: no Firebase call, no ID token. The client
+stores a "dev session" and sends `x-dev-uid` / `x-dev-email` headers, which the
+backend's `AUTH_DEV_BYPASS` already understands. You land as an **operator**,
+so `/admin`, `/studio` and `/test` are reachable too.
+
+Two things have to be true for it to work, and both are already set by
+[Step 2](#step-2-create-backend-env-file):
+
+```
+AUTH_DEV_BYPASS=true
+SUPER_ADMIN_EMAILS=...,test@sprout.com    # the address must be on the operator allowlist
+```
+
+The operator part is not special-cased — the server derives `isSuperAdmin`
+from that email through the normal allowlist, so if you take `test@sprout.com`
+out of `SUPER_ADMIN_EMAILS` you still sign in, just as an ordinary player.
+Handy for checking what a non-operator sees. "Log out" clears the session as
+usual.
+
+> **This cannot activate on a deployment.** The client half goes through
+> `import.meta.env.DEV`, which compiles to a literal `false` in `vite build`
+> (it minifies to `function(){return!1}`), so the dev session is always `null`
+> and the headers are never sent. The server half independently requires
+> `AUTH_DEV_BYPASS=true` **and** `NODE_ENV !== 'production'`, and `render.yaml`
+> pins `AUTH_DEV_BYPASS=false`. Neither half alone opens anything: a deployed
+> API refuses these headers even from a locally-run client, and a deployed
+> client never sends them even against a local API.
+>
+> Note the shortcut is inert in the production bundle, not stripped from it —
+> `test@sprout.com` and `sprout-dev-session` are readable in the shipped JS.
+> Nothing relies on them being secret. Still, do not add `test@sprout.com` to
+> `SUPER_ADMIN_EMAILS` (or `ADMIN_EMAILS`) on a deployed environment: that
+> would make it a live operator address the moment anyone creates that
+> Firebase account for real.
+
+To act as a specific user instead — a different archive, say — set the dev
+session yourself in the browser console:
+
+```js
+localStorage.setItem('sprout-dev-session',
+  JSON.stringify({ uid: 'demo-user-0001', email: 'test@sprout.com' }))
+```
+
 ### The almanac taxonomy
 
 The landing page and the admin dashboard share a fixed list of 200 Singapore
