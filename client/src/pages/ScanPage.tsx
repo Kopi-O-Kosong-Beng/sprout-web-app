@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import BackButton from '../components/common/BackButton';
-import { streamPipeline, type PipelineEvent } from '../services/pipelineStream';
+import {
+  PipelineRequestError,
+  streamPipeline,
+  type PipelineEvent,
+} from '../services/pipelineStream';
 
 /**
  * Scan screen — ported from plantemon-web's (app)/scan/page.tsx, itself a port
@@ -66,7 +70,40 @@ type Status =
       saveError?: string;
       discovery: ScanDiscovery | null;
     }
+  | {
+      /** Plant.id was not sure enough to be worth a render. Its own state
+       *  rather than an error: nothing went wrong, the photo was just not
+       *  good enough, and the way out is another photo. */
+      kind: 'lowConfidence';
+      name: string;
+      probability: number;
+      threshold: number;
+    }
   | { kind: 'error'; message: string };
+
+/**
+ * What to tell the player when a run could not start or finish.
+ *
+ * Branches on the failure's kind rather than its wording. The offline case is
+ * the one that matters most here: a scan is the one screen a user is likely to
+ * open away from wifi, standing in front of a plant.
+ */
+function scanErrorMessage(error: unknown): string {
+  if (error instanceof PipelineRequestError) {
+    switch (error.kind) {
+      case 'offline':
+        return 'No connection. Reconnect to wifi or mobile data, then scan again.';
+      case 'unauthorised':
+        return 'Please sign in to scan a plant.';
+      default:
+        return error.message;
+    }
+  }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return 'No connection. Reconnect to wifi or mobile data, then scan again.';
+  }
+  return error instanceof Error ? error.message : 'Something went wrong.';
+}
 
 /** Maps a pipeline hop id onto the three stages the player is shown. */
 const STEP_FOR_HOP: Record<string, ScanStep> = {
@@ -185,6 +222,8 @@ export default function ScanPage() {
     abortRef.current = controller;
     let finalSprite: string | null = null;
     let finalName = customName ?? '';
+    /** Set when the server gives up on a too-unsure identification. */
+    let lowConfidence: { name: string; probability: number; threshold: number } | null = null;
     let savedOutcome: { saved: boolean; saveError?: string; discovery: ScanDiscovery | null } = {
       saved: true,
       discovery: null,
@@ -241,12 +280,27 @@ export default function ScanPage() {
             };
           }
 
+          if (event.event === 'low_confidence') {
+            lowConfidence = {
+              name: String(event.name ?? 'that plant'),
+              probability: Number(event.probability ?? 0),
+              threshold: Number(event.threshold ?? 0.7),
+            };
+            return;
+          }
           if (event.event === 'pipeline_error' || event.event === 'error') {
             throw new Error(String(event.error ?? 'The pipeline failed.'));
           }
         },
         controller.signal
       );
+
+      // The server stops before generating when it is not sure enough, so a
+      // missing sprite here is expected rather than a fault.
+      if (lowConfidence) {
+        setStatus({ kind: 'lowConfidence', ...lowConfidence });
+        return;
+      }
 
       if (!finalSprite) {
         throw new Error('The pipeline finished without producing a sprite.');
@@ -261,11 +315,12 @@ export default function ScanPage() {
         discovery: savedOutcome.discovery,
       });
     } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : 'Something went wrong.';
-      setStatus({
-        kind: 'error',
-        message: rawMessage.includes('401') ? 'Please sign in to scan a plant.' : rawMessage,
-      });
+      // Decided by the failure's own kind, not by searching its text. The old
+      // check was `message.includes('401')`, which reported an offline device
+      // as "please sign in" — Firebase's token refresh fails with a network
+      // error before any request is sent, so the user was told to do the one
+      // thing that could not help.
+      setStatus({ kind: 'error', message: scanErrorMessage(error) });
     } finally {
       processingRef.current = false;
       abortRef.current = null;
@@ -365,6 +420,16 @@ export default function ScanPage() {
       {/* Full-screen progress while the pipeline runs — the long, opaque wait. */}
       {busy && (
         <ScanProgress step={status.step} plantName={status.plantName} detail={status.detail} />
+      )}
+
+      {/* Not sure enough to be worth drawing. Asks for a better photo rather
+          than handing over a creature built on a guess. */}
+      {status.kind === 'lowConfidence' && (
+        <NotSureDialog
+          name={status.name}
+          probability={status.probability}
+          onRetry={() => setStatus({ kind: 'idle' })}
+        />
       )}
 
       {/* Action row: upload | capture | test */}
@@ -527,6 +592,47 @@ function StepMarker({ state }: { state: 'done' | 'active' | 'pending' }) {
     );
   }
   return <span className="mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 border-black/40" />;
+}
+
+/**
+ * "I'm not sure what this is."
+ *
+ * Shown when Plant.id's confidence falls under MIN_CONFIDENCE_THRESHOLD. The
+ * percentage is included because a bare "try again" gives the player nothing to
+ * act on, and the advice is specific — flowers and leaves are what the
+ * identifier keys on, so "get closer to the flower" is genuinely the fix rather
+ * than encouragement.
+ */
+function NotSureDialog({
+  name,
+  probability,
+  onRetry,
+}: {
+  name: string;
+  probability: number;
+  onRetry: () => void;
+}) {
+  return (
+    <Overlay>
+      <h2 className="text-center text-xs">Not sure about this one</h2>
+      <p className="mt-3 text-[10px] leading-relaxed">
+        The closest match was <em>{name}</em>, but only {Math.round(probability * 100)}%
+        confident — not enough to grow a plant from.
+      </p>
+      <p className="mt-2 text-[9px] leading-relaxed opacity-80">
+        Try again with a clearer photo: fill the frame with one plant, get close to a
+        flower or leaf, and keep it in focus and well lit.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+        className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
+      >
+        Scan again
+      </button>
+    </Overlay>
+  );
 }
 
 /** Port of ScanActivity.showNameDialog. */

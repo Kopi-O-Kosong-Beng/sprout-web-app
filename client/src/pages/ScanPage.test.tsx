@@ -2,11 +2,19 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PipelineEvent } from '../services/pipelineStream';
+import {
+  PipelineRequestError,
+  type PipelineEvent,
+} from '../services/pipelineStream';
 import ScanPage, { type ScanDiscovery } from './ScanPage';
 
 const streamPipeline = vi.hoisted(() => vi.fn());
-vi.mock('../services/pipelineStream', () => ({ streamPipeline }));
+// Partial mock: PipelineRequestError is a real class the page branches on, so
+// it must be the genuine one, not a stub.
+vi.mock('../services/pipelineStream', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/pipelineStream')>()),
+  streamPipeline,
+}));
 
 /** Drives the page's own onEvent callback with a scripted event sequence. */
 function scriptStream(events: PipelineEvent[]) {
@@ -146,10 +154,56 @@ describe('ScanPage save outcome', () => {
   });
 
   it('asks the user to sign in when the server rejects the request', async () => {
-    streamPipeline.mockRejectedValue(new Error('Pipeline API HTTP 401'));
+    streamPipeline.mockRejectedValue(
+      new PipelineRequestError('unauthorised', 'Pipeline API HTTP 401', 401)
+    );
     await startScan();
 
     expect(await screen.findByText(/sign in/i)).toBeInTheDocument();
     expect(screen.queryByText(/Pipeline API HTTP 401/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The bug this replaces: the page decided by `message.includes('401')`, so an
+   * offline device — whose Firebase token refresh fails before any request is
+   * sent — was told to sign in, the one thing that could not help.
+   */
+  it('tells an offline user to reconnect, not to sign in', async () => {
+    streamPipeline.mockRejectedValue(
+      new PipelineRequestError('offline', 'No connection.')
+    );
+    await startScan();
+
+    expect(await screen.findByText(/reconnect to wifi/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
+  });
+
+  it('does not mistake an unrelated error mentioning 401 for a sign-in problem', async () => {
+    streamPipeline.mockRejectedValue(
+      new PipelineRequestError('http', 'Render failed after 401 ms', 500)
+    );
+    await startScan();
+
+    expect(await screen.findByText(/Render failed after 401 ms/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
+  });
+
+  /** Too unsure to be worth a render: ask for a better photo, do not invent a
+   *  creature from a guess. */
+  it('asks for a clearer photo when identification is not confident enough', async () => {
+    scriptStream([
+      {
+        event: 'low_confidence',
+        name: 'Ficus lyrata',
+        probability: 0.31,
+        threshold: 0.7,
+      },
+    ]);
+    await startScan();
+
+    expect(await screen.findByText(/not sure about this one/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ficus lyrata/)).toBeInTheDocument();
+    expect(screen.getByText(/31%/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /scan again/i })).toBeInTheDocument();
   });
 });

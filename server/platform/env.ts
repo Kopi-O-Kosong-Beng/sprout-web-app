@@ -43,10 +43,40 @@ export function resolveKeys<T extends Record<string, () => string>>(
   return resolved;
 }
 
+/** Fallback when MIN_CONFIDENCE_THRESHOLD is unset or unparseable. */
+const DEFAULT_MIN_CONFIDENCE = 0.7;
+
 export const serverEnv = {
   /** Plant.id v3 species identification. PLANTID_API_KEY is this repo's name. */
   get plantApiKey() {
     return process.env.PLANT_API_KEY || process.env.PLANTID_API_KEY || null;
+  },
+
+  /**
+   * How sure Plant.id has to be before a scan is allowed to become a creature,
+   * as a probability in 0..1.
+   *
+   * This has been declared in .env, .env.example and render.yaml since the
+   * pipeline was written, and until now nothing read it: every identification
+   * proceeded to generation no matter how unsure, so a 12%-confidence guess
+   * still spent a render and landed a wrong species in the player's archive.
+   *
+   * Out-of-range or unparseable values fall back rather than throw — a typo in
+   * a deployment variable should not take the scan route down — but 0 is
+   * honoured, since disabling the gate is a legitimate choice.
+   */
+  get minConfidenceThreshold() {
+    const raw = process.env.MIN_CONFIDENCE_THRESHOLD?.trim();
+    if (!raw) return DEFAULT_MIN_CONFIDENCE;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+      console.warn(
+        `MIN_CONFIDENCE_THRESHOLD="${raw}" is not a probability between 0 and 1; ` +
+          `using ${DEFAULT_MIN_CONFIDENCE}.`
+      );
+      return DEFAULT_MIN_CONFIDENCE;
+    }
+    return parsed;
   },
 
   /**

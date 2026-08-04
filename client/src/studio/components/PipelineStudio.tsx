@@ -11,7 +11,6 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { type User } from '../lib/firebase';
 import { studioFetch } from '../lib/api';
 import { SPROUT_PALETTE } from '../pipeline/config';
 import {
