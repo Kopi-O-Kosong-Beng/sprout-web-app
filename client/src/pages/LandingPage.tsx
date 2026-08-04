@@ -205,7 +205,7 @@ export default function LandingPage() {
             alt="Sprout"
             className="h-auto w-24 opacity-70"
           />
-          <p className="text-xs text-white/45">Scan real plants. Battle them.</p>
+          <p className="text-xs text-white/70">Scan real plants. Battle them.</p>
         </div>
       </footer>
     </div>
@@ -215,7 +215,7 @@ export default function LandingPage() {
 function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
     <div className="max-w-2xl">
-      <p className="font-pixel text-[10px] tracking-wide text-white/40 uppercase">{eyebrow}</p>
+      <p className="font-pixel text-[10px] tracking-wide text-white/65 uppercase">{eyebrow}</p>
       <h2 className="mt-4 text-2xl leading-tight font-semibold text-balance sm:text-4xl">
         {title}
       </h2>

@@ -191,6 +191,10 @@ export interface AuthProfile {
    *  and whether the Admin nav link appears — it is not a permission. /api/admin
    *  re-checks the allowlist on every request and answers 403 regardless. */
   isAdmin: boolean;
+  /** Server-computed from SUPER_ADMIN_EMAILS — the operator tier that opens the
+   *  Admin, Studio, and API Test surfaces. Advisory only, same as isAdmin:
+   *  /api/admin and /api/platform re-check the allowlist on every request. */
+  isSuperAdmin: boolean;
   lastLogin?: string | null;
   lastLogout?: string | null;
 }

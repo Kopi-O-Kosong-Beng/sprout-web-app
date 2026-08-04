@@ -6,11 +6,12 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <!-- viewport-fit=cover lets the game screens extend behind the notch and the
          home indicator; the .safe-top / .safe-bottom helpers pad them back.
-         maximum-scale blocks the double-tap zoom that makes tapping pixel
-         buttons feel broken. -->
+         No maximum-scale: pinch zoom is an accessibility right (WCAG 1.4.4),
+         and the double-tap-zoom problem it once papered over is already solved
+         by touch-action: manipulation on the pressable chrome. -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <!-- Sprout brand green, sampled from the logo card. -->
     <meta name="theme-color" content="#203727" />

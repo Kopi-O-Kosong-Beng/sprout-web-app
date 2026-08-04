@@ -29,7 +29,7 @@
 import '../env';
 import bcrypt from 'bcrypt';
 import authUserRepository from '../repositories/auth-users';
-import { isAdminEmail } from '../middleware/admin.middleware';
+import { isAdminEmail, isSuperAdminEmail } from '../middleware/admin.middleware';
 import { getAuthAdmin } from '../firebase';
 
 const DEFAULT_EMAIL = 'sprout@gmail.com';
@@ -163,15 +163,24 @@ async function run(): Promise<void> {
     `Admin account ${outcome}: ${input.email} (uid ${uid}), email verified, display name "${input.displayName}".`
   );
 
+  if (isSuperAdminEmail(input.email)) {
+    console.log('SUPER_ADMIN_EMAILS already lists this address — /admin will open.');
+    return;
+  }
   if (isAdminEmail(input.email)) {
-    console.log('ADMIN_EMAILS already lists this address — /admin will open.');
+    console.warn(
+      '\nWARNING: this address is in ADMIN_EMAILS but not SUPER_ADMIN_EMAILS.\n' +
+        'The admin badge shows, but /api/admin and /api/platform answer to the\n' +
+        'operator tier, so the dashboard will answer 403. To make it an operator:\n\n' +
+        `  SUPER_ADMIN_EMAILS=${input.email}\n`
+    );
     return;
   }
   console.warn(
-    '\nWARNING: this address is NOT in ADMIN_EMAILS, so /api/admin will answer 403\n' +
-      'and the dashboard will stay empty. The allowlist fails closed by design.\n' +
+    '\nWARNING: this address is NOT in SUPER_ADMIN_EMAILS, so /api/admin will answer\n' +
+      '403 and the dashboard will stay empty. The allowlist fails closed by design.\n' +
       `Add it to server/.env (and the deploy's env vars), then restart the server:\n\n` +
-      `  ADMIN_EMAILS=${input.email}\n`
+      `  SUPER_ADMIN_EMAILS=${input.email}\n`
   );
 }
 

@@ -103,7 +103,7 @@ function expectPublicSession(session: Record<string, unknown>): void {
     expect.objectContaining({
       energy: expect.any(Number),
       maxEnergy: MAX_BATTLE_ENERGY,
-      spriteUrl: '',
+      spriteUrl: '/sprites/thornback.png',
     })
   );
 
@@ -269,7 +269,7 @@ describe('verified PVE battle API', () => {
     expect(response.body.bot).toMatchObject({
       name: 'Thornback',
       maxEnergy: MAX_BATTLE_ENERGY,
-      spriteUrl: '',
+      spriteUrl: '/sprites/thornback.png',
     });
     expect(response.body.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -433,7 +433,7 @@ describe('verified PVE battle API', () => {
       abandoned.body,
     ]) {
       expectPublicSession(session);
-      expect(session.bot.spriteUrl).toBe('');
+      expect(session.bot.spriteUrl).toBe('/sprites/thornback.png');
     }
   });
 

@@ -295,6 +295,11 @@ const firestoreAvatarRepository: AvatarRepository = {
   },
 
   async deleteOwned(userId: string, avatarId: string): Promise<boolean> {
+    // A percent-encoded slash in the URL decodes into a multi-component
+    // Firestore path here — doc() then throws and the route answers 500
+    // instead of its documented 404. Same guard battle.service.ts applies
+    // to session ids.
+    if (avatarId.includes('/')) return false;
     const db = getDb();
     const ref = db.collection('avatar_records').doc(avatarId);
     // Read and delete in one transaction so the ownership check and the

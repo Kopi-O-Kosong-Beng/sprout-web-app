@@ -643,14 +643,19 @@ describe('GET /api/auth/me', () => {
     expect(row.lastLoginAtReadable).toBeUndefined();
   });
 
-  // The frontend routes admins to /admin and shows the nav link off this flag,
-  // so it has to follow the same allowlist the API gate uses — not the user
-  // document, which has no admin field at all.
-  it('reports admin membership from the ADMIN_EMAILS allowlist', async () => {
-    const previous = process.env.ADMIN_EMAILS;
+  // The frontend routes operators to /admin and shows the operator nav links
+  // off these flags, so they have to follow the same allowlists the API gates
+  // use — not the user document, which has no admin field at all.
+  it('reports admin membership from the ADMIN_EMAILS / SUPER_ADMIN_EMAILS allowlists', async () => {
+    const previousAdmins = process.env.ADMIN_EMAILS;
+    const previousSupers = process.env.SUPER_ADMIN_EMAILS;
     const admin = await createLocalUser({
       email: 'allowlisted@example.com',
       displayName: 'Allowlisted Admin',
+    });
+    const operator = await createLocalUser({
+      email: 'operator@example.com',
+      displayName: 'Operator',
     });
     const player = await createLocalUser({
       email: 'player@example.com',
@@ -659,6 +664,7 @@ describe('GET /api/auth/me', () => {
 
     // Case and padding are the allowlist's problem, not the caller's.
     process.env.ADMIN_EMAILS = ' ALLOWLISTED@example.com , someone@else.com ';
+    process.env.SUPER_ADMIN_EMAILS = ' OPERATOR@example.com ';
     try {
       mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
         uid: admin.id,
@@ -670,6 +676,20 @@ describe('GET /api/auth/me', () => {
         .set('Authorization', 'Bearer admin-token');
       expect(adminRes.status).toBe(200);
       expect(adminRes.body.isAdmin).toBe(true);
+      expect(adminRes.body.isSuperAdmin).toBe(false);
+
+      // A super admin is an admin everywhere without appearing in both lists.
+      mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
+        uid: operator.id,
+        email: operator.email,
+        email_verified: true,
+      });
+      const operatorRes = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', 'Bearer operator-token');
+      expect(operatorRes.status).toBe(200);
+      expect(operatorRes.body.isAdmin).toBe(true);
+      expect(operatorRes.body.isSuperAdmin).toBe(true);
 
       mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
         uid: player.id,
@@ -681,9 +701,11 @@ describe('GET /api/auth/me', () => {
         .set('Authorization', 'Bearer player-token');
       expect(playerRes.status).toBe(200);
       expect(playerRes.body.isAdmin).toBe(false);
+      expect(playerRes.body.isSuperAdmin).toBe(false);
 
-      // Fail closed: an unset allowlist makes nobody an admin.
+      // Fail closed: unset allowlists make nobody an admin of either tier.
       delete process.env.ADMIN_EMAILS;
+      delete process.env.SUPER_ADMIN_EMAILS;
       mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
         uid: admin.id,
         email: admin.email,
@@ -694,9 +716,12 @@ describe('GET /api/auth/me', () => {
         .set('Authorization', 'Bearer admin-token');
       expect(denied.status).toBe(200);
       expect(denied.body.isAdmin).toBe(false);
+      expect(denied.body.isSuperAdmin).toBe(false);
     } finally {
-      if (previous === undefined) delete process.env.ADMIN_EMAILS;
-      else process.env.ADMIN_EMAILS = previous;
+      if (previousAdmins === undefined) delete process.env.ADMIN_EMAILS;
+      else process.env.ADMIN_EMAILS = previousAdmins;
+      if (previousSupers === undefined) delete process.env.SUPER_ADMIN_EMAILS;
+      else process.env.SUPER_ADMIN_EMAILS = previousSupers;
     }
   });
 

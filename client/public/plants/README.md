@@ -4,10 +4,18 @@ Art for the five demo plants, served by the client at `/plants/`. Each plant
 is a pair: the sprite that stands in the pot on the shelf, and the photograph
 it was drawn from, which the archive shows on the specimen card.
 
-Sprites here are rendered by `npm run sprites:generate -w server` until someone
-draws them by hand. The generator never overwrites an existing file (only
-`--force` redoes one), so replacing a render with hand-made art is just
-dropping the file in under the same name.
+The committed sprites are pipeline renders — hand-made art never landed here,
+which left every seeded avatar 404ing to a bare pot. Until someone draws them
+by hand, regenerate them with the one generator that covers demo plants and
+Thornback alike:
+
+```
+npm run sprites:generate -w server            # anything still missing
+npm run sprites:generate -w server -- --force # re-render
+```
+
+Dropping in a hand-drawn `SPRITE_<Key>.png` simply replaces the render; the
+generator skips files that already exist unless `--force` is passed.
 
 | Plant | Sprite | Photo |
 | --- | --- | --- |

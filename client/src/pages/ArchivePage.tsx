@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '../components/common/BackButton';
 import {
@@ -30,6 +30,13 @@ export default function ArchivePage() {
     useArchive();
   const [selectedAvatarId, setSelectedAvatarId] = useState<string | null>(null);
   const [shovelArmed, setShovelArmed] = useState(false);
+
+  // The derived `shovelling` below only HIDES the mode when the archive
+  // empties — without this the stale armed state pops back the moment demo
+  // plants are re-added, wiggling sprites nobody asked to dig.
+  useEffect(() => {
+    if (avatars.length === 0) setShovelArmed(false);
+  }, [avatars.length]);
   const [pendingRemoval, setPendingRemoval] = useState<PlantAvatarData | null>(null);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -115,9 +122,11 @@ export default function ArchivePage() {
               onClick={() => setShovelArmed((on) => !on)}
               // Inline background wins over .pixel-button's unlayered shorthand.
               style={shovelling ? { background: 'var(--color-hp-low)' } : undefined}
-              className="press pixel-button flex h-10 w-10 items-center justify-center text-lg"
+              className="press pixel-button flex h-11 w-11 items-center justify-center text-lg"
             >
-              🪏
+              {/* U+26CF, not the shovel emoji U+1FA8F (Unicode 16, 2024) —
+                  which still renders as a tofu box on most installed OSes. */}
+              <span aria-hidden="true">⛏️</span>
             </button>
           )}
         </div>
@@ -195,7 +204,10 @@ export default function ArchivePage() {
                 selectedId={selected.id}
                 shovelling={shovelling}
                 onSelect={setSelectedAvatarId}
-                onDig={setPendingRemoval}
+                // Never retarget an open dialog: the page behind the scrim is
+                // still keyboard-operable, and swapping the pending plant
+                // mid-flight could confirm-delete a plant nobody agreed to.
+                onDig={(plant) => setPendingRemoval((current) => current ?? plant)}
               />
             ))}
           </div>
@@ -242,19 +254,29 @@ function RemoveDialog({
   onCancel: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/70 p-6">
+    <div
+      className="fixed inset-0 z-20 flex items-center justify-center bg-black/70 p-6"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !busy) onCancel();
+      }}
+    >
       <div
         className="pixel-panel w-full max-w-xs p-4 text-center"
         role="alertdialog"
+        aria-modal="true"
         aria-label={`Dig up ${plant.name}?`}
       >
-        <div className="text-3xl">🪏</div>
+        <div className="text-3xl" aria-hidden="true">⛏️</div>
         <h2 className="font-pixel mt-2 text-xs leading-relaxed">Dig up {plant.name}?</h2>
         <p className="mt-2 text-[10px] leading-relaxed opacity-80">
           This removes it from your archive for good.
         </p>
         {error && (
-          <p className="mt-2 text-[10px] leading-relaxed text-red-700" role="alert">
+          <p
+            className="mt-2 text-[10px] leading-relaxed"
+            style={{ color: 'var(--color-danger-ink)' }}
+            role="alert"
+          >
             {error}
           </p>
         )}
@@ -268,10 +290,15 @@ function RemoveDialog({
           >
             {busy ? 'Digging…' : 'Dig up'}
           </button>
+          {/* autoFocus: moving focus INTO the dialog is what makes a screen
+              reader announce it, keeps Escape working (the wrapper's handler
+              only hears keys from within), and takes focus off the shelf
+              button behind the scrim, which stays keyboard-reachable. */}
           <button
             type="button"
             disabled={busy}
             onClick={onCancel}
+            autoFocus
             className="press pixel-button px-3 py-2 text-[9px]"
           >
             Cancel
@@ -329,11 +356,11 @@ function Shelf({
                   your plants are on the clock — the card only shows one. */}
               <CaptureBadge source={avatar.source} className="mt-1" />
               {avatar.isDemo && (
-                <span className="font-pixel border-2 border-black bg-[color:var(--color-hp-mid)] px-1 text-[7px]">
+                <span className="font-pixel border-2 border-black bg-[color:var(--color-hp-mid)] px-1 text-[9px]">
                   Demo
                 </span>
               )}
-              <span className="font-pixel text-outline max-w-full truncate px-1 text-[7px] text-white sm:text-[9px]">
+              <span className="font-pixel text-outline max-w-full truncate px-1 text-[9px] text-white sm:text-[9px]">
                 {avatar.name}
               </span>
             </button>
@@ -412,7 +439,7 @@ function SpecimenPhoto({ avatar }: { avatar: PlantAvatarData }) {
         onError={() => setFailed(true)}
         className="block aspect-square w-full border-2 border-black object-cover"
       />
-      <figcaption className="font-pixel mt-1 text-center text-[7px] opacity-60">
+      <figcaption className="font-pixel mt-1 text-center text-[9px] opacity-60">
         Photographed
       </figcaption>
     </figure>
@@ -443,7 +470,7 @@ function SpecimenCard({
         </div>
 
         <div className="min-w-0 flex-1 text-center sm:text-left">
-          <p className="font-pixel text-[8px] opacity-60">Selected plant</p>
+          <p className="font-pixel text-[9px] opacity-60">Selected plant</p>
           <h2 className="font-pixel mt-2 text-sm leading-relaxed">{avatar.name}</h2>
           <p className="mt-2 flex flex-wrap items-center justify-center gap-1.5 sm:justify-start">
             <CaptureBadge source={avatar.source} />
@@ -465,13 +492,13 @@ function SpecimenCard({
             <dl className="mt-3 space-y-1.5 text-xs leading-relaxed">
               {avatar.habitat && (
                 <div>
-                  <dt className="font-pixel inline text-[8px]">Habitat</dt>{' '}
+                  <dt className="font-pixel inline text-[9px]">Habitat</dt>{' '}
                   <dd className="inline opacity-85">{avatar.habitat}</dd>
                 </div>
               )}
               {avatar.conservationStatus && (
                 <div>
-                  <dt className="font-pixel inline text-[8px]">Conservation status</dt>{' '}
+                  <dt className="font-pixel inline text-[9px]">Conservation status</dt>{' '}
                   <dd className="inline opacity-85">{avatar.conservationStatus}</dd>
                 </div>
               )}
@@ -483,8 +510,7 @@ function SpecimenCard({
       <StatGrid avatar={avatar} />
 
       <button
-        className="press pixel-button mt-4 w-full px-2 py-3 text-[9px]"
-        style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+        className="press pixel-button is-primary mt-4 w-full px-2 py-3 text-[9px]"
         type="button"
         disabled={busy}
         onClick={onBattle}

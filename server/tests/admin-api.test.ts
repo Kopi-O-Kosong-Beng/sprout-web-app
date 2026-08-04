@@ -16,10 +16,13 @@ import app from '../app';
 
 const ADMIN_EMAIL = 'hello.sprout.team@gmail.com';
 const ADMIN_UID = 'admin-uid';
+const PLAIN_ADMIN_UID = 'plain-admin-uid';
+const PLAIN_ADMIN_EMAIL = 'plain-admin@example.com';
 const MEMBER_UID = 'member-uid';
 const MEMBER_EMAIL = 'member-uid@example.com';
 
 let previousAdminEmails: string | undefined;
+let previousSuperAdminEmails: string | undefined;
 let previousAuthDevBypass: string | undefined;
 
 /** Tokens encode the caller so each test states its own identity:
@@ -29,6 +32,7 @@ function authorization(uid: string, email: string): string {
 }
 
 const asAdmin = () => authorization(ADMIN_UID, ADMIN_EMAIL);
+const asPlainAdmin = () => authorization(PLAIN_ADMIN_UID, PLAIN_ADMIN_EMAIL);
 const asMember = () => authorization(MEMBER_UID, MEMBER_EMAIL);
 
 async function seedProfile(
@@ -60,8 +64,12 @@ async function seedProfile(
 
 beforeEach(async () => {
   previousAdminEmails = process.env.ADMIN_EMAILS;
+  previousSuperAdminEmails = process.env.SUPER_ADMIN_EMAILS;
   previousAuthDevBypass = process.env.AUTH_DEV_BYPASS;
-  process.env.ADMIN_EMAILS = ADMIN_EMAIL;
+  // /api/admin answers to the operator tier; ADMIN_EMAILS holds a plain admin
+  // so the tier split itself is exercised.
+  process.env.SUPER_ADMIN_EMAILS = ADMIN_EMAIL;
+  process.env.ADMIN_EMAILS = PLAIN_ADMIN_EMAIL;
   process.env.AUTH_DEV_BYPASS = 'false';
 
   mockAuthAdmin.verifyIdToken.mockReset();
@@ -78,6 +86,8 @@ beforeEach(async () => {
 afterEach(() => {
   if (previousAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
   else process.env.ADMIN_EMAILS = previousAdminEmails;
+  if (previousSuperAdminEmails === undefined) delete process.env.SUPER_ADMIN_EMAILS;
+  else process.env.SUPER_ADMIN_EMAILS = previousSuperAdminEmails;
   if (previousAuthDevBypass === undefined) delete process.env.AUTH_DEV_BYPASS;
   else process.env.AUTH_DEV_BYPASS = previousAuthDevBypass;
 });
@@ -100,8 +110,22 @@ describe('GET /api/admin/users authorisation', () => {
     expect(JSON.stringify(res.body)).not.toContain(ADMIN_EMAIL);
   });
 
-  it('denies everyone when the allowlist is unset (fail closed)', async () => {
-    delete process.env.ADMIN_EMAILS;
+  it('rejects a plain admin — the surface answers to the operator tier', async () => {
+    await seedProfile(PLAIN_ADMIN_UID, PLAIN_ADMIN_EMAIL);
+
+    const res = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', asPlainAdmin());
+
+    expect(res.status).toBe(403);
+    // Identical body to any other 403: the response must not reveal that a
+    // second tier exists.
+    expect(JSON.stringify(res.body)).not.toContain('super');
+  });
+
+  it('denies everyone when the operator allowlist is unset (fail closed)', async () => {
+    delete process.env.SUPER_ADMIN_EMAILS;
+    process.env.ADMIN_EMAILS = ADMIN_EMAIL;
     await seedProfile(ADMIN_UID, ADMIN_EMAIL);
 
     const res = await request(app)
@@ -111,8 +135,8 @@ describe('GET /api/admin/users authorisation', () => {
     expect(res.status).toBe(403);
   });
 
-  it('denies everyone when the allowlist is empty or comma-only', async () => {
-    process.env.ADMIN_EMAILS = ' , ,';
+  it('denies everyone when the operator allowlist is empty or comma-only', async () => {
+    process.env.SUPER_ADMIN_EMAILS = ' , ,';
 
     const res = await request(app)
       .get('/api/admin/users')
@@ -122,7 +146,7 @@ describe('GET /api/admin/users authorisation', () => {
   });
 
   it('matches allowlist entries case-insensitively and ignores padding', async () => {
-    process.env.ADMIN_EMAILS = `  ${ADMIN_EMAIL.toUpperCase()} , someone@else.com `;
+    process.env.SUPER_ADMIN_EMAILS = `  ${ADMIN_EMAIL.toUpperCase()} , someone@else.com `;
     await seedProfile(ADMIN_UID, ADMIN_EMAIL);
 
     const res = await request(app)
@@ -142,11 +166,45 @@ describe('GET /api/admin/users authorisation', () => {
   });
 });
 
+describe('GET /api/platform authorisation', () => {
+  // The studio's ops portal answers to the same operator tier as /api/admin;
+  // nothing else pins that, and a silent revert to requireAdmin would expose
+  // /config-status (which enumerates provider keys) to every ADMIN_EMAILS
+  // entry.
+  it('rejects an anonymous caller', async () => {
+    const res = await request(app).get('/api/platform/config-status');
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects a plain admin — the portal answers to the operator tier', async () => {
+    await seedProfile(PLAIN_ADMIN_UID, PLAIN_ADMIN_EMAIL);
+
+    const res = await request(app)
+      .get('/api/platform/config-status')
+      .set('Authorization', asPlainAdmin());
+
+    expect(res.status).toBe(403);
+  });
+
+  it('admits a super admin', async () => {
+    await seedProfile(ADMIN_UID, ADMIN_EMAIL);
+
+    const res = await request(app)
+      .get('/api/platform/config-status')
+      .set('Authorization', asAdmin());
+
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('GET /api/admin/users listing', () => {
   it('returns every account with newest first and flags admins', async () => {
     await seedProfile(MEMBER_UID, MEMBER_EMAIL, {
       createdAt: '2026-07-21T00:00:00.000Z',
       pveWins: 3,
+    });
+    await seedProfile(PLAIN_ADMIN_UID, PLAIN_ADMIN_EMAIL, {
+      createdAt: '2026-07-20T00:00:00.000Z',
     });
     await seedProfile(ADMIN_UID, ADMIN_EMAIL, {
       createdAt: '2026-07-19T00:00:00.000Z',
@@ -157,14 +215,20 @@ describe('GET /api/admin/users listing', () => {
       .set('Authorization', asAdmin());
 
     expect(res.status).toBe(200);
-    expect(res.body.total).toBe(2);
+    expect(res.body.total).toBe(3);
     expect(res.body.items.map((item: { id: string }) => item.id)).toEqual([
       MEMBER_UID,
+      PLAIN_ADMIN_UID,
       ADMIN_UID,
     ]);
     const admin = res.body.items.find((item: { id: string }) => item.id === ADMIN_UID);
+    const plainAdmin = res.body.items.find(
+      (item: { id: string }) => item.id === PLAIN_ADMIN_UID
+    );
     const member = res.body.items.find((item: { id: string }) => item.id === MEMBER_UID);
+    // Super admins count as admins; the badge covers both tiers.
     expect(admin.isAdmin).toBe(true);
+    expect(plainAdmin.isAdmin).toBe(true);
     expect(member.isAdmin).toBe(false);
     expect(member.pveWins).toBe(3);
   });

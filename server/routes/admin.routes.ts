@@ -1,7 +1,10 @@
 /** Admin account-management and operations routes.
  *
  *  Two gates, in order: a valid verified Firebase ID token (authMiddleware),
- *  then membership of the ADMIN_EMAILS allowlist (requireAdmin). The dev/demo
+ *  then membership of the SUPER_ADMIN_EMAILS allowlist (requireSuperAdmin).
+ *  Account deletion and the operations dashboard are operator tools, so they
+ *  answer to the operator tier — plain ADMIN_EMAILS membership is advisory
+ *  (profile badge, UI affordances) and does not open this surface. The dev/demo
  *  bypass headers accepted elsewhere are deliberately NOT usable here —
  *  strictUnverifiedAuthMiddleware is not used, and authMiddleware's bypass only
  *  yields a uid with no email, which can never match the allowlist.
@@ -12,7 +15,7 @@
  */
 import { Router } from 'express';
 import authMiddleware from '../middleware/auth.middleware';
-import requireAdmin from '../middleware/admin.middleware';
+import { requireSuperAdmin } from '../middleware/admin.middleware';
 import {
   handleAdminAlmanac,
   handleAdminCleanup,
@@ -22,7 +25,7 @@ import {
 
 const router = Router();
 
-router.use(authMiddleware, requireAdmin);
+router.use(authMiddleware, requireSuperAdmin);
 router.get('/users', handleListAccounts);
 router.delete('/users/:uid', handleDeleteAccount);
 router.get('/almanac', handleAdminAlmanac);
