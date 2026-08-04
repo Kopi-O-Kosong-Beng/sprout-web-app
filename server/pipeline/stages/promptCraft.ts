@@ -4,6 +4,7 @@ import {
   GEMINI_TIMEOUT_MS,
   VISION_TIMEOUT_MS,
 } from "../deadline";
+import { descriptionBudgetFor } from "../promptStyle";
 import { serverEnv } from "../../platform/env";
 
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
@@ -74,7 +75,14 @@ export function buildInstruction(plantName: string): string {
     "fully isolated on a solid flat " +
     "pure-white background — no scenery, pot, ground, graph paper or grid backdrop, " +
     "gradient, shadow, or reflection, so it cuts out cleanly. " +
-    "Keep it to 2-3 sentences and output only the prompt, with no preamble."
+    // The word bound exists because the renderer's budget is character-shaped:
+    // Flux hard-caps prompts at 800 characters and the fixed style suffix takes
+    // ~300 of them, leaving ~490 for this description. 65 words lands near 430
+    // characters, comfortably inside — an unbounded "2-3 sentences" routinely
+    // ran to 600+ and got its tail trimmed off at render time, which is the
+    // silent way to lose the last feature the model described.
+    "Keep it to 2-3 sentences and at most 65 words, and output only the prompt, " +
+    "with no preamble."
   );
 }
 
@@ -192,6 +200,93 @@ export function nameOnlyPrompt(plantName: string): string {
     `margin on every side, fully isolated on a solid flat pure-white background — no ` +
     `scenery, pot, ground, gradient, shadow or reflection, so it cuts out cleanly.`
   );
+}
+
+/**
+ * Second pass for a crafted description that overran the render budget:
+ * the model rewrites it shorter instead of the render step chopping its tail.
+ *
+ * The trim in applyStyleScaffold stays as the backstop, but it is a dumb one —
+ * it keeps whatever came first and drops whatever came last, and the last
+ * sentence is where the crafting models put the isolation and background
+ * requirements. A prompt that loses those doesn't fail; it renders something
+ * subtly off-brief, which is the hallucination this pass exists to prevent.
+ * Compression lets the model choose what to give up, feature-aware, rather
+ * than position-aware.
+ *
+ * Gemini first, NVIDIA second, mirroring the craft tiers and reusing whichever
+ * credential just worked. Any failure is non-fatal: the caller keeps the long
+ * prompt and the backstop trim still runs.
+ */
+export async function compressPromptText(
+  prompt: string,
+  budget: number,
+  geminiKey?: string,
+  nvidiaKey?: string,
+  deadline?: Deadline,
+): Promise<string> {
+  const instruction =
+    `This image-generation prompt is ${prompt.length} characters long, but the renderer ` +
+    `accepts at most ${budget}. Rewrite it in under ${budget} characters. Keep every ` +
+    `plant-derived feature, colour, and anatomy choice, the friendly toy-like character, ` +
+    `and the requirement of one whole centred creature isolated on a flat pure-white ` +
+    `background; cut filler words and repeated style vocabulary first. ` +
+    `Output only the rewritten prompt, with no preamble.\n\n${prompt}`;
+
+  if (geminiKey && geminiKey !== "MOCK_KEY") {
+    const model = serverEnv.geminiVisionModel;
+    const response = await fetch(
+      `${GEMINI_ENDPOINT}/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: instruction }] }],
+          generationConfig: { maxOutputTokens: 256 },
+        }),
+        signal: deadline?.signal(GEMINI_TIMEOUT_MS, "the prompt-compression step"),
+      },
+    );
+
+    const raw = await response.text();
+    if (!response.ok) {
+      throw new Error(`Gemini compression error ${response.status}: ${raw.slice(0, 300)}`);
+    }
+    const text: string = (JSON.parse(raw)?.candidates?.[0]?.content?.parts ?? [])
+      .map((part: { text?: string }) => part.text ?? "")
+      .join("")
+      .trim();
+    if (text.length > 0) return cleanVlmPromptText(text);
+    // Fall through to NVIDIA rather than failing on an empty answer.
+  }
+
+  if (nvidiaKey && nvidiaKey !== "MOCK_KEY") {
+    const response = await fetch(NVIDIA_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${nvidiaKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: serverEnv.nvidiaVisionModel,
+        messages: [{ role: "user", content: instruction }],
+        max_tokens: 200,
+      }),
+      signal: deadline?.signal(VISION_TIMEOUT_MS, "the prompt-compression step"),
+    });
+
+    const raw = await response.text();
+    if (!response.ok) {
+      throw new Error(`NVIDIA compression error ${response.status}: ${raw.slice(0, 300)}`);
+    }
+    const content = JSON.parse(raw)?.choices?.[0]?.message?.content;
+    if (typeof content === "string" && content.trim().length > 0) {
+      return cleanVlmPromptText(content.trim());
+    }
+    throw new Error("NVIDIA compression returned no text.");
+  }
+
+  throw new Error("No key available for prompt compression.");
 }
 
 /** Internal: bounds an injected caller that has no abort signal of its own. */
@@ -329,6 +424,57 @@ export async function craftPromptGemma(
   return cleanVlmPromptText(content.trim());
 }
 
+interface CraftCallers {
+  gemini: typeof craftPromptGemini;
+  gemma: typeof craftPromptGemma;
+  nameOnly: typeof nameOnlyPrompt;
+  /** Optional so injected test doubles predating compression keep working. */
+  compress?: typeof compressPromptText;
+}
+
+/**
+ * Holds a crafted description to the render budget, model-first.
+ *
+ * Only runs when the description overshoots what Flux leaves for it (the word
+ * bound in buildInstruction makes that the exception, not the rule), and never
+ * fails the craft: whatever goes wrong, the over-long prompt is returned and
+ * applyStyleScaffold's trim remains the backstop.
+ */
+async function fitToRenderBudget(
+  prompt: string,
+  callers: CraftCallers,
+  geminiKey?: string,
+  nvidiaKey?: string,
+  deadline?: Deadline,
+): Promise<string> {
+  const budget = descriptionBudgetFor("flux");
+  if (budget === null || prompt.length <= budget || !callers.compress) return prompt;
+
+  try {
+    const compressed = await withTimeout(
+      callers.compress(prompt, budget, geminiKey, nvidiaKey, deadline),
+      GEMINI_TIMEOUT_MS,
+    );
+    if (compressed.length > 0 && compressed.length < prompt.length) {
+      console.info(
+        `Crafted description overran the ${budget}-char render budget at ` +
+          `${prompt.length} chars; compressed to ${compressed.length}.`,
+      );
+      return compressed;
+    }
+    console.warn(
+      `Prompt compression did not shorten the description ` +
+        `(${prompt.length} -> ${compressed.length} chars); keeping the original — ` +
+        `the render step will trim it instead.`,
+    );
+  } catch (err: any) {
+    console.warn(
+      `Prompt compression failed; the render step will trim instead: ${err?.message ?? err}`,
+    );
+  }
+  return prompt;
+}
+
 /**
  * Tiered prompt-craft orchestrator.
  *
@@ -341,10 +487,11 @@ export async function craftPromptTiered(
   plantName: string,
   nvidiaKey?: string,
   geminiKey?: string,
-  callers = {
+  callers: CraftCallers = {
     gemini: craftPromptGemini,
     gemma: craftPromptGemma,
     nameOnly: nameOnlyPrompt,
+    compress: compressPromptText,
   },
   deadline?: Deadline,
 ): Promise<{ prompt: string; tier: PipelineTier }> {
@@ -355,7 +502,10 @@ export async function craftPromptTiered(
         callers.gemini(photoBase64, plantName, geminiKey, deadline),
         GEMINI_TIMEOUT_MS,
       );
-      return { prompt, tier: "gemini" };
+      return {
+        prompt: await fitToRenderBudget(prompt, callers, geminiKey, nvidiaKey, deadline),
+        tier: "gemini",
+      };
     } catch (err: any) {
       console.warn(`Gemini vision failed, falling back to NVIDIA: ${err.message}`);
     }
@@ -368,12 +518,17 @@ export async function craftPromptTiered(
         callers.gemma(photoBase64, plantName, nvidiaKey, deadline),
         VISION_TIMEOUT_MS,
       );
-      return { prompt, tier: "gemma" };
+      return {
+        prompt: await fitToRenderBudget(prompt, callers, geminiKey, nvidiaKey, deadline),
+        tier: "gemma",
+      };
     } catch (err: any) {
       console.warn(`NVIDIA vision failed, dropping to name-only prompt: ${err.message}`);
     }
   }
 
-  // Tier 3: species-aware prompt built without a photo.
+  // Tier 3: species-aware prompt built without a photo. Deterministic text with
+  // no key to compress with — the render-time trim covers it, and its tail is
+  // style vocabulary the scaffold restates anyway.
   return { prompt: callers.nameOnly(plantName), tier: "nameOnly" };
 }
