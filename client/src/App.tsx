@@ -54,23 +54,24 @@ function App() {
               <Route path="/signup" element={<SignupPage />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
               <Route path="/contact" element={<ContactPage />} />
-              {/* Signed-in gate only; the server's ADMIN_EMAILS allowlist is
+              {/* Courtesy gate; the server's SUPER_ADMIN_EMAILS allowlist is
                   the real authority and returns 403 to everyone else. */}
               <Route
                 path="/admin"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requireSuperAdmin>
                     <AdminPage />
                   </ProtectedRoute>
                 }
               />
               {/* The backend test bench drives real endpoints against the real
                   project — account signup among them — so it sits behind the
-                  same allowlist as /admin rather than being open to the web. */}
+                  same operator allowlist as /admin rather than being open to
+                  the web. */}
               <Route
                 path="/test"
                 element={
-                  <ProtectedRoute requireAdmin>
+                  <ProtectedRoute requireSuperAdmin>
                     <BackendTestPage />
                   </ProtectedRoute>
                 }
@@ -123,7 +124,7 @@ function App() {
               <Route
                 path="/studio"
                 element={
-                  <ProtectedRoute requireAdmin>
+                  <ProtectedRoute requireSuperAdmin>
                     <StudioPage />
                   </ProtectedRoute>
                 }

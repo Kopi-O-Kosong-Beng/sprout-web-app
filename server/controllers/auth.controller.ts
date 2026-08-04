@@ -9,26 +9,33 @@ import {
   verifyPasswordReset,
   type PublicProfile,
 } from '../services/auth.service';
-import { isAdminEmail } from '../middleware/admin.middleware';
+import { isAdminEmail, isSuperAdminEmail } from '../middleware/admin.middleware';
 
 export interface ProfileResponse extends PublicProfile {
   isAdmin: boolean;
+  isSuperAdmin: boolean;
 }
 
 /** The frontend has to know whether to route this account to the admin
- *  dashboard and show its nav link, and it cannot compute that itself:
- *  membership lives in the server's ADMIN_EMAILS allowlist.
+ *  dashboard and show the operator nav links, and it cannot compute that
+ *  itself: membership lives in the server's ADMIN_EMAILS / SUPER_ADMIN_EMAILS
+ *  allowlists.
  *
  *  Attached here rather than stored on the user document, so revoking an admin
  *  stays a config edit — a persisted flag would have to be migrated instead.
- *  It is advisory only: /api/admin re-checks the allowlist on every request, so
- *  a forged isAdmin buys nothing but a dashboard that answers 403.
+ *  Both flags are advisory only: /api/admin and /api/platform re-check the
+ *  allowlists on every request, so a forged flag buys nothing but a dashboard
+ *  that answers 403.
  */
 function withAdminFlag(
   profile: PublicProfile,
   email: string | undefined
 ): ProfileResponse {
-  return { ...profile, isAdmin: isAdminEmail(email) };
+  return {
+    ...profile,
+    isAdmin: isAdminEmail(email),
+    isSuperAdmin: isSuperAdminEmail(email),
+  };
 }
 
 export const handleSignup: RequestHandler = async (req, res, next) => {

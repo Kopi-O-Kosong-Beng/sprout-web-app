@@ -28,7 +28,7 @@ function avatar(overrides: Partial<AvatarRecord> = {}): AvatarRecord {
     userId: 'user-1',
     speciesName: 'Nephrolepis exaltata',
     speciesFamily: 'Nephrolepidaceae',
-    spriteUrl: '/static/sprites/fern.png',
+    spriteUrl: '/plants/SPRITE_Fern.png',
     discoveredAt: '2026-07-22T00:00:00.000Z',
     source: 'mobile',
     isTemporary: false,
@@ -439,7 +439,7 @@ describe('ArchivePage', () => {
     expect(await screen.findByRole('heading', { name: 'Fern Ward' })).toBeVisible();
   });
 
-  it('falls back to the empty pot when a sprite image fails', async () => {
+  it('stands a drawn plant in the pot when a sprite image fails', async () => {
     apiMocks.listOwnedAvatars.mockResolvedValue({
       ...collectedPage,
       items: [collectedPage.items[0]],
@@ -449,15 +449,16 @@ describe('ArchivePage', () => {
     const visual = (await screen.findAllByRole('img', {
       name: /fern ward avatar/i,
     }))[0];
-    const sprite = visual.querySelector('.plant-sprite');
+    const sprite = visual.querySelector('img.plant-sprite');
 
     expect(sprite).not.toBeNull();
     fireEvent.error(sprite!);
 
-    // The pixel-art redesign draws the pot as a real painted asset and stands
-    // the sprite in it, so a broken sprite leaves the pot rather than the
-    // CSS-art leaf/face/pot spans this used to assert on.
-    expect(visual.querySelector('.plant-sprite')).toBeNull();
+    // A broken sprite URL used to leave a silently bare pot — which is how
+    // missing art shipped twice without anyone noticing. Now the procedural
+    // stand-in takes the sprite's place while the pot stays painted.
+    expect(visual.querySelector('img.plant-sprite')).toBeNull();
+    expect(visual.querySelector('svg.plant-sprite.is-procedural')).not.toBeNull();
     expect(visual.querySelector('.pot-art')).not.toBeNull();
   });
 });

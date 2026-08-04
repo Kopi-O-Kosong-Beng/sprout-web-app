@@ -6,19 +6,19 @@
  *  to share a name.
  *
  *  Both gates apply, in order: a valid verified Firebase ID token, then
- *  membership of the ADMIN_EMAILS allowlist. The platform had no auth at all,
- *  which was defensible when it ran on a developer's laptop behind a Vite dev
- *  server and indefensible now that it is deployed: /config-status enumerates
- *  which provider keys exist, and /run-tests spawns a process.
+ *  membership of the SUPER_ADMIN_EMAILS allowlist. The platform had no auth at
+ *  all, which was defensible when it ran on a developer's laptop behind a Vite
+ *  dev server and indefensible now that it is deployed: /config-status
+ *  enumerates which provider keys exist, and /run-tests spawns a process.
  */
 import { Router } from 'express';
 import authMiddleware from '../middleware/auth.middleware';
-import requireAdmin from '../middleware/admin.middleware';
+import { requireSuperAdmin } from '../middleware/admin.middleware';
 import { adminRouter as platformPortalRouter } from '../platform/adminRoutes';
 
 const router = Router();
 
-router.use(authMiddleware, requireAdmin);
+router.use(authMiddleware, requireSuperAdmin);
 router.use(platformPortalRouter);
 
 export default router;

@@ -323,6 +323,18 @@ describe('DELETE /api/avatar/:avatarId (the archive shovel)', () => {
     expect(response.body).toEqual({ error: 'Avatar not found.' });
   });
 
+  it('answers 404 — not 500 — for a percent-encoded slash in the id', async () => {
+    // Express decodes a%2Fb to 'a/b'; unguarded, Firestore's doc() throws on
+    // the multi-component path and the route leaked a 500 instead of holding
+    // its indistinguishable-404 contract.
+    const response = await request(app)
+      .delete('/api/avatar/a%2Fb')
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+  });
+
   it('rejects an unauthenticated delete without touching the record', async () => {
     await seedAvatar({ id: 'kept-avatar', speciesName: 'Kept Fern' });
 

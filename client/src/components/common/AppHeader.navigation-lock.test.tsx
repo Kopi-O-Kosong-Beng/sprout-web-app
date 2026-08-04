@@ -134,6 +134,7 @@ const authValue: AuthContextValue = {
     displayName: 'Owner',
     emailVerified: true,
     isAdmin: false,
+    isSuperAdmin: false,
   },
   login: vi.fn(),
   loginWithGoogle: vi.fn(),

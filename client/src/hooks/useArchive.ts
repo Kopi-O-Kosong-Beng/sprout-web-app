@@ -127,20 +127,31 @@ export function useArchive(): UseArchiveResult {
     const request = ++requestVersion.current;
     setStatus('mutating');
     setError(null);
+    // Two failure modes, two different truths. If the DELETE itself fails the
+    // plant still exists and the dialog should say so. If the delete COMMITTED
+    // and only the follow-up refresh failed, reporting "could not remove"
+    // over shelves that still show the dead record invites a second dig —
+    // which the server then 404s. So the record is dropped locally the moment
+    // the server confirms, and a refresh failure degrades to a quieter sync.
     try {
       await deleteAvatar(avatarId);
-      if (request !== requestVersion.current) return;
+    } catch (caught) {
+      if (request === requestVersion.current) setStatus('ready');
+      throw new Error(extractApiError(caught, 'Could not remove that plant.'));
+    }
+    if (request !== requestVersion.current) return;
+    setRecords((current) => current.filter((record) => record.id !== avatarId));
+    try {
       const nextRecords = await fetchAllOwnedAvatars(
         () => request === requestVersion.current
       );
       if (request !== requestVersion.current) return;
       setRecords(nextRecords);
       setStatus('ready');
-    } catch (caught) {
-      // The archive itself is fine — only this removal failed — so the shelves
-      // stay 'ready' and the throw carries the reason to the confirm dialog.
+    } catch {
+      // The removal succeeded; only the resync is stale. The local filter
+      // above already reflects the delete.
       if (request === requestVersion.current) setStatus('ready');
-      throw new Error(extractApiError(caught, 'Could not remove that plant.'));
     }
   }, []);
 

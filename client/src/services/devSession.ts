@@ -30,7 +30,8 @@
  */
 
 /** The one identity the shortcut will accept. Must also be in the server's
- *  ADMIN_EMAILS for the dev session to come back as an admin. */
+ *  SUPER_ADMIN_EMAILS for the dev session to come back as an operator (the
+ *  tier that opens /admin, /studio, and /test). */
 export const DEV_ADMIN_EMAIL = 'test@sprout.com';
 
 /** Stable uid for the dev admin, so its archive and battles persist between

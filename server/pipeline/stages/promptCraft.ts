@@ -234,30 +234,39 @@ export async function compressPromptText(
     `Output only the rewritten prompt, with no preamble.\n\n${prompt}`;
 
   if (geminiKey && geminiKey !== "MOCK_KEY") {
-    const model = serverEnv.geminiVisionModel;
-    const response = await fetch(
-      `${GEMINI_ENDPOINT}/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: instruction }] }],
-          generationConfig: { maxOutputTokens: 256 },
-        }),
-        signal: deadline?.signal(GEMINI_TIMEOUT_MS, "the prompt-compression step"),
-      },
-    );
+    // The whole tier in a try/catch: an HTTP error, a network rejection, or a
+    // parse failure must FALL THROUGH to NVIDIA, not throw out of the
+    // function — otherwise the second tier is unreachable in exactly the
+    // failure mode it exists for, and the caller's "any failure keeps the
+    // long prompt" promise silently loses its middle option.
+    try {
+      const model = serverEnv.geminiVisionModel;
+      const response = await fetch(
+        `${GEMINI_ENDPOINT}/${model}:generateContent?key=${encodeURIComponent(geminiKey)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: instruction }] }],
+            generationConfig: { maxOutputTokens: 256 },
+          }),
+          signal: deadline?.signal(GEMINI_TIMEOUT_MS, "the prompt-compression step"),
+        },
+      );
 
-    const raw = await response.text();
-    if (!response.ok) {
-      throw new Error(`Gemini compression error ${response.status}: ${raw.slice(0, 300)}`);
+      const raw = await response.text();
+      if (!response.ok) {
+        throw new Error(`Gemini compression error ${response.status}: ${raw.slice(0, 300)}`);
+      }
+      const text: string = (JSON.parse(raw)?.candidates?.[0]?.content?.parts ?? [])
+        .map((part: { text?: string }) => part.text ?? "")
+        .join("")
+        .trim();
+      if (text.length > 0) return cleanVlmPromptText(text);
+      // Fall through to NVIDIA rather than failing on an empty answer.
+    } catch {
+      // Fall through to NVIDIA; the caller treats a full miss as non-fatal.
     }
-    const text: string = (JSON.parse(raw)?.candidates?.[0]?.content?.parts ?? [])
-      .map((part: { text?: string }) => part.text ?? "")
-      .join("")
-      .trim();
-    if (text.length > 0) return cleanVlmPromptText(text);
-    // Fall through to NVIDIA rather than failing on an empty answer.
   }
 
   if (nvidiaKey && nvidiaKey !== "MOCK_KEY") {

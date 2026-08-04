@@ -126,17 +126,18 @@ from a shared inbox. Re-running it is safe and is also how you reset a forgotten
 admin password: the uid, PVE stats and history survive.
 
 Creating the account is not what grants access — the address must also be in
-`ADMIN_EMAILS` in `server/.env`. That allowlist is the only authority (it fails
-closed when empty), and the seed warns if the address is missing from it.
-Restart the backend after editing it.
+`SUPER_ADMIN_EMAILS` in `server/.env`, the operator allowlist that gates
+`/api/admin` and `/api/platform` (`ADMIN_EMAILS` is an advisory badge only).
+The allowlist is the only authority (it fails closed when empty), and the seed
+warns if the address is missing from it. Restart the backend after editing it.
 
 **Where login lands.** Everyone enters at `/`, the public landing page. After a
-successful login an admin goes to `/admin` and everyone else goes to `/home`,
-the in-game hub — unless a protected route bounced them, in which case they
-return to the page they originally asked for. The frontend reads this from the
-`isAdmin` field on `GET /api/auth/me`, which the server computes from
-`ADMIN_EMAILS`; it decides navigation only, and `/api/admin` re-checks the
-allowlist on every request.
+successful login a super admin goes to `/admin` and everyone else goes to
+`/home`, the in-game hub — unless a protected route bounced them, in which case
+they return to the page they originally asked for. The frontend reads this from
+the `isSuperAdmin` field on `GET /api/auth/me`, which the server computes from
+`SUPER_ADMIN_EMAILS`; it decides navigation only, and `/api/admin` re-checks
+the allowlist on every request.
 
 ### Step 3: Create frontend env file
 
@@ -247,21 +248,22 @@ password:  anything at all — it is not read
 
 That takes a local-only shortcut: no Firebase call, no ID token. The client
 stores a "dev session" and sends `x-dev-uid` / `x-dev-email` headers, which the
-backend's `AUTH_DEV_BYPASS` already understands. You land as an **admin**, so
-`/admin` and `/test` are reachable too.
+backend's `AUTH_DEV_BYPASS` already understands. You land as an **operator**,
+so `/admin`, `/studio` and `/test` are reachable too.
 
 Two things have to be true for it to work, and both are already set by
 [Step 2](#step-2-create-backend-env-file):
 
 ```
 AUTH_DEV_BYPASS=true
-ADMIN_EMAILS=...,test@sprout.com    # the address must be on the allowlist
+SUPER_ADMIN_EMAILS=...,test@sprout.com    # the address must be on the operator allowlist
 ```
 
-The admin part is not special-cased — the server derives `isAdmin` from that
-email through the normal allowlist, so if you take `test@sprout.com` out of
-`ADMIN_EMAILS` you still sign in, just as an ordinary player. Handy for
-checking what a non-admin sees. "Log out" clears the session as usual.
+The operator part is not special-cased — the server derives `isSuperAdmin`
+from that email through the normal allowlist, so if you take `test@sprout.com`
+out of `SUPER_ADMIN_EMAILS` you still sign in, just as an ordinary player.
+Handy for checking what a non-operator sees. "Log out" clears the session as
+usual.
 
 > **This cannot activate on a deployment.** The client half goes through
 > `import.meta.env.DEV`, which compiles to a literal `false` in `vite build`
@@ -275,8 +277,9 @@ checking what a non-admin sees. "Log out" clears the session as usual.
 > Note the shortcut is inert in the production bundle, not stripped from it —
 > `test@sprout.com` and `sprout-dev-session` are readable in the shipped JS.
 > Nothing relies on them being secret. Still, do not add `test@sprout.com` to
-> `ADMIN_EMAILS` on a deployed environment: that would make it a live admin
-> address the moment anyone creates that Firebase account for real.
+> `SUPER_ADMIN_EMAILS` (or `ADMIN_EMAILS`) on a deployed environment: that
+> would make it a live operator address the moment anyone creates that
+> Firebase account for real.
 
 To act as a specific user instead — a different archive, say — set the dev
 session yourself in the browser console:
@@ -371,9 +374,9 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 | POST | `/api/battle/pve/start` | Bearer token | start a PVE battle with one of your avatars |
 | GET/POST | `/api/battle/pve/:sessionId`(`/action`, `/abandon`) | Bearer token | read a session, take a turn, concede |
 | POST | `/api/pipeline/run-stream` | Bearer token | the 4-hop sprite pipeline, streamed as SSE |
-| GET | `/api/admin/users`, `/api/admin/almanac` | Bearer + `ADMIN_EMAILS` | accounts; taxonomy with finders |
-| POST | `/api/admin/cleanup` | Bearer + `ADMIN_EMAILS` | dry-run / delete expired web uploads |
-| GET | `/api/platform/*` | Bearer + `ADMIN_EMAILS` | pipeline portal: config, live provider health, tests |
+| GET | `/api/admin/users`, `/api/admin/almanac` | Bearer + `SUPER_ADMIN_EMAILS` | accounts; taxonomy with finders |
+| POST | `/api/admin/cleanup` | Bearer + `SUPER_ADMIN_EMAILS` | dry-run / delete expired web uploads |
+| GET | `/api/platform/*` | Bearer + `SUPER_ADMIN_EMAILS` | pipeline portal: config, live provider health, tests |
 
 Two of these are deliberately unlike the rest. `GET /api/almanac` takes no auth
 at all — it is the landing page's centrepiece and is shown to visitors who have

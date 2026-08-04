@@ -7,24 +7,26 @@ interface NavItem {
   to: string;
   label: string;
   requiresAuth: boolean;
-  /** Hidden from non-admins rather than shown disabled: the disabled state
+  /** Hidden from non-operators rather than shown disabled: the disabled state
    *  reads as "log in to access", which would be a lie here — no amount of
-   *  logging in gets a player past the server's ADMIN_EMAILS allowlist. */
-  requiresAdmin?: boolean;
+   *  logging in gets a player past the server's SUPER_ADMIN_EMAILS allowlist. */
+  requiresSuperAdmin?: boolean;
 }
 
 /** `/home` is the in-game hub; `/` is the public landing page. Scan is reached
- *  from the hub, which is where the game's own design puts it. */
+ *  from the hub, which is where the game's own design puts it. The operator
+ *  tools — Studio, Admin, API Test — are grouped at the end so the player nav
+ *  reads as one arc and the ops surface as another. */
 const navItems: NavItem[] = [
   { to: '/', label: 'Home', requiresAuth: false },
   { to: '/home', label: 'Play', requiresAuth: true },
   { to: '/archive', label: 'Archive', requiresAuth: true },
   { to: '/battle', label: 'PVE Battle', requiresAuth: true },
   { to: '/leaderboard', label: 'Ranking', requiresAuth: true },
-  { to: '/studio', label: 'Studio', requiresAuth: true, requiresAdmin: true },
-  { to: '/admin', label: 'Admin', requiresAuth: true, requiresAdmin: true },
   { to: '/contact', label: 'Contact', requiresAuth: false },
-  { to: '/test', label: 'API Test', requiresAuth: true, requiresAdmin: true },
+  { to: '/studio', label: 'Studio', requiresAuth: true, requiresSuperAdmin: true },
+  { to: '/admin', label: 'Admin', requiresAuth: true, requiresSuperAdmin: true },
+  { to: '/test', label: 'API Test', requiresAuth: true, requiresSuperAdmin: true },
 ];
 
 export default function AppHeader() {
@@ -67,7 +69,7 @@ export default function AppHeader() {
 
       <nav className="primary-nav" aria-label="Primary">
         {navItems
-          .filter((item) => !item.requiresAdmin || profile?.isAdmin)
+          .filter((item) => !item.requiresSuperAdmin || profile?.isSuperAdmin)
           .map((item) =>
             isNavigationLocked || (item.requiresAuth && !signedIn) ? (
               <span
