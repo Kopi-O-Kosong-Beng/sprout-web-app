@@ -335,3 +335,44 @@ describe('DELETE /api/avatar/:avatarId (the archive shovel)', () => {
     expect(doc.exists).toBe(true);
   });
 });
+
+/**
+ * `.doc()` throws synchronously on an id Firestore cannot address, so an id
+ * typed straight into the URL used to escape the repository as a 500. A wrong
+ * id is a 404 — a reserved-looking one must not read as a server fault, nor
+ * hint that it addressed anything.
+ */
+describe('an avatar id Firestore cannot address', () => {
+  // '.' and '..' are deliberately absent: the URL is path-normalised before it
+  // reaches the router, so `/api/avatar/.` resolves to the list route and
+  // `/api/avatar/..` falls outside it entirely. They never arrive as an id, so
+  // asserting on them here would test Express, not the guard. The repository
+  // still rejects them for any non-HTTP caller.
+  const UNADDRESSABLE = ['__proto__', '__name__', 'a/b', 'x'.repeat(1501)];
+
+  it.each(UNADDRESSABLE)('answers 404 rather than 500 for GET %s', async (id) => {
+    const response = await request(app)
+      .get(`/api/avatar/${encodeURIComponent(id)}`)
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+  });
+
+  it.each(UNADDRESSABLE)('answers 404 rather than 500 for DELETE %s', async (id) => {
+    const response = await request(app)
+      .delete(`/api/avatar/${encodeURIComponent(id)}`)
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: 'Avatar not found.' });
+  });
+
+  it('still serves an id at the 1500-byte boundary', async () => {
+    const response = await request(app)
+      .get(`/api/avatar/${'x'.repeat(1500)}`)
+      .set('Authorization', authorization());
+
+    expect(response.status).toBe(404);
+  });
+});
