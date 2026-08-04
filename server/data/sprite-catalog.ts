@@ -47,9 +47,11 @@ export function spriteUrlForSlug(slug: string): string {
 }
 
 /**
- * Everything the generator renders. The demo plants are deliberately absent:
- * their art is hand-made and lives in `/plants/`, so generating over it would
- * replace a drawing someone made with one a model guessed at.
+ * The invented creatures the generator renders into `/sprites/`. The demo
+ * plants are absent because their filenames live on their templates in
+ * demo-avatar-templates.ts — the generator picks them up from there and writes
+ * into `/plants/`, but never over an existing file, so hand-made art dropped
+ * in there is kept, not replaced with a drawing a model guessed at.
  */
 export const SPRITE_CATALOG: SpriteCatalogEntry[] = [
   {
