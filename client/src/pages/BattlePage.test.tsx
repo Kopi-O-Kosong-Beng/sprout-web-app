@@ -1042,6 +1042,101 @@ describe('BattlePage', () => {
   });
 
   /*
+    The bfcache resurrection: browser Back restored a document frozen with a
+    finished battle fully playable-looking. Two defences — pageshow(persisted)
+    re-runs the entry decision against the server, and a command bouncing off
+    a dead session resyncs to the server's verdict instead of offering a
+    Retry that can never succeed.
+  */
+  it('resyncs to the server verdict when a move bounces off a finished session', async () => {
+    apiMocks.submitPveAction.mockRejectedValueOnce(
+      Object.assign(new Error('Battle session is already complete.'), {
+        isAxiosError: true,
+        response: { status: 409 },
+      })
+    );
+    apiMocks.getPveBattle.mockResolvedValue(
+      battleSession({ status: 'abandoned', xpAwarded: 0 })
+    );
+    const { user } = await enterActiveBattle();
+
+    await user.click(screen.getByRole('button', { name: /vine tap/i }));
+
+    // The result screen, not a dead-end error panel: the player sees how the
+    // battle actually ended and holds live Replay / Change Plant controls.
+    expect(
+      await screen.findByRole('heading', { name: /battle abandoned/i })
+    ).toBeVisible();
+    expect(screen.getByText(/already ended/i)).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /retry move/i })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /replay/i })).toBeEnabled();
+  });
+
+  it('falls back to the roster when the conflicting session is gone entirely', async () => {
+    apiMocks.submitPveAction.mockRejectedValueOnce(
+      Object.assign(new Error('Battle session not found.'), {
+        isAxiosError: true,
+        response: { status: 404 },
+      })
+    );
+    apiMocks.getPveBattle.mockRejectedValue(
+      Object.assign(new Error('Battle session not found.'), {
+        isAxiosError: true,
+        response: { status: 404 },
+      })
+    );
+    const { user } = await enterActiveBattle();
+
+    await user.click(screen.getByRole('button', { name: /vine tap/i }));
+
+    expect(
+      await screen.findByRole('button', { name: /select fern ward/i })
+    ).toBeVisible();
+    expect(sessionStorage.getItem('sprout.battle.sessionId')).toBeNull();
+  });
+
+  it('revalidates a document restored from the back/forward cache', async () => {
+    await enterActiveBattle();
+    // The abandon happened in this document's previous life: the server ended
+    // the battle and cleared the stored pointer, then bfcache froze the
+    // fully-playable-looking battle screen.
+    sessionStorage.removeItem('sprout.battle.sessionId');
+
+    const restore = new Event('pageshow');
+    Object.defineProperty(restore, 'persisted', { value: true });
+    act(() => {
+      window.dispatchEvent(restore);
+    });
+
+    // Back at the roster — the frozen battle is not resurrected.
+    expect(
+      await screen.findByRole('button', { name: /select fern ward/i })
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /vine tap/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('resumes a still-live battle after a back/forward cache restore', async () => {
+    await enterActiveBattle();
+    apiMocks.getPveBattle.mockResolvedValue(battleSession({ turnNumber: 3 }));
+
+    const restore = new Event('pageshow');
+    Object.defineProperty(restore, 'persisted', { value: true });
+    act(() => {
+      window.dispatchEvent(restore);
+    });
+
+    // The pointer still names a live session, so the restore lands the player
+    // on the server's current turn rather than the frozen one.
+    expect(
+      await screen.findByRole('heading', { name: /turn 3/i })
+    ).toBeVisible();
+  });
+
+  /*
     jsdom has no matchMedia, so every other test exercises the reduced-motion
     (instant) path. This block stubs motion ON and lets the real beat clock run
     (0ms / 1250ms / +400ms) — the only automated coverage the cinematic has.

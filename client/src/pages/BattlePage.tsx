@@ -643,6 +643,44 @@ export default function BattlePage() {
     [beginRequest, finishRequest, loadRoster, refreshRosterQuietly]
   );
 
+  /** The server has contradicted the client's picture of this battle — a
+   *  command bounced with a conflict, or the session vanished. Retrying the
+   *  same command can never succeed, so fetch the session and show what
+   *  actually happened: its result screen if it ended, the live turn if the
+   *  client was merely behind, or the roster if it is gone entirely. */
+  const resyncSession = useCallback(
+    async (sessionId: string) => {
+      const request = beginRequest();
+      if (request === null) return;
+      setView('loading');
+      setError(null);
+      setRetryCommand(null);
+
+      try {
+        const current = await getPveBattle(sessionId);
+        if (request !== requestVersion.current) return;
+        setSession(current);
+        setNotice({
+          kind: 'stale',
+          message:
+            current.status === 'active'
+              ? 'Battle synchronized to the latest server turn.'
+              : 'This battle had already ended — showing its final result.',
+        });
+        setView(viewForSession(current));
+        finishRequest(request);
+      } catch {
+        if (request !== requestVersion.current) return;
+        // Gone entirely (or unreachable) — the roster is the only place left,
+        // and a dead pointer must not resurrect this session on the next visit.
+        writeStoredSessionId(null);
+        finishRequest(request);
+        void loadRoster();
+      }
+    },
+    [beginRequest, finishRequest, loadRoster]
+  );
+
   useEffect(() => {
     const storedSessionId = readStoredSessionId();
     // An explicit route avatarId is the player mid-gesture (Archive's Battle
@@ -661,6 +699,30 @@ export default function BattlePage() {
       releaseNavigationLock.current = null;
     };
   }, [loadRoster, preferredAvatarId, resumeStoredSession]);
+
+  /** Back/forward can restore this document from the back/forward cache with
+   *  a finished battle frozen on screen, fully playable-looking — turn number,
+   *  HP, live move buttons. The frozen state is not evidence of anything:
+   *  re-run the entry decision against the server exactly as a fresh mount
+   *  would (the stored pointer already reflects how the battle ended). */
+  useEffect(() => {
+    const revalidate = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      // Whatever was in flight when the document froze is dead. A stuck lock
+      // here would make the revalidation a silent no-op.
+      requestVersion.current += 1;
+      inFlight.current = false;
+      setPendingCommand(null);
+      const storedSessionId = readStoredSessionId();
+      if (storedSessionId) {
+        void resumeStoredSession(storedSessionId);
+      } else {
+        void loadRoster();
+      }
+    };
+    window.addEventListener('pageshow', revalidate);
+    return () => window.removeEventListener('pageshow', revalidate);
+  }, [loadRoster, resumeStoredSession]);
 
   /** The stored pointer follows the session: written while a battle is live,
    *  cleared the moment it ends, so a reload can only ever resume something
@@ -717,6 +779,7 @@ export default function BattlePage() {
       setError(null);
       setRetryCommand(null);
       setNotice(null);
+      let conflicted = false;
 
       try {
         const result = await submitPveAction(
@@ -737,20 +800,32 @@ export default function BattlePage() {
         setView(viewForSession(result.session));
       } catch (caught) {
         if (request !== requestVersion.current) return;
-        setError(extractApiError(caught, 'Could not submit this move.'));
-        setRetryCommand({
-          kind: 'action',
-          sessionId,
-          moveId,
-          expectedTurn,
-        });
-        setView('error');
+        const status = axios.isAxiosError(caught)
+          ? caught.response?.status
+          : undefined;
+        // 409/404: the server says this session is complete, mismatched, or
+        // gone. A Retry of the same command can never succeed (the bfcache
+        // resurrection dead-ended exactly here), so resync to the truth
+        // instead of offering one.
+        if (status === 409 || status === 404) {
+          conflicted = true;
+        } else {
+          setError(extractApiError(caught, 'Could not submit this move.'));
+          setRetryCommand({
+            kind: 'action',
+            sessionId,
+            moveId,
+            expectedTurn,
+          });
+          setView('error');
+        }
       } finally {
         if (request === requestVersion.current) setPendingCommand(null);
         finishRequest(request);
       }
+      if (conflicted) await resyncSession(sessionId);
     },
-    [beginRequest, finishRequest]
+    [beginRequest, finishRequest, resyncSession]
   );
 
   const runAbandon = useCallback(
@@ -762,6 +837,7 @@ export default function BattlePage() {
       setError(null);
       setRetryCommand(null);
       setNotice(null);
+      let conflicted = false;
 
       try {
         const abandonedSession = await abandonPveBattle(sessionId);
@@ -780,15 +856,31 @@ export default function BattlePage() {
         if (records.length === 0) void refreshRosterQuietly();
       } catch (caught) {
         if (request !== requestVersion.current) return;
-        setError(extractApiError(caught, 'Could not abandon this battle.'));
-        setRetryCommand({ kind: 'abandon', sessionId });
-        setView('error');
+        const status = axios.isAxiosError(caught)
+          ? caught.response?.status
+          : undefined;
+        // Same conflict rule as runAction: if the session already ended or is
+        // gone, retrying the abandon is pointless — show what the server has.
+        if (status === 409 || status === 404) {
+          conflicted = true;
+        } else {
+          setError(extractApiError(caught, 'Could not abandon this battle.'));
+          setRetryCommand({ kind: 'abandon', sessionId });
+          setView('error');
+        }
       } finally {
         if (request === requestVersion.current) setPendingCommand(null);
         finishRequest(request);
       }
+      if (conflicted) await resyncSession(sessionId);
     },
-    [beginRequest, finishRequest, records.length, refreshRosterQuietly]
+    [
+      beginRequest,
+      finishRequest,
+      records.length,
+      refreshRosterQuietly,
+      resyncSession,
+    ]
   );
 
   const handleRetry = () => {
@@ -919,6 +1011,13 @@ export default function BattlePage() {
     setNotice(null);
     setView('selecting');
   };
+
+  /** Stable identity on purpose: as a ref callback it then fires only when
+   *  the error panel mounts, not on every rerender while it is visible. */
+  const scrollErrorIntoView = useCallback((node: HTMLDivElement | null) => {
+    // jsdom has no scrollIntoView, hence the optional call.
+    node?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, []);
 
   const dismissSessionError = () => {
     if (!session || commandLocked) return;
@@ -1145,7 +1244,15 @@ export default function BattlePage() {
               </p>
             )}
             {error && (
-              <div className="pixel-panel p-3" role="alert">
+              <div
+                className="pixel-panel p-3"
+                role="alert"
+                // The panel renders above the arena; a player who was looking
+                // at the move grid saw every control grey out with the
+                // explanation sitting off-screen above the fold. The stable
+                // ref callback brings it into view once, on mount.
+                ref={scrollErrorIntoView}
+              >
                 <strong className="font-pixel block text-[9px] leading-relaxed">
                   Battle command not saved
                 </strong>
