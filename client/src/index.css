@@ -201,6 +201,11 @@ body {
  */
 .screen-scrollable {
   overflow-y: auto;
+  /* Reserve the scrollbar's gutter even when content doesn't overflow, so
+     switching to shorter/taller content (e.g. selecting a different archive
+     avatar) doesn't shift the content width when the scrollbar appears or
+     disappears. */
+  scrollbar-gutter: stable;
 }
 
 .safe-top {
@@ -247,6 +252,31 @@ body {
 .pixel-button:disabled {
   opacity: 0.45;
   box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Small icon-only pixel buttons (e.g. the archive card's close X): flat, no
+ * offset shadow, with a green hover/focus tint standing in for the missing
+ * depth cue. */
+.pixel-button-icon {
+  box-shadow: none;
+  transition:
+    background 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.pixel-button-icon:hover,
+.pixel-button-icon:focus-visible {
+  background: var(--color-hp-high);
+  color: #ffffff;
+}
+
+/* Same battle-button green on hover/focus, kept for regular (non-icon)
+ * pixel buttons that want it — currently just the archive Filter/Sort
+ * trigger. Unlike `.pixel-button-icon` this keeps the normal offset shadow. */
+.pixel-button-accent-hover:hover,
+.pixel-button-accent-hover:focus-visible {
+  background: var(--color-hp-high);
+  color: #ffffff;
 }
 
 .pixel-panel {

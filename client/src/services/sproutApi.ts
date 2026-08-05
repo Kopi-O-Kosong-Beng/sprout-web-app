@@ -238,6 +238,11 @@ export async function listOwnedAvatars(
   return data;
 }
 
+export async function getAvatar(avatarId: string): Promise<AvatarRecord> {
+  const { data } = await apiClient.get<AvatarRecord>(`/api/avatar/${avatarId}`);
+  return data;
+}
+
 export async function setDemoAvatars(
   enabled: boolean
 ): Promise<PaginatedAvatars> {

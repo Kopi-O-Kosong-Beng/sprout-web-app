@@ -66,6 +66,7 @@ function stubDemoImageLoading() {
   vi.stubGlobal(
     'fetch',
     vi.fn().mockResolvedValue({
+      ok: true,
       blob: () => Promise.resolve(new Blob(['fake-jpeg'], { type: 'image/jpeg' })),
     })
   );

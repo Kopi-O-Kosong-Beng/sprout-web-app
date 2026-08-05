@@ -354,7 +354,9 @@ describe('ArchivePage', () => {
       await screen.findByRole('switch', { name: /add five demo plants/i })
     );
 
-    expect(await screen.findByText('mutation rejected')).toBeVisible();
+    expect(
+      await screen.findByText(/couldn't reach your plant archive/i)
+    ).toBeVisible();
     expect(apiMocks.listOwnedAvatars).toHaveBeenCalledTimes(1);
   });
 
@@ -366,7 +368,7 @@ describe('ArchivePage', () => {
 
     const retry = await screen.findByRole('button', { name: /retry/i });
     expect(retry).toBeVisible();
-    expect(screen.getByText('offline')).toBeVisible();
+    expect(screen.getByText(/couldn't reach your plant archive/i)).toBeVisible();
 
     await user.click(retry);
 
@@ -426,7 +428,10 @@ describe('ArchivePage species detail (UC4 step 3)', () => {
     renderArchive();
 
     expect(await screen.findAllByText('IRL Scan')).not.toHaveLength(0);
-    expect(screen.queryByText('Web Upload')).not.toBeInTheDocument();
+    // `{ selector: 'span' }` because the Filter/Sort toolbar's Source toggle
+    // also has a "Web Upload" button — this checks the actual capture badge,
+    // not that unrelated filter control.
+    expect(screen.queryByText('Web Upload', { selector: 'span' })).not.toBeInTheDocument();
     expect(screen.queryByText(/expires in/i)).not.toBeInTheDocument();
   });
 
