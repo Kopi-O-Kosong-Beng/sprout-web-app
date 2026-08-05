@@ -232,8 +232,14 @@ export default function ScanPage() {
     abortRef.current = controller;
     let finalSprite: string | null = null;
     let finalName = customName ?? '';
-    /** Set when the server gives up on a too-unsure identification. */
-    let lowConfidence: { name: string; probability: number; threshold: number } | null = null;
+    /** Set when the server gives up on a too-unsure identification.
+     *
+     *  Widened on the initializer rather than annotated: the only writer is the
+     *  stream callback below, and control flow analysis does not look inside a
+     *  nested function. A plain `: T | null = null` would leave this pinned to
+     *  `null` for the rest of the run, so the read after the stream could not
+     *  narrow back to the object. */
+    let lowConfidence = null as { name: string; probability: number; threshold: number } | null;
     let savedOutcome: { saved: boolean; saveError?: string; discovery: ScanDiscovery | null } = {
       saved: true,
       discovery: null,
