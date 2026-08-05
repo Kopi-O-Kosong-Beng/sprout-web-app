@@ -40,6 +40,31 @@ function requireOneOf<T extends string>(
   return value as T;
 }
 
+/** Delivery bookkeeping, for documents that may predate it.
+ *
+ *  `submitterEmailStatus` / `adminEmailStatus` were added with the notification
+ *  tracking; tickets stored before that carry neither. Absent decodes to
+ *  'pending', which is the honest reading — nothing was ever recorded — and the
+ *  same value a new ticket starts at.
+ *
+ *  Only *absent* is forgiven. A field that is present but holds something other
+ *  than the three known states is a real data defect and still throws, exactly
+ *  as before; silently rewriting it to 'pending' would hide a corrupt write.
+ */
+function optionalDeliveryStatus(
+  value: unknown,
+  fieldName: string,
+  documentId: string
+): DeliveryStatus {
+  if (value === undefined || value === null) return 'pending';
+  return requireOneOf<DeliveryStatus>(
+    value,
+    ['pending', 'sent', 'failed'],
+    fieldName,
+    documentId
+  );
+}
+
 export function mapTicketDocument(snapshot: FirestoreSnapshotLike): Ticket {
   const data = requireDocumentData(snapshot, 'query_tickets');
   return {
@@ -72,15 +97,13 @@ export function mapTicketDocument(snapshot: FirestoreSnapshotLike): Ticket {
     ),
     message: requireString(data.message, 'message', 'query_tickets', snapshot.id),
     status: requireOneOf(data.status, ['open', 'resolved'], 'status', snapshot.id),
-    submitterEmailStatus: requireOneOf<DeliveryStatus>(
+    submitterEmailStatus: optionalDeliveryStatus(
       data.submitterEmailStatus,
-      ['pending', 'sent', 'failed'],
       'submitterEmailStatus',
       snapshot.id
     ),
-    adminEmailStatus: requireOneOf<DeliveryStatus>(
+    adminEmailStatus: optionalDeliveryStatus(
       data.adminEmailStatus,
-      ['pending', 'sent', 'failed'],
       'adminEmailStatus',
       snapshot.id
     ),
@@ -95,6 +118,16 @@ export function mapTicketDocument(snapshot: FirestoreSnapshotLike): Ticket {
       normalizeNullableTimestamp(
         data.notificationUpdatedAt,
         'notificationUpdatedAt',
+        'query_tickets',
+        snapshot.id
+      ) ?? null,
+    // Absent on every ticket resolved before this was tracked, which decodes
+    // to null — the status check then reports "Resolved" with no date rather
+    // than claiming a reply happened at a time nobody recorded.
+    resolvedAt:
+      normalizeNullableTimestamp(
+        data.resolvedAt,
+        'resolvedAt',
         'query_tickets',
         snapshot.id
       ) ?? null,
@@ -146,6 +179,7 @@ const firestoreTicketRepository: TicketRepository = {
         adminEmailStatus: 'pending',
         lastEmailError: null,
         notificationUpdatedAt: null,
+        resolvedAt: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -154,6 +188,45 @@ const firestoreTicketRepository: TicketRepository = {
     });
     const snapshot = await db.collection('query_tickets').doc(ticketId).get();
     return mapTicketDocument(snapshot);
+  },
+
+  async findByRefNumber(refNumber: string): Promise<Ticket | null> {
+    const snapshot = await getDb()
+      .collection('query_tickets')
+      .where('refNumber', '==', refNumber)
+      .limit(1)
+      .get();
+    return snapshot.empty ? null : mapTicketDocument(snapshot.docs[0]);
+  },
+
+  async list(): Promise<Ticket[]> {
+    // Sorted in memory rather than with orderBy: createdAt is absent on the
+    // oldest documents, and a Firestore orderBy silently drops rows that lack
+    // the field — the Ticket Manager would then hide exactly the tickets that
+    // have been waiting longest.
+    const snapshot = await getDb().collection('query_tickets').get();
+    return snapshot.docs
+      .map((doc) => mapTicketDocument(doc))
+      .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  },
+
+  async setStatus(id: string, status: Ticket['status']): Promise<Ticket | null> {
+    const ref = getDb().collection('query_tickets').doc(id);
+    const existing = await ref.get();
+    if (!existing.exists) return null;
+    const now = new Date().toISOString();
+    await ref.set(
+      {
+        status,
+        // Stamped when an operator resolves, cleared when they reopen: a
+        // ticket back in the queue must not still show the submitter a date
+        // Sprout supposedly replied on.
+        resolvedAt: status === 'resolved' ? now : null,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+    return mapTicketDocument(await ref.get());
   },
 
   async updateNotificationState(id: string, patch: TicketNotificationPatch): Promise<void> {

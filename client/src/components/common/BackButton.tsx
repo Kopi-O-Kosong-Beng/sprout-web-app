@@ -4,12 +4,13 @@ import { useNavigate } from 'react-router-dom';
  * Stands in for the `← Back` button every Android activity wired to finish().
  *
  * Falls back to a route when there is no history to pop — the common case for
- * an installed PWA opened straight onto a deep link. The hub passes `/`, since
- * defaulting it to `/home` there would navigate the page to itself.
+ * an installed PWA opened straight onto a deep link. `/` is the default now
+ * that the `/home` hub is archived; it is the landing page a signed-in player
+ * returns to.
  */
 export default function BackButton({
   className = '',
-  fallback = '/home',
+  fallback = '/',
 }: {
   className?: string;
   fallback?: string;

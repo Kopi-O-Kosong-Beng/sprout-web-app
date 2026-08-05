@@ -7,10 +7,13 @@
  * finder. Nothing here introduces a new write path — a leaderboard that had its
  * own tally would be a second answer to a question already answered.
  *
- * Authenticated, unlike the almanac grid. Every row is a display name attached
- * to a play record, which is exactly what the almanac's public view withholds
- * from anonymous visitors; publishing the same names on a ranked table would
- * undo that decision.
+ * Readable without a session, like the almanac grid. Ranking is one of the
+ * three tabs a signed-out visitor can open, so the top-ten table is public.
+ *
+ * The personal half is not: an anonymous caller gets `caller.rank: null` and no
+ * row flagged `isCaller`, so "where do I rank" still requires an account. That
+ * split is what the tests below pin — the boards being public is deliberate,
+ * the caller standing leaking to anonymous callers would not be.
  */
 import request from 'supertest';
 import { getDb } from '../firebase';
@@ -91,9 +94,31 @@ beforeEach(async () => {
 });
 
 describe('GET /api/leaderboard', () => {
-  it('rejects an unauthenticated caller', async () => {
+  it('serves the boards to an unauthenticated caller', async () => {
+    await seedPlayer('u-high', 'High Scorer', { pveXp: 140, pveWins: 7 });
+
     const response = await request(app).get('/api/leaderboard');
-    expect(response.status).toBe(401);
+
+    expect(response.status).toBe(200);
+    expect(
+      response.body.xp.entries.map((e: { displayName: string }) => e.displayName)
+    ).toEqual(['High Scorer']);
+  });
+
+  /* The table is public; the personal standing is not. An anonymous caller
+   * matches no player, so nothing may come back that identifies one of the
+   * rows as theirs. */
+  it('withholds the caller standing from an unauthenticated caller', async () => {
+    await seedPlayer('u-high', 'High Scorer', { pveXp: 140, pveWins: 7 });
+
+    const response = await request(app).get('/api/leaderboard');
+
+    expect(response.status).toBe(200);
+    expect(response.body.xp.caller.rank).toBeNull();
+    expect(response.body.discovery.caller.rank).toBeNull();
+    expect(
+      response.body.xp.entries.every((e: { isCaller: boolean }) => !e.isCaller)
+    ).toBe(true);
   });
 
   it('ranks players by PVE experience, highest first', async () => {

@@ -16,11 +16,27 @@ import {
   type FirestoreSnapshotLike,
 } from './firestore-normalization';
 import type {
+  AuthProviderTag,
   AuthUserProfile,
   AuthUserRepository,
   CreateAuthUserProfile,
   PasswordHistoryEntry,
 } from '../models/auth';
+
+/** Older documents predate the field, so an absent value is not a defect — it
+ *  simply means "never observed", and the next /api/auth/me call fills it in. */
+function authProviderValue(
+  value: unknown,
+  documentId: string
+): AuthProviderTag | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'password' || value === 'google') return value;
+  throw invalidFirestoreDocument(
+    'users',
+    documentId,
+    'authProvider must be "password" or "google"'
+  );
+}
 
 function progressionValue(
   value: unknown,
@@ -89,6 +105,14 @@ export function decodeAuthUserProfile(
     createdAt: normalizeOptionalTimestamp(data.createdAt, 'createdAt', 'users', snapshot.id),
     updatedAt: normalizeOptionalTimestamp(data.updatedAt, 'updatedAt', 'users', snapshot.id),
   };
+  const authProvider = authProviderValue(data.authProvider, snapshot.id);
+  if (authProvider !== undefined) {
+    profile.authProvider = authProvider;
+  }
+  // Strictly `=== true`. Anything else — absent, null, the string "true" — is
+  // not a grant: this field is the whole authority behind account deletion and
+  // Firestore cleanup, so it fails closed on any value it does not recognise.
+  profile.isSuperAdmin = data.isSuperAdmin === true;
   if (data.resetOtpFailedAttempts !== undefined) {
     profile.resetOtpFailedAttempts = requireFiniteNumber(
       data.resetOtpFailedAttempts,
@@ -217,6 +241,20 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       .collection('users')
       .doc(id)
       .set({ isVerified: true, updatedAt: new Date().toISOString() }, { merge: true });
+  },
+
+  async setAuthProvider(id: string, authProvider: AuthProviderTag): Promise<void> {
+    await getDb()
+      .collection('users')
+      .doc(id)
+      .set({ authProvider, updatedAt: new Date().toISOString() }, { merge: true });
+  },
+
+  async setSuperAdmin(id: string, isSuperAdmin: boolean): Promise<void> {
+    await getDb()
+      .collection('users')
+      .doc(id)
+      .set({ isSuperAdmin, updatedAt: new Date().toISOString() }, { merge: true });
   },
 
   async setResetOtp(

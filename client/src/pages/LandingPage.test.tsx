@@ -62,3 +62,66 @@ describe('landing page', () => {
     expect(apiMocks.getAlmanac).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The hero and its footnote — the first thing a signed-out visitor reads, and
+ * the only place the marketing copy lives.
+ */
+describe('LandingPage hero', () => {
+  it('offers sign up before log in, matching the header order', async () => {
+    renderLanding();
+
+    const signUp = await screen.findByRole('link', {
+      name: /start scanning \(sign up\)/i,
+    });
+    const logIn = screen.getByRole('link', { name: /i have an account/i });
+
+    expect(signUp).toHaveAttribute('href', '/signup');
+    expect(logIn).toHaveAttribute('href', '/login');
+    // Sign up first in the DOM, so it is first for a keyboard and a reader too.
+    expect(signUp.compareDocumentPosition(logIn)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+  });
+
+  /* Two of these — the hero and the closing call to action. Both must lead to
+   * Scan; one still pointing at the archived /home hub would be a dead end. */
+  it('sends a signed-in visitor straight to Scan rather than to sign up', async () => {
+    authMocks.status = 'authenticated';
+    renderLanding();
+
+    const opens = await screen.findAllByRole('link', { name: /open sprout/i });
+    expect(opens.length).toBeGreaterThan(0);
+    for (const link of opens) expect(link).toHaveAttribute('href', '/scan');
+    expect(
+      screen.queryByRole('link', { name: /start scanning \(sign up\)/i })
+    ).toBeNull();
+  });
+
+  /* PVE Battle points at /battle unconditionally: ProtectedRoute carries the
+   * path to /login, so signing in lands the visitor on the screen they clicked
+   * rather than back here. */
+  it('links the footnote to the battle screen and to login', async () => {
+    renderLanding();
+
+    expect(await screen.findByRole('link', { name: 'PVE Battle' })).toHaveAttribute(
+      'href',
+      '/battle'
+    );
+    expect(screen.getByRole('link', { name: 'Login' })).toHaveAttribute(
+      'href',
+      '/login'
+    );
+  });
+
+  it('describes the plant as a Plantemon, not a sprite or a creature', async () => {
+    renderLanding();
+
+    expect(
+      await screen.findByText(/into Plantemon that fight/i)
+    ).toBeInTheDocument();
+    // Hero paragraph and the "Grow" step both use it.
+    expect(screen.getAllByText(/pixel-art Plantemon/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/creatures that fight/i)).toBeNull();
+  });
+});

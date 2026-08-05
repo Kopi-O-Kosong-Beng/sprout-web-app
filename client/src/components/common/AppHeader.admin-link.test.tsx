@@ -82,7 +82,7 @@ describe('AppHeader operator links', () => {
       expect(within(nav).queryByText(label)).not.toBeInTheDocument();
     }
     // The player's own nav is untouched.
-    expect(within(nav).getByRole('link', { name: 'Play' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Scan' })).toBeInTheDocument();
   });
 
   it('hides them from a plain admin — the tools answer to the operator tier', () => {

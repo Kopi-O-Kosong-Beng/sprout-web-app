@@ -7,6 +7,7 @@ import {
   handleResendVerification,
   handleSessionLogin,
   handleSessionLogout,
+  handleSignInMethod,
   handleSignup,
   handleVerifyReset,
 } from '../controllers/auth.controller';
@@ -68,6 +69,12 @@ router.post(
   strictUnverifiedAuthMiddleware,
   verificationResendAccountLimiter,
   handleResendVerification
+);
+router.post(
+  '/sign-in-method',
+  authLimiter,
+  validate(requestResetSchema),
+  handleSignInMethod
 );
 router.get('/me', authMiddleware, handleMe);
 router.post('/session/login', unverifiedAuthMiddleware, handleSessionLogin);

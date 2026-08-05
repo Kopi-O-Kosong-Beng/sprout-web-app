@@ -44,6 +44,13 @@ export interface Ticket extends TicketInput {
   adminEmailStatus: DeliveryStatus;
   lastEmailError: string | null;
   notificationUpdatedAt: string | null;
+  /** When an operator marked this resolved — the moment Sprout replied, as far
+   *  as the submitter is concerned. Null while open, and cleared again on
+   *  reopen so a ticket back in the queue cannot still claim a reply date.
+   *
+   *  Absent on tickets resolved before this was tracked; the status check then
+   *  reports the state without a date rather than inventing one. */
+  resolvedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -55,8 +62,28 @@ export interface TicketNotificationPatch {
   notificationUpdatedAt: string;
 }
 
+/** What a submitter is told when they check a reference number.
+ *
+ *  Deliberately not the whole Ticket: the stored record carries the message
+ *  body, the reporter's name and the email delivery bookkeeping, and this is
+ *  returned on an unauthenticated endpoint. Only what the person who filed it
+ *  needs to confirm it is being handled.
+ */
+export interface TicketStatusView {
+  refNumber: string;
+  subject: string;
+  category: TicketCategory;
+  status: 'open' | 'resolved';
+  submittedAt: string | null;
+  resolvedAt: string | null;
+}
+
 /** Services depend on this interface rather than Firebase Admin directly. */
 export interface TicketRepository {
   create(input: TicketInput): Promise<Ticket>;
+  findByRefNumber(refNumber: string): Promise<Ticket | null>;
+  /** Newest first, for the superadmin Ticket Manager. */
+  list(): Promise<Ticket[]>;
+  setStatus(id: string, status: Ticket['status']): Promise<Ticket | null>;
   updateNotificationState(id: string, patch: TicketNotificationPatch): Promise<void>;
 }

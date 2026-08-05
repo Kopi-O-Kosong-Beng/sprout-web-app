@@ -25,7 +25,7 @@ const STEPS = [
     n: '02',
     title: 'Grow',
     art: '/img/ic_nav_garden.png',
-    body: 'An AI renders that species as a pixel-art creature and plants it on your shelf. Every sprite is unique to the plant you scanned.',
+    body: 'An AI renders that species as a pixel-art Plantemon and plants it on your shelf. Every Plantemon is unique to the plant you scanned.',
   },
   {
     n: '03',
@@ -38,19 +38,19 @@ const STEPS = [
 const FEATURES = [
   {
     title: 'Real species, real data',
-    body: "Every creature is backed by the plant's botanical record: scientific name, family, habitat, conservation status, and battle stats drawn from its own botany.",
+    body: 'Every Plantemon is a real plant underneath with its very own scientific name, family, habitat, conservation status and battle stats!',
   },
   {
     title: 'Sprites generated per plant',
-    body: 'A language model describes your plant as a creature, and an image model renders it as a 192×192 sprite. No two archives look alike.',
+    body: "We describe your plant as a unique Plantemon, then render it as a 192×192 sprite for learning and battle. Everyone's archive turns into its own little garden.",
   },
   {
     title: 'Taxonomy-driven movesets',
-    body: 'A decision tree maps the real taxonomic class onto a move pool, so a fern and a conifer genuinely play differently.',
+    body: "A plant's taxonomic class determines its own unique movesets for PVE.",
   },
   {
-    title: 'Built on a real pipeline',
-    body: 'Identification, prompt crafting, rendering, background cutout and palette quantisation each run as their own hop — with a live studio to watch them resolve.',
+    title: "Powered by Sprout's GenAI Engine",
+    body: 'Five steps run behind every sprite: identify the plant, prompt engineer, render it, cut out the background, lock the palette. Watch each step happen live as you scan or upload a real life plant picture to convert!',
   },
 ];
 
@@ -84,17 +84,17 @@ export default function LandingPage() {
           />
 
           <h1 className="mt-8 text-3xl leading-tight font-semibold text-balance sm:text-5xl">
-            Turn the plants around you into creatures that fight.
+            Turn the plants around you into Plantemon that fight.
           </h1>
 
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-white/75 sm:text-lg">
-            Point your camera at any plant. Sprout identifies the species, renders it as a
-            pixel-art creature, and gives it a moveset drawn from its real botanical taxonomy.
+            Point your phone camera at any plant. Sprout identifies the species, renders it
+            as a pixel-art Plantemon, and gives it a moveset based on its botanical taxonomy.
           </p>
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
             {signedIn ? (
-              <Link to="/home" className="press pixel-button w-full px-6 py-4 text-[10px] sm:w-auto">
+              <Link to="/scan" className="press pixel-button w-full px-6 py-4 text-[10px] sm:w-auto">
                 Open Sprout
               </Link>
             ) : (
@@ -103,7 +103,7 @@ export default function LandingPage() {
                   to="/signup"
                   className="press pixel-button w-full px-6 py-4 text-[10px] sm:w-auto"
                 >
-                  Start scanning
+                  Start Scanning (Sign Up)
                 </Link>
                 <Link
                   to="/login"
@@ -115,9 +115,30 @@ export default function LandingPage() {
             )}
           </div>
 
-          <p className="mt-6 text-xs text-white/50">
-            Free to play. Installs to your home screen as an app.
-          </p>
+          {/* Three lines rather than one sentence: they say three different
+              things — the price, where you capture, and what to try here.
+
+              "PVE Battle" points at /battle unconditionally rather than
+              switching to /login when signed out. ProtectedRoute already sends
+              a visitor to the login form, and it carries the path with it, so
+              logging in drops them on the battle screen they clicked for
+              instead of the landing page they came from. An unverified account
+              goes to /verify-email by the same route. */}
+          <div className="mt-6 space-y-1 text-xs text-white/50">
+            <p>Free to play.</p>
+            <p>Capture on Phone (Sprout Mobile App).</p>
+            <p>
+              Experience it first on Sprout Web with our{' '}
+              <Link to="/battle" className="underline underline-offset-2 hover:text-white/75">
+                PVE Battle
+              </Link>{' '}
+              (Require{' '}
+              <Link to="/login" className="underline underline-offset-2 hover:text-white/75">
+                Login
+              </Link>
+              ).
+            </p>
+          </div>
         </div>
       </section>
 
@@ -146,10 +167,7 @@ export default function LandingPage() {
       {/* ---------- Features ---------- */}
       <section className="border-y border-white/10 bg-black/15">
         <div className="mx-auto max-w-6xl px-6 py-20 sm:py-24">
-          <SectionHeading
-            eyebrow="What's under it"
-            title="It's a real plant identifier wearing a game."
-          />
+          <SectionHeading eyebrow="What's under it" title="Gamifying plant learning!" />
 
           <div className="mt-12 grid gap-5 sm:grid-cols-2">
             {FEATURES.map((feature) => (
@@ -189,7 +207,7 @@ export default function LandingPage() {
           </h2>
           <div className="mt-8 flex justify-center">
             <Link
-              to={signedIn ? '/home' : '/signup'}
+              to={signedIn ? '/scan' : '/signup'}
               className="press pixel-button px-6 py-4 text-[10px]"
             >
               {signedIn ? 'Open Sprout' : 'Create your archive'}
