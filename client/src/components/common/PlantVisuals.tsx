@@ -43,66 +43,90 @@ export interface PlantAvatarData {
   conservationStatus?: string;
 }
 
+/**
+ * The five demo plants, and the only thing this array feeds is MiniArchive.
+ *
+ * These used to be invented species — an orchid, a fern, a cactus — with no
+ * `spriteUrl` between them, so every pot on the auth and contact pages fell
+ * through to PixelPlantFallback and the shelf showed hand-coded SVG
+ * silhouettes. The pages advertised the product with art the product does not
+ * make.
+ *
+ * Each entry is now one of the demo species in
+ * `server/data/demo-avatar-templates.ts`, pointed at that species' committed
+ * pipeline render in `client/public/plants/`. Same order, same stats, same
+ * families as the server's templates, so the decorative shelf and the seeded
+ * archive show the same creatures rather than two unrelated sets.
+ *
+ * Swapping a species here means swapping the sprite with it — a name that does
+ * not match its art is the bug this replaced. The fallback still stands behind
+ * every entry, so a missing PNG degrades to a drawn plant rather than a bare pot.
+ */
 export const plantAvatars: PlantAvatarData[] = [
+  {
+    id: 'helianthus',
+    name: 'Helianthus Flare',
+    species: 'Helianthus annuus',
+    family: 'Asteraceae',
+    discovered: '12 Jul 2026',
+    hp: 96,
+    attack: 72,
+    defense: 41,
+    speed: 68,
+    color: 'lime',
+    spriteUrl: '/plants/SPRITE_Helianthus.png',
+  },
+  {
+    id: 'quercus',
+    name: 'Quercus Guard',
+    species: 'Quercus robur',
+    family: 'Fagaceae',
+    discovered: '10 Jul 2026',
+    hp: 168,
+    attack: 44,
+    defense: 88,
+    speed: 22,
+    color: 'clay',
+    spriteUrl: '/plants/SPRITE_Quercus.png',
+  },
   {
     id: 'monstera',
     name: 'Monstera Scout',
     species: 'Monstera deliciosa',
     family: 'Araceae',
-    discovered: '12 Jul 2026',
-    hp: 148,
-    attack: 62,
-    defense: 74,
-    speed: 48,
-    color: 'emerald',
-  },
-  {
-    id: 'orchid',
-    name: 'Orchid Flare',
-    species: 'Phalaenopsis aphrodite',
-    family: 'Orchidaceae',
-    discovered: '10 Jul 2026',
-    hp: 96,
-    attack: 86,
-    defense: 42,
-    speed: 81,
-    color: 'violet',
-  },
-  {
-    id: 'fern',
-    name: 'Fern Ward',
-    species: 'Nephrolepis exaltata',
-    family: 'Nephrolepidaceae',
     discovered: '08 Jul 2026',
-    hp: 132,
-    attack: 54,
-    defense: 88,
-    speed: 57,
-    color: 'sage',
-  },
-  {
-    id: 'cactus',
-    name: 'Cactus Guard',
-    species: 'Echinopsis chamaecereus',
-    family: 'Cactaceae',
-    discovered: '06 Jul 2026',
-    hp: 168,
+    hp: 112,
     attack: 58,
-    defense: 92,
-    speed: 34,
-    color: 'lime',
+    defense: 63,
+    speed: 47,
+    color: 'emerald',
+    spriteUrl: '/plants/SPRITE_Monstera.png',
   },
   {
-    id: 'mushroom',
-    name: 'Mycelium Hex',
-    species: 'Agaricus bisporus',
-    family: 'Agaricaceae',
+    id: 'ficus',
+    name: 'Ficus Ward',
+    species: 'Ficus lyrata',
+    family: 'Moraceae',
+    discovered: '06 Jul 2026',
+    hp: 134,
+    attack: 39,
+    defense: 74,
+    speed: 33,
+    color: 'sage',
+    spriteUrl: '/plants/SPRITE_Ficus.png',
+  },
+  {
+    id: 'amanita',
+    name: 'Amanita Hex',
+    species: 'Amanita muscaria',
+    family: 'Amanitaceae',
     discovered: '04 Jul 2026',
-    hp: 88,
-    attack: 92,
-    defense: 38,
-    speed: 64,
-    color: 'clay',
+    hp: 74,
+    attack: 91,
+    defense: 28,
+    speed: 55,
+    color: 'violet',
+    spriteUrl: '/plants/SPRITE_Amanita.png',
   },
 ];
 
