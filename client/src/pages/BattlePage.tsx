@@ -142,14 +142,20 @@ function boundedEnergy(
   return { current, max };
 }
 
+/** The server's intent taxonomy (battle-engine intentForMove): `building`
+ *  means the chosen move is a quick attack or a guard, `committed` means the
+ *  signature or the heal, and `uncertain` is deliberate ambiguity whenever an
+ *  honest split would leak the pending move. The copy says what each hint
+ *  actually covers — "building momentum" read as "an attack is coming" and
+ *  then a guard halved the player's damage with no stated reason. */
 function intentMessage(name: string, intent: BattleIntent | null): string {
   switch (intent) {
     case 'building':
-      return `${name} is building momentum.`;
+      return `${name} is building up — expect a light hit or a guard.`;
     case 'committed':
       return `${name} is committed to a decisive action.`;
     case 'uncertain':
-      return `${name}'s next action remains uncertain.`;
+      return `${name} is unreadable — anything could come, big or small.`;
     default:
       return `${name}'s intent is not available.`;
   }

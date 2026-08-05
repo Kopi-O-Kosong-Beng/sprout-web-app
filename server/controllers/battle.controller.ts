@@ -102,23 +102,6 @@ function serializeMove(move: BattleMove): BattleMove {
   };
 }
 
-function botEventMessage(event: BattleEvent): string {
-  switch (event.type) {
-    case 'bot_intent_prepared':
-      return 'Opponent intent prepared.';
-    case 'move_missed':
-      return 'Opponent attack missed.';
-    case 'damage_dealt':
-      return `Opponent dealt ${event.amount ?? 0} damage.`;
-    case 'healed':
-      return `Opponent recovered ${event.amount ?? 0} HP.`;
-    case 'bot_action_skipped':
-      return 'Opponent fainted before acting.';
-    default:
-      return 'Opponent acted.';
-  }
-}
-
 function serializeEvent(event: BattleEvent): PublicBattleEvent {
   const base = {
     turnNumber: event.turnNumber,
@@ -129,10 +112,17 @@ function serializeEvent(event: BattleEvent): PublicBattleEvent {
     return {
       ...base,
       actor: 'bot',
-      message: botEventMessage(event),
+      // The engine's own line, verbatim. Bot messages only ever name a move
+      // the bot has already used ("Thornback used Guard...") — never the
+      // pending move or the move list, which stay hidden: PublicBattleBot has
+      // no moves array and this event drops the bot's moveId below. Rewriting
+      // these to "Opponent acted." hid the one fact that explains a halved
+      // hit — the player could not see that their damage halved because the
+      // opponent guarded.
       ...(event.type === 'bot_intent_prepared' && event.intent !== undefined
         ? { intent: event.intent }
         : {}),
+      message: event.message,
     };
   }
   if (event.actor === 'player') {

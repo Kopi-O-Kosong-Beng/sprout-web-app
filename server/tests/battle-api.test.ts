@@ -62,20 +62,27 @@ function findForbiddenKeys(value: unknown, path = '$'): string[] {
   ]);
 }
 
-function expectedBotEventMessage(event: Record<string, unknown>): string {
+/** Bot log lines are the engine's own copy, verbatim — they may name a move
+ *  the bot has ALREADY used, deliberately: a guard must be visible in the log
+ *  so a halved hit has a stated reason. What stays hidden is the future — the
+ *  move list, the bot's moveIds, and the pending move. The intent line in
+ *  particular must stay at intent level and never name the chosen move. */
+function expectedBotEventPattern(event: Record<string, unknown>): RegExp {
   switch (event.type) {
     case 'bot_intent_prepared':
-      return 'Opponent intent prepared.';
+      return /^Thornback( is building momentum\.| is committing to a decisive action\.|'s next action remains uncertain\.)$/;
+    case 'move_used':
+      return /^Thornback used .+\.$/;
     case 'move_missed':
-      return 'Opponent attack missed.';
+      return /^Thornback's .+ missed\.$/;
     case 'damage_dealt':
-      return `Opponent dealt ${event.amount} damage.`;
+      return new RegExp(`^Thornback dealt ${event.amount} damage\\.$`);
     case 'healed':
-      return `Opponent recovered ${event.amount} HP.`;
+      return new RegExp(`^Thornback recovered ${event.amount} HP\\.$`);
     case 'bot_action_skipped':
-      return 'Opponent fainted before acting.';
+      return /^Thornback fainted before acting\.$/;
     default:
-      return 'Opponent acted.';
+      return /^Thornback\b/;
   }
 }
 
@@ -107,21 +114,25 @@ function expectPublicSession(session: Record<string, unknown>): void {
     })
   );
 
-  const serialized = JSON.stringify(session);
+  // The bot OBJECT must never carry its move names — the log may (a used
+  // move is public history), the roster of options is not.
+  const serializedBot = JSON.stringify(session.bot);
   for (const botMoveName of BOT_MOVE_NAMES.slice(0, 3)) {
-    expect(serialized).not.toContain(botMoveName);
+    expect(serializedBot).not.toContain(botMoveName);
   }
 
   const log = session.log as Array<Record<string, unknown>>;
   for (const event of log) {
     if (event.actor !== 'bot') continue;
     expect(event).not.toHaveProperty('moveId');
-    expect(event.message).toBe(expectedBotEventMessage(event));
-    for (const botMoveName of BOT_MOVE_NAMES) {
-      expect(event.message).not.toContain(botMoveName);
-    }
+    expect(event.message).toMatch(expectedBotEventPattern(event));
     if (event.type === 'bot_intent_prepared') {
       expect(['building', 'committed', 'uncertain']).toContain(event.intent);
+      // The pending move stays secret: the intent line is the one bot message
+      // that speaks about the future, so it must never name a move.
+      for (const botMoveName of BOT_MOVE_NAMES) {
+        expect(event.message).not.toContain(botMoveName);
+      }
     } else {
       expect(event).not.toHaveProperty('intent');
     }
