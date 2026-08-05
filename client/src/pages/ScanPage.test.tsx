@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { ToastProvider } from '../components/common/Toast';
@@ -286,5 +286,64 @@ describe('ScanPage save outcome', () => {
       expect.any(Function),
       expect.anything()
     );
+  });
+
+  /**
+   * The result dialog covers the screen, and its only exits used to be "Scan
+   * another" and the page's Back button behind the scrim. Pressing outside a box
+   * is how a modal is closed everywhere else, and a plant that just saved is
+   * worth being able to go and look at.
+   */
+  describe('leaving the result dialog', () => {
+    it('closes on a press outside the panel, staying on the scan screen', async () => {
+      scriptStream([completeEvent()]);
+      const user = await startScan();
+
+      const dialog = await screen.findByRole('dialog');
+      await user.click(dialog.parentElement!);
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('stays open when the press lands on the panel itself', async () => {
+      scriptStream([completeEvent()]);
+      const user = await startScan();
+
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByText('Done!'));
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('closes on Escape', async () => {
+      scriptStream([completeEvent()]);
+      const user = await startScan();
+
+      await screen.findByRole('dialog');
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('offers the archive once the plant is saved', async () => {
+      scriptStream([completeEvent({ saved: true })]);
+      await startScan();
+
+      expect(
+        await screen.findByRole('button', { name: /see it in your archive/i })
+      ).toBeInTheDocument();
+    });
+
+    it('does not offer the archive for a plant that failed to save', async () => {
+      scriptStream([completeEvent({ saved: false })]);
+      await startScan();
+
+      // Sending someone to admire a record that does not exist is a worse
+      // answer than the failure message beside it.
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /see it in your archive/i })
+      ).not.toBeInTheDocument();
+    });
   });
 });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import BackButton from '../components/common/BackButton';
 import { useToast } from '../hooks/useToast';
 import {
@@ -158,6 +159,7 @@ function captureFrame(video: HTMLVideoElement): string {
 
 export default function ScanPage() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -563,6 +565,12 @@ export default function ScanPage() {
           saveError={status.saveError}
           discovery={status.discovery}
           onScanAnother={() => setStatus({ kind: 'idle' })}
+          onLeave={() => {
+            // Same rule as BackButton: pop history when there is any, else the
+            // landing page — a scan opened as a deep link has nothing to pop.
+            if (window.history.length > 1) navigate(-1);
+            else navigate('/');
+          }}
         />
       )}
     </main>
@@ -750,6 +758,7 @@ function ResultDialog({
   saveError,
   discovery,
   onScanAnother,
+  onLeave,
 }: {
   sprite: string;
   name: string;
@@ -757,10 +766,34 @@ function ResultDialog({
   saveError?: string;
   discovery: ScanDiscovery | null;
   onScanAnother: () => void;
+  /** Leaves the scan screen, the way the page's own Back button does. */
+  onLeave: () => void;
 }) {
+  const navigate = useNavigate();
+
   return (
-    <Overlay>
-      <h2 className="text-center text-xs">Done!</h2>
+    /*
+     * Dismissing returns to the viewfinder rather than leaving the screen. The
+     * scan is already persisted by the time this shows — `saved` reports
+     * whether that worked — so closing costs nothing, and a backdrop press that
+     * navigated away would be a surprising way to lose a sprite in the one case
+     * where it is only in the browser.
+     */
+    <Overlay onDismiss={onScanAnother} labelledBy="scan-result-title">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={onLeave}
+          className="press pixel-button px-2 py-1 text-[9px]"
+        >
+          ← Back
+        </button>
+        <h2 id="scan-result-title" className="flex-1 text-center text-xs">
+          Done!
+        </h2>
+        {/* Balances the row so the heading stays centred against the button. */}
+        <span aria-hidden="true" className="w-[3.25rem]" />
+      </div>
       <img src={sprite} alt="" className="pixelated mx-auto mt-3 h-40 w-40 object-contain" />
       <p className="mt-2 text-center text-[10px] leading-relaxed">{name}</p>
       <p className="mt-1 text-center text-[9px] leading-relaxed opacity-70">
@@ -786,10 +819,25 @@ function ResultDialog({
           </div>
         ))}
 
+      {/* Only when the record exists: sending someone to the archive to admire
+          a plant that failed to save would be a worse answer than the error
+          above it. */}
+      {saved && (
+        <button
+          type="button"
+          onClick={() => navigate('/archive')}
+          className="press pixel-button is-primary mt-4 w-full px-2 py-2 text-[9px]"
+        >
+          See it in your archive
+        </button>
+      )}
+
       <a
         href={sprite}
         download={`${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`}
-        className="press pixel-button is-primary mt-4 block w-full px-2 py-2 text-center text-[9px]"
+        className={`press pixel-button mt-2 block w-full px-2 py-2 text-center text-[9px]${
+          saved ? '' : ' is-primary'
+        }`}
       >
         Save Plantemon
       </a>
@@ -804,10 +852,50 @@ function ResultDialog({
   );
 }
 
-function Overlay({ children }: { children: React.ReactNode }) {
+/**
+ * The scan screen's modal shell.
+ *
+ * `onDismiss` makes the backdrop and Escape close it, which is what pressing
+ * outside a box is expected to do everywhere else. Dialogs that have no safe
+ * way to be dismissed — one that must be answered — simply do not pass it, and
+ * then neither affordance is offered rather than being offered and ignored.
+ *
+ * The click is checked against the backdrop itself, so a press that starts on
+ * the panel and drifts onto the scrim does not count as clicking outside.
+ */
+function Overlay({
+  children,
+  onDismiss,
+  labelledBy,
+}: {
+  children: React.ReactNode;
+  onDismiss?: () => void;
+  labelledBy?: string;
+}) {
+  useEffect(() => {
+    if (!onDismiss) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onDismiss();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onDismiss]);
+
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-6">
-      <div className="pixel-panel w-full max-w-xs p-4">{children}</div>
+    <div
+      className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-6"
+      onClick={onDismiss ? (event) => {
+        if (event.target === event.currentTarget) onDismiss();
+      } : undefined}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        className="pixel-panel w-full max-w-xs p-4"
+      >
+        {children}
+      </div>
     </div>
   );
 }
