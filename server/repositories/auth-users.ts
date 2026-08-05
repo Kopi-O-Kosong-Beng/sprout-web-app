@@ -1,5 +1,6 @@
 /** Firebase Admin is the only runtime database adapter for auth profiles. */
 import { randomUUID } from 'crypto';
+import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from '../firebase';
 import { buildAuditTimestamp } from '../utils/audit-timestamp';
 import {
@@ -63,6 +64,9 @@ export function decodeAuthUserProfile(
     id: snapshot.id,
     email: requireString(data.email, 'email', 'users', snapshot.id),
     displayName: requireString(data.displayName, 'displayName', 'users', snapshot.id),
+    ...(typeof data.displayNameAdjustedFrom === 'string' && data.displayNameAdjustedFrom
+      ? { displayNameAdjustedFrom: data.displayNameAdjustedFrom }
+      : {}),
     isVerified: requireBoolean(data.isVerified, 'isVerified', 'users', snapshot.id),
     pveXp: progressionValue(data.pveXp, 'pveXp', snapshot.id),
     pveWins: progressionValue(data.pveWins, 'pveWins', snapshot.id),
@@ -208,6 +212,16 @@ const firestoreAuthUserRepository: AuthUserRepository = {
     const reference = db.collection('users').doc(input.id);
     await reference.set(record);
     return decodeAuthUserProfile(await reference.get());
+  },
+
+  /** Clears the one-time "we renamed you" notice, once the client has shown
+   *  it. Deleting the field rather than flagging it false keeps the absent
+   *  case — which is every other account — the cheap one. */
+  async clearDisplayNameNotice(id: string): Promise<void> {
+    await getDb()
+      .collection('users')
+      .doc(id)
+      .update({ displayNameAdjustedFrom: FieldValue.delete() });
   },
 
   async getById(id: string): Promise<AuthUserProfile | null> {

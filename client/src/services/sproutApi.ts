@@ -209,6 +209,10 @@ export interface VerificationEmailResponse {
 export type AuthProviderTag = 'password' | 'google';
 
 export interface AuthProfile {
+  /** Present only on the sign-in where auto-provisioning found the name it
+   *  derived from the email already taken and assigned a variant. Holds what
+   *  was asked for; cleared once the player has been told. */
+  displayNameAdjustedFrom?: string;
   uid: string;
   email: string;
   displayName: string;
@@ -455,6 +459,12 @@ export async function resendVerification(): Promise<VerificationEmailResponse> {
     '/api/auth/resend-verification'
   );
   return data;
+}
+
+/** Confirms the player has seen the "your name was taken" notice, so it is not
+ *  shown again (POST /api/auth/display-name-notice/ack -> 204). */
+export async function acknowledgeDisplayNameNotice(): Promise<void> {
+  await apiClient.post('/api/auth/display-name-notice/ack');
 }
 
 export async function getCurrentUser(idToken?: string): Promise<AuthProfile> {

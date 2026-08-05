@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import authUserRepository from '../repositories/auth-users';
 import {
   getCurrentUserProfile,
   lookupSignInMethod,
@@ -75,6 +76,18 @@ export const handleMe: RequestHandler = async (req, res, next) => {
       user.emailVerified
     );
     res.status(200).json(await withAdminFlag(profile, user.uid, user.email));
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** POST /api/auth/display-name-notice/ack — the player has been told that the
+ *  name they would have had was taken. Idempotent: acknowledging a notice that
+ *  is not there is a no-op, not a 404, because two tabs will both send it. */
+export const handleAckDisplayNameNotice: RequestHandler = async (req, res, next) => {
+  try {
+    await authUserRepository.clearDisplayNameNotice(req.user!.uid);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }
