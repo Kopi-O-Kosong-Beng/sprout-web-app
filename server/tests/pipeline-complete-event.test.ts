@@ -206,14 +206,29 @@ describe('pipeline complete event species scoping', () => {
     expect(mockSpriteSaves).toEqual(['fern', 'fern']);
   });
 
-  it('scopes a failed identification to the scanning user', async () => {
+  /**
+   * A failed identification used to become "Unknown Plant Species" and run to
+   * completion — a render, a cutout and a judge call spent on a name nobody
+   * chose, then filed under a label that says nothing. It stops and asks now,
+   * so there is no sprite to scope until the player has answered.
+   */
+  it('stops and asks rather than generating for a plant it could not name', async () => {
     mockIdentifyPlant.mockResolvedValue({ error: 'Not identified as a plant.', needsName: true });
 
-    await runScan(SCANNER);
-    await runScan(FINDER);
+    const { frames } = await runScan(SCANNER);
 
-    expect(mockSpriteSaves[0]).toContain('unknown_plant_species__u_');
-    expect(mockSpriteSaves[0]).not.toBe(mockSpriteSaves[1]);
+    expect(frames.map((f) => f.event)).toContain('needs_name');
+    expect(frames.map((f) => f.event)).not.toContain('complete');
+    expect(mockSpriteSaves).toHaveLength(0);
+  });
+
+  it('scopes the named retry to the scanning user', async () => {
+    mockIdentifyPlant.mockResolvedValue({ error: 'Not identified as a plant.', needsName: true });
+
+    // What the naming dialog sends back on the second run.
+    await runScan(SCANNER, { customName: 'Mystery Fern' });
+
+    expect(mockSpriteSaves[0]).toContain('mystery_fern');
   });
 
   it('scopes the keyless mock identification to the scanning user', async () => {

@@ -102,6 +102,9 @@ async function startScan() {
   );
   const trigger = await screen.findByRole('button', { name: /^test$/i });
   await user.click(trigger);
+  // Returned so a test can carry on interacting — the naming flow answers a
+  // dialog after the run stops.
+  return user;
 }
 
 describe('ScanPage save outcome', () => {
@@ -245,5 +248,43 @@ describe('ScanPage save outcome', () => {
     expect(screen.queryByText(/no connection/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  /**
+   * NameDialog has existed since the Android port and nothing ever opened it:
+   * when Plant.id could not identify the photo, the server substituted
+   * "Unknown Plant Species" and carried on, spending a render on a name nobody
+   * chose. It asks now, and the answer comes back as the run's customName.
+   */
+  it('asks the player to name a plant it could not identify', async () => {
+    scriptStream([
+      { event: 'step_start', step: '1' },
+      { event: 'needs_name', step: '1', error: 'Not identified as a plant.' },
+    ]);
+    await startScan();
+
+    expect(await screen.findByText(/name this plant/i)).toBeInTheDocument();
+    expect(screen.getByText(/couldn't identify it automatically/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /generate/i })).toBeInTheDocument();
+  });
+
+  it('re-runs with the name the player typed', async () => {
+    scriptStream([
+      { event: 'step_start', step: '1' },
+      { event: 'needs_name', step: '1', error: 'Not identified as a plant.' },
+    ]);
+    const user = await startScan();
+
+    await user.type(await screen.findByPlaceholderText(/rose, sunflower/i), 'Mystery Fern');
+    await user.click(screen.getByRole('button', { name: /generate/i }));
+
+    // The name travels as customName on the second run — the path the server's
+    // override branch already honoured.
+    expect(streamPipeline).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ customName: 'Mystery Fern' }),
+      expect.any(Function),
+      expect.anything()
+    );
   });
 });
