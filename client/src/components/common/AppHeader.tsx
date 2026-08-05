@@ -70,6 +70,11 @@ export default function AppHeader() {
   //              that immediately redirects.
   const signedIn = status === 'authenticated' || status === 'unverified';
   const verified = status === 'authenticated';
+  // Firebase has not yet said who this is. Until it does, the header must not
+  // claim "signed out" — on a fresh tab a signed-in player was shown
+  // Sign up / Log in and greyed game tabs for ~2s before the swap. Render a
+  // neutral pending state instead of the wrong one.
+  const authPending = status === 'loading';
   const identity = profile?.displayName ?? firebaseUser?.email ?? 'Account';
   const visibleNavItems = navItems.filter(
     (item) => !item.requiresSuperAdmin || profile?.isSuperAdmin
@@ -115,14 +120,17 @@ export default function AppHeader() {
               !visibleNavItems[index - 1]?.requiresSuperAdmin && (
                 <span className="nav-divider" aria-hidden="true" />
               )}
-            {isNavigationLocked || (item.requiresAuth && !verified) ? (
+            {isNavigationLocked ||
+            (item.requiresAuth && (authPending || !verified)) ? (
               <span
                 className="nav-link is-disabled"
                 aria-disabled="true"
                 title={
                   isNavigationLocked
                     ? navigationDisabledTitle
-                    : 'Log in to access'
+                    : authPending
+                      ? 'Checking session…'
+                      : 'Log in to access'
                 }
               >
                 {item.label}
@@ -143,7 +151,7 @@ export default function AppHeader() {
       </nav>
 
       <div className="header-actions">
-        {signedIn ? (
+        {authPending ? null : signedIn ? (
           <>
             <span className="header-user" title={firebaseUser?.email ?? undefined}>
               {identity}

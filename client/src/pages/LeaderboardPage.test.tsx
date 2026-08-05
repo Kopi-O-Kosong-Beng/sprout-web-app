@@ -152,6 +152,43 @@ describe('LeaderboardPage', () => {
     expect(await screen.findByText(/No battles fought yet/i)).toBeInTheDocument();
   });
 
+  /*
+   * The mount-race that told a ranked player "you are not ranked yet": on a
+   * fresh tab the page mounted and fetched before Firebase restored the
+   * session, so the request carried no token and the server saw an anonymous
+   * caller. The page must hold the fetch until auth settles, then fetch with
+   * the session attached.
+   */
+  it('does not fetch while auth is still restoring, then fetches once it settles', async () => {
+    apiMocks.getLeaderboards.mockResolvedValue(boards());
+    const view = render(
+      <MemoryRouter initialEntries={['/leaderboard']}>
+        <AuthContext.Provider value={authValue('loading')}>
+          <Routes>
+            <Route path="/leaderboard" element={<LeaderboardPage />} />
+          </Routes>
+        </AuthContext.Provider>
+      </MemoryRouter>
+    );
+
+    // While auth is restoring: spinner, and crucially no anonymous request.
+    expect(screen.getByText(/Counting the standings/i)).toBeInTheDocument();
+    expect(apiMocks.getLeaderboards).not.toHaveBeenCalled();
+
+    view.rerender(
+      <MemoryRouter initialEntries={['/leaderboard']}>
+        <AuthContext.Provider value={authValue('authenticated')}>
+          <Routes>
+            <Route path="/leaderboard" element={<LeaderboardPage />} />
+          </Routes>
+        </AuthContext.Provider>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText(/You are #2 of 2 with 65 XP/i)).toBeInTheDocument();
+    expect(apiMocks.getLeaderboards).toHaveBeenCalledTimes(1);
+  });
+
   it('offers a retry when the request fails', async () => {
     const user = userEvent.setup();
     apiMocks.getLeaderboards.mockRejectedValueOnce(new Error('offline'));
