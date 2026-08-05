@@ -43,10 +43,67 @@ export function resolveKeys<T extends Record<string, () => string>>(
   return resolved;
 }
 
+/** Fallback when MIN_CONFIDENCE_THRESHOLD is unset or unparseable. */
+const DEFAULT_MIN_CONFIDENCE = 0.7;
+
+/**
+ * Whether to keep every upstream credential out of the pipeline's hands.
+ *
+ * USE_MOCK_APIS was declared in .env, .env.example and render.yaml and read by
+ * nothing, while README.md told developers it meant "never call real
+ * plant.id/Gemma/FLUX in dev". Both were true at once: the flag said mock, the
+ * .env beside it held live funded keys, and every local scan spent real quota
+ * on five services. render.yaml pinned it true on the production deploy, where
+ * an operator would read it as "production is stubbed".
+ *
+ * It works by withholding the keys rather than by branching at each call site.
+ * Every hop already has a keyless path — identifyPlant returns its mock
+ * species, generateSprite draws the procedural placeholder, promptCraft falls
+ * to nameOnly, removeBackgroundSafe keeps the raw render — so this routes
+ * through behaviour that already exists and is already tested, instead of
+ * adding a second set of branches that could drift from the first.
+ */
+function mockingExternalApis(): boolean {
+  return process.env.USE_MOCK_APIS === 'true';
+}
+
+/** A credential, unless we are mocking — in which case nobody gets one. */
+function liveKey(...values: (string | undefined)[]): string | null {
+  if (mockingExternalApis()) return null;
+  return values.find((value) => value) ?? null;
+}
+
 export const serverEnv = {
   /** Plant.id v3 species identification. PLANTID_API_KEY is this repo's name. */
   get plantApiKey() {
-    return process.env.PLANT_API_KEY || process.env.PLANTID_API_KEY || null;
+    return liveKey(process.env.PLANT_API_KEY, process.env.PLANTID_API_KEY);
+  },
+
+  /**
+   * How sure Plant.id has to be before a scan is allowed to become a creature,
+   * as a probability in 0..1.
+   *
+   * This has been declared in .env, .env.example and render.yaml since the
+   * pipeline was written, and until now nothing read it: every identification
+   * proceeded to generation no matter how unsure, so a 12%-confidence guess
+   * still spent a render and landed a wrong species in the player's archive.
+   *
+   * Out-of-range or unparseable values fall back rather than throw — a typo in
+   * a deployment variable should not take the scan route down — but 0 is
+   * honoured, since disabling the gate is a legitimate choice.
+   */
+  get minConfidenceThreshold() {
+    const raw = process.env.MIN_CONFIDENCE_THRESHOLD?.trim();
+    if (!raw) return DEFAULT_MIN_CONFIDENCE;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+      console.warn(
+        `MIN_CONFIDENCE_THRESHOLD="${raw}" is not a probability between 0 and 1; ` +
+          `using ${DEFAULT_MIN_CONFIDENCE}.`
+      );
+      return DEFAULT_MIN_CONFIDENCE;
+    }
+    return parsed;
   },
 
   /**
@@ -57,12 +114,12 @@ export const serverEnv = {
    * stays accepted as a fallback for either.
    */
   get gemmaApiKey() {
-    return process.env.GEMMA_API_KEY || process.env.NVIDIA_API_KEY || null;
+    return liveKey(process.env.GEMMA_API_KEY, process.env.NVIDIA_API_KEY);
   },
 
   /** NVIDIA credential for the Flux.2 Klein image endpoint. */
   get fluxApiKey() {
-    return process.env.FLUX_API_KEY || process.env.NVIDIA_API_KEY || null;
+    return liveKey(process.env.FLUX_API_KEY, process.env.NVIDIA_API_KEY);
   },
 
   /**
@@ -74,7 +131,7 @@ export const serverEnv = {
    * working scan.
    */
   get geminiKey() {
-    return process.env.GEMINI_KEY || process.env.GEMINI_API_KEY || null;
+    return liveKey(process.env.GEMINI_KEY, process.env.GEMINI_API_KEY);
   },
 
   /**
@@ -82,7 +139,7 @@ export const serverEnv = {
    * the raw render, so a missing key degrades rather than failing.
    */
   get withoutbgKey() {
-    return process.env.WITHOUTBG_KEY || process.env.REMOVE_BG_API_KEY || null;
+    return liveKey(process.env.WITHOUTBG_KEY, process.env.REMOVE_BG_API_KEY);
   },
 
   /** Overridable so a retired model can be swapped without a code change. */

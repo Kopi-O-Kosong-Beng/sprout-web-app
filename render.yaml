@@ -13,8 +13,6 @@ services:
         value: production
       - key: NODE_VERSION
         value: "22.13.1"
-      - key: STORAGE_MODE
-        value: local
       - key: AUTH_DEV_BYPASS
         value: "false"
       - key: DEMO_AUTH_BYPASS
@@ -50,8 +48,10 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      # Was "true" while nothing read it. Now that it does, leaving it true
+      # would serve every player a placeholder drawing instead of their plant.
       - key: USE_MOCK_APIS
-        value: "true"
+        value: "false"
       - key: MIN_CONFIDENCE_THRESHOLD
         value: "0.70"
       - key: CORS_ORIGIN

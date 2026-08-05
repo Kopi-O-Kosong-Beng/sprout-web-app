@@ -1,22 +1,29 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
-import { NavigationLockProvider } from './context/NavigationLockProvider';
-import AppHeader from './components/common/AppHeader';
-import ProtectedRoute from './components/common/ProtectedRoute';
-import LandingPage from './pages/LandingPage';
-import HomePage from './pages/HomePage';
-import LoginPage from './pages/LoginPage';
-import SignupPage from './pages/SignupPage';
-import VerifyEmailPage from './pages/VerifyEmailPage';
-import ContactPage from './pages/ContactPage';
-import ArchivePage from './pages/ArchivePage';
-import ScanPage from './pages/ScanPage';
-import BattlePage from './pages/BattlePage';
-import LeaderboardPage from './pages/LeaderboardPage';
-import BackendTestPage from './pages/BackendTestPage';
-import AdminPage from './pages/AdminPage';
-import StudioPage from './pages/StudioPage';
-import './App.css';
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+} from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext";
+import { NavigationLockProvider } from "./context/NavigationLockProvider";
+import AppHeader from "./components/common/AppHeader";
+import ProtectedRoute from "./components/common/ProtectedRoute";
+import { ToastProvider } from "./components/common/Toast";
+import LandingPage from "./pages/LandingPage";
+import HomePage from "./pages/HomePage";
+import LoginPage from "./pages/LoginPage";
+import SignupPage from "./pages/SignupPage";
+import VerifyEmailPage from "./pages/VerifyEmailPage";
+import ContactPage from "./pages/ContactPage";
+import ArchivePage from "./pages/ArchivePage";
+import ScanPage from "./pages/ScanPage";
+import BattlePage from "./pages/BattlePage";
+import LeaderboardPage from "./pages/LeaderboardPage";
+import BackendTestPage from "./pages/BackendTestPage";
+import AdminPage from "./pages/AdminPage";
+import StudioPage from "./pages/StudioPage";
+import "./App.css";
 
 /**
  * Chrome for the document pages: the painted app shell and the primary nav.
@@ -46,94 +53,96 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <NavigationLockProvider>
-          <Routes>
-            <Route element={<DocumentLayout />}>
-              <Route path="/" element={<LandingPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/signup" element={<SignupPage />} />
-              <Route path="/verify-email" element={<VerifyEmailPage />} />
-              <Route path="/contact" element={<ContactPage />} />
-              {/* Courtesy gate; the server's SUPER_ADMIN_EMAILS allowlist is
+        <ToastProvider>
+          <NavigationLockProvider>
+            <Routes>
+              <Route element={<DocumentLayout />}>
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
+                <Route path="/verify-email" element={<VerifyEmailPage />} />
+                <Route path="/contact" element={<ContactPage />} />
+                {/* Courtesy gate; the server's SUPER_ADMIN_EMAILS allowlist is
                   the real authority and returns 403 to everyone else. */}
-              <Route
-                path="/admin"
-                element={
-                  <ProtectedRoute requireSuperAdmin>
-                    <AdminPage />
-                  </ProtectedRoute>
-                }
-              />
-              {/* The backend test bench drives real endpoints against the real
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute requireSuperAdmin>
+                      <AdminPage />
+                    </ProtectedRoute>
+                  }
+                />
+                {/* The backend test bench drives real endpoints against the real
                   project — account signup among them — so it sits behind the
                   same operator allowlist as /admin rather than being open to
                   the web. */}
-              <Route
-                path="/test"
-                element={
-                  <ProtectedRoute requireSuperAdmin>
-                    <BackendTestPage />
-                  </ProtectedRoute>
-                }
-              />
-            </Route>
+                <Route
+                  path="/test"
+                  element={
+                    <ProtectedRoute requireSuperAdmin>
+                      <BackendTestPage />
+                    </ProtectedRoute>
+                  }
+                />
+              </Route>
 
-            <Route element={<GameLayout />}>
-              <Route
-                path="/home"
-                element={
-                  <ProtectedRoute>
-                    <HomePage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/scan"
-                element={
-                  <ProtectedRoute>
-                    <ScanPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/archive"
-                element={
-                  <ProtectedRoute>
-                    <ArchivePage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/battle"
-                element={
-                  <ProtectedRoute>
-                    <BattlePage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/leaderboard"
-                element={
-                  <ProtectedRoute>
-                    <LeaderboardPage />
-                  </ProtectedRoute>
-                }
-              />
-              {/* The sprite-pipeline studio brings its own sidebar and top bar,
+              <Route element={<GameLayout />}>
+                <Route
+                  path="/home"
+                  element={
+                    <ProtectedRoute>
+                      <HomePage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/scan"
+                  element={
+                    <ProtectedRoute>
+                      <ScanPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/archive"
+                  element={
+                    <ProtectedRoute>
+                      <ArchivePage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/battle"
+                  element={
+                    <ProtectedRoute>
+                      <BattlePage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/leaderboard"
+                  element={
+                    <ProtectedRoute>
+                      <LeaderboardPage />
+                    </ProtectedRoute>
+                  }
+                />
+                {/* The sprite-pipeline studio brings its own sidebar and top bar,
                   so it also renders outside the app header. */}
-              <Route
-                path="/studio"
-                element={
-                  <ProtectedRoute requireSuperAdmin>
-                    <StudioPage />
-                  </ProtectedRoute>
-                }
-              />
-            </Route>
+                <Route
+                  path="/studio"
+                  element={
+                    <ProtectedRoute requireSuperAdmin>
+                      <StudioPage />
+                    </ProtectedRoute>
+                  }
+                />
+              </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </NavigationLockProvider>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </NavigationLockProvider>
+        </ToastProvider>
       </AuthProvider>
     </BrowserRouter>
   );
