@@ -125,19 +125,41 @@ with its email already verified, so no verification link has to be collected
 from a shared inbox. Re-running it is safe and is also how you reset a forgotten
 admin password: the uid, PVE stats and history survive.
 
-Creating the account is not what grants access — the address must also be in
-`SUPER_ADMIN_EMAILS` in `server/.env`, the operator allowlist that gates
-`/api/admin` and `/api/platform` (`ADMIN_EMAILS` is an advisory badge only).
-The allowlist is the only authority (it fails closed when empty), and the seed
-warns if the address is missing from it. Restart the backend after editing it.
+Creating the account is not what grants access. Add `--superadmin` to set the
+Firestore flag, or put the address in `SUPER_ADMIN_EMAILS` in `server/.env` (`ADMIN_EMAILS` is
+an advisory badge only and opens nothing) — either
+grant alone is enough, and both fail closed. The seed warns when the account
+ends up with neither.
 
-**Where login lands.** Everyone enters at `/`, the public landing page. After a
-successful login a super admin goes to `/admin` and everyone else goes to
-`/home`, the in-game hub — unless a protected route bounced them, in which case
-they return to the page they originally asked for. The frontend reads this from
-the `isSuperAdmin` field on `GET /api/auth/me`, which the server computes from
-`SUPER_ADMIN_EMAILS`; it decides navigation only, and `/api/admin` re-checks
-the allowlist on every request.
+```bash
+npm run seed:admin -w server -- sprout@gmail.com 'the-password' --superadmin
+```
+
+To promote someone who already has an account, use **Admin → Accounts → Make
+superadmin** rather than the seed: re-running the seed resets that account's
+password. See [CMD.md](CMD.md) for the full command reference.
+Restart the backend after editing it.
+
+**Where login lands.** Everyone enters at `/`, the public landing page, and
+that is also where a signed-in player returns — the separate `/home` hub is
+archived (`HomePage.tsx` is still in the tree, nothing routes to it). After a
+successful login a superadmin goes to `/admin` and everyone else goes to `/`,
+unless a protected route bounced them, in which case they return to the page
+they originally asked for.
+
+**Who sees what.** One nav, three audiences:
+
+| | visitor (signed out or unverified) | player | superadmin |
+|---|---|---|---|
+| Home, Ranking, Contact | open | open | open |
+| Scan, Archive, PVE Battle | greyed out | open | open |
+| Admin, Studio, API Test, Ticket Manager | hidden | hidden | open |
+
+Greyed vs hidden is deliberate: greyed means "verify your account and you are
+in", hidden means no amount of logging in helps, so showing it disabled would
+be a lie. The frontend reads `isAdmin` / `isSuperAdmin` from
+`GET /api/auth/me`; it decides navigation only, and every `/api/admin` and
+`/api/platform` request re-resolves the grant server-side.
 
 ### Step 3: Create frontend env file
 
@@ -356,6 +378,16 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 **Run the tests:** `npm test`. Backend integration tests run against the local
 `sprout-test` Firestore Emulator and never your live Firebase project.
 
+Two environment gotchas worth knowing before you blame the code:
+
+- **The emulator suite needs Java 11+.** On an older JDK the emulator exits
+  immediately and no test runs. `java -version` to check. This is the suite that
+  covers the auth, admin and ticket APIs, so it is the one to get working.
+- **On Windows, vitest's default fork pool times out.** Run the client suite as
+  `npx vitest run --pool=threads --no-file-parallelism` from `client/`.
+
+Every command in the repo, with these caveats spelled out: [`CMD.md`](CMD.md).
+
 ## 4. Current API (more coming — check back)
 
 | Method | Endpoint | Auth | What it does |
@@ -365,7 +397,10 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 | GET | `/api/auth/me` | Bearer token | current authenticated profile |
 | POST | `/api/auth/request-reset` | — | send 6-digit OTP via email log/SMTP |
 | POST | `/api/auth/verify-reset` | — | verify OTP and update password |
+| POST | `/api/auth/sign-in-method` | — | after a failed login: is this address Google-only? |
 | POST | `/api/query/submit` | — | create query ticket → `{refNumber}` |
+| POST | `/api/query/status` | — | check one ticket with its refNumber + filing email |
+| GET | `/api/leaderboard` | optional | XP and discovery boards; a login adds your own standing |
 | GET | `/api/avatar` | Bearer token | list caller's avatars (paginated) |
 | GET | `/api/avatar/:id` | Bearer token | one avatar (ownership-checked) |
 | POST | `/api/avatar` | Bearer token | save a scanned plant into the archive |
@@ -374,9 +409,12 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 | POST | `/api/battle/pve/start` | Bearer token | start a PVE battle with one of your avatars |
 | GET/POST | `/api/battle/pve/:sessionId`(`/action`, `/abandon`) | Bearer token | read a session, take a turn, concede |
 | POST | `/api/pipeline/run-stream` | Bearer token | the 4-hop sprite pipeline, streamed as SSE |
-| GET | `/api/admin/users`, `/api/admin/almanac` | Bearer + `SUPER_ADMIN_EMAILS` | accounts; taxonomy with finders |
-| POST | `/api/admin/cleanup` | Bearer + `SUPER_ADMIN_EMAILS` | dry-run / delete expired web uploads |
-| GET | `/api/platform/*` | Bearer + `SUPER_ADMIN_EMAILS` | pipeline portal: config, live provider health, tests |
+| GET | `/api/admin/users`, `/api/admin/almanac` | Bearer + superadmin | accounts; taxonomy with finders |
+| PATCH | `/api/admin/users/:uid/superadmin` | Bearer + superadmin | grant / revoke the operator grant |
+| GET | `/api/admin/tickets` | Bearer + superadmin | the Ticket Manager queue |
+| PATCH | `/api/admin/tickets/:id/status` | Bearer + superadmin | resolve / reopen, stamps the reply time |
+| POST | `/api/admin/cleanup` | Bearer + superadmin | dry-run / delete expired web uploads |
+| GET | `/api/platform/*` | Bearer + superadmin | pipeline portal: config, live provider health, tests |
 
 Two of these are deliberately unlike the rest. `GET /api/almanac` takes no auth
 at all — it is the landing page's centrepiece and is shown to visitors who have
@@ -456,5 +494,5 @@ Still stuck? Share only the minimal relevant, sanitized error lines. Redact toke
 
 ## Related repos
 
-- 🎨 **[Sprout_Dev_Platform](https://github.com/Neonat/Sprout_Dev_Platform)** — where the GenAI sprite pipeline and its operations portal come from. Both were migrated into this repo (`server/pipeline/`, `server/platform/`, `client/src/studio/`) rather than kept as a third app, and changes made there since are ported across periodically. The two copies are intentionally not identical: this one keeps its verified-login + `ADMIN_EMAILS` gate on the portal, accepts either spelling of each provider key, and adapts a handful of lines to this repo's stricter tsconfig. Commit messages on the ports record every deliberate divergence.
+- 🎨 **[Sprout_Dev_Platform](https://github.com/Neonat/Sprout_Dev_Platform)** — where the GenAI sprite pipeline and its operations portal come from. Both were migrated into this repo (`server/pipeline/`, `server/platform/`, `client/src/studio/`) rather than kept as a third app, and changes made there since are ported across periodically. The two copies are intentionally not identical: this one keeps its verified-login + superadmin gate on the portal, accepts either spelling of each provider key, and adapts a handful of lines to this repo's stricter tsconfig. Commit messages on the ports record every deliberate divergence.
 - 📚 **[sprout-knowledge-base](https://github.com/Kopi-O-Kosong-Beng/sprout-knowledge-base)** — the team's Obsidian vault: rubrics, use cases, design decisions, prof feedback, Q&As. When you wonder "why is it built this way?", the answer is there.

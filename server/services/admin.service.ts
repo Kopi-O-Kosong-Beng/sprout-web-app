@@ -14,6 +14,12 @@ export interface AdminAccountSummary {
   displayName: string;
   isVerified: boolean;
   isAdmin: boolean;
+  /** The persisted grant. */
+  isSuperAdmin: boolean;
+  /** True when the allowlist alone is carrying this account. The dashboard
+   *  greys out revoke for these rows: clearing the flag would not remove the
+   *  grant, so offering the button would be a lie. */
+  isAllowlisted: boolean;
   pveXp: number;
   pveWins: number;
   pveLosses: number;
@@ -44,12 +50,16 @@ export async function listAccounts(): Promise<AdminAccountSummary[]> {
     .map((doc) => {
       const data = doc.data() as Record<string, unknown>;
       const email = typeof data.email === 'string' ? data.email : '';
+      const isAllowlisted = isAdminEmail(email);
+      const isSuperAdmin = data.isSuperAdmin === true;
       return {
         id: doc.id,
         email,
         displayName: typeof data.displayName === 'string' ? data.displayName : '',
         isVerified: data.isVerified === true,
-        isAdmin: isAdminEmail(email),
+        isAdmin: isSuperAdmin || isAllowlisted,
+        isSuperAdmin,
+        isAllowlisted,
         pveXp: Number(data.pveXp ?? 0),
         pveWins: Number(data.pveWins ?? 0),
         pveLosses: Number(data.pveLosses ?? 0),
@@ -58,6 +68,61 @@ export async function listAccounts(): Promise<AdminAccountSummary[]> {
       };
     })
     .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+}
+
+/**
+ * Grants or revokes the superadmin flag on another account.
+ *
+ * Self-demotion is refused for the same reason self-deletion is: the operator
+ * holding the console should not be able to lock themselves out of it with one
+ * click and no confirmation. Promoting yourself is equally pointless — you are
+ * already here — so the rule is simply "not your own row".
+ *
+ * Revoking an allowlisted account is refused rather than silently ineffective:
+ * ADMIN_EMAILS would keep granting access, and a dashboard that reports success
+ * while access continues is worse than one that explains why it cannot.
+ */
+export async function setSuperAdmin(
+  targetUid: string,
+  requesterUid: string,
+  isSuperAdmin: boolean
+): Promise<AdminAccountSummary> {
+  if (targetUid === requesterUid) {
+    throw new AdminOperationError(
+      400,
+      'You cannot change your own superadmin status.'
+    );
+  }
+
+  const profile = await authUserRepository.getById(targetUid);
+  if (!profile) {
+    throw new AdminOperationError(404, 'Account not found.');
+  }
+
+  const isAllowlisted = isAdminEmail(profile.email);
+  if (!isSuperAdmin && isAllowlisted) {
+    throw new AdminOperationError(
+      409,
+      'This account is granted by the ADMIN_EMAILS allowlist. Remove it there instead.'
+    );
+  }
+
+  await authUserRepository.setSuperAdmin(targetUid, isSuperAdmin);
+
+  return {
+    id: profile.id,
+    email: profile.email,
+    displayName: profile.displayName,
+    isVerified: profile.isVerified,
+    isAdmin: isSuperAdmin || isAllowlisted,
+    isSuperAdmin,
+    isAllowlisted,
+    pveXp: profile.pveXp,
+    pveWins: profile.pveWins,
+    pveLosses: profile.pveLosses,
+    createdAt: profile.createdAt ?? null,
+    lastLogin: profile.lastLogin ?? null,
+  };
 }
 
 /** Deletes the Firebase identity and the Sprout profile.

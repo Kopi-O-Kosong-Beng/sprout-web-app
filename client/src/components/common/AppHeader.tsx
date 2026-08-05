@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useNavigationLock } from '../../hooks/useNavigationLock';
@@ -7,26 +8,52 @@ interface NavItem {
   to: string;
   label: string;
   requiresAuth: boolean;
-  /** Hidden from non-operators rather than shown disabled: the disabled state
-   *  reads as "log in to access", which would be a lie here — no amount of
-   *  logging in gets a player past the server's SUPER_ADMIN_EMAILS allowlist. */
+  /** Hidden from non-superadmins rather than shown disabled: the disabled
+   *  state reads as "log in to access", which would be a lie here — no amount
+   *  of logging in gets a player the operator tools. */
   requiresSuperAdmin?: boolean;
 }
 
-/** `/home` is the in-game hub; `/` is the public landing page. Scan is reached
- *  from the hub, which is where the game's own design puts it. The operator
- *  tools — Studio, Admin, API Test — are grouped at the end so the player nav
- *  reads as one arc and the ops surface as another. */
+/**
+ * Three audiences, one list.
+ *
+ *   visitor (signed out or unverified)
+ *     open:    Home, Ranking, Contact
+ *     greyed:  Scan, Archive, PVE Battle
+ *   player
+ *     open:    all six
+ *   superadmin
+ *     open:    all six, then a divider, then Admin, Studio, API Test,
+ *              Ticket Manager
+ *
+ * `/` is both the public landing page and, once signed in, the home a player
+ * returns to — the separate "Play" hub at `/home` is archived, so Scan is
+ * reached from the nav directly rather than through an extra screen.
+ *
+ * Ranking sits with the public three: the boards read without a session, and
+ * the personal "where do I rank" half of that page is what needs an account.
+ *
+ * Order matters: everything a player uses comes first, then the operator tools
+ * as a trailing group. The divider is drawn before the first tool rather than
+ * hardcoded at an index, so it appears only when the tools do — a normal
+ * player never sees a rule with nothing after it.
+ */
 const navItems: NavItem[] = [
   { to: '/', label: 'Home', requiresAuth: false },
-  { to: '/home', label: 'Play', requiresAuth: true },
+  { to: '/scan', label: 'Scan', requiresAuth: true },
   { to: '/archive', label: 'Archive', requiresAuth: true },
   { to: '/battle', label: 'PVE Battle', requiresAuth: true },
-  { to: '/leaderboard', label: 'Ranking', requiresAuth: true },
+  { to: '/leaderboard', label: 'Ranking', requiresAuth: false },
   { to: '/contact', label: 'Contact', requiresAuth: false },
-  { to: '/studio', label: 'Studio', requiresAuth: true, requiresSuperAdmin: true },
   { to: '/admin', label: 'Admin', requiresAuth: true, requiresSuperAdmin: true },
+  { to: '/studio', label: 'Studio', requiresAuth: true, requiresSuperAdmin: true },
   { to: '/test', label: 'API Test', requiresAuth: true, requiresSuperAdmin: true },
+  {
+    to: '/tickets',
+    label: 'Ticket Manager',
+    requiresAuth: true,
+    requiresSuperAdmin: true,
+  },
 ];
 
 export default function AppHeader() {
@@ -34,8 +61,19 @@ export default function AppHeader() {
   const { isNavigationLocked } = useNavigationLock();
   const navigate = useNavigate();
 
+  // Two different questions, deliberately not the same flag.
+  //   signedIn — is there a session to show an identity and a log-out for?
+  //              An unverified account has one.
+  //   verified — may this account actually open the game screens? An
+  //              unverified account may not: ProtectedRoute bounces it to
+  //              /verify-email, so showing Scan as live would promise a page
+  //              that immediately redirects.
   const signedIn = status === 'authenticated' || status === 'unverified';
+  const verified = status === 'authenticated';
   const identity = profile?.displayName ?? firebaseUser?.email ?? 'Account';
+  const visibleNavItems = navItems.filter(
+    (item) => !item.requiresSuperAdmin || profile?.isSuperAdmin
+  );
 
   async function handleLogout() {
     if (isNavigationLocked) return;
@@ -68,12 +106,17 @@ export default function AppHeader() {
       )}
 
       <nav className="primary-nav" aria-label="Primary">
-        {navItems
-          .filter((item) => !item.requiresSuperAdmin || profile?.isSuperAdmin)
-          .map((item) =>
-            isNavigationLocked || (item.requiresAuth && !signedIn) ? (
+        {visibleNavItems.map((item, index) => (
+          <Fragment key={item.to}>
+            {/* Rule between the player tabs and the operator tools. Drawn
+                before the first tool in the rendered list, so it never trails
+                a nav that has no tools after it. */}
+            {item.requiresSuperAdmin &&
+              !visibleNavItems[index - 1]?.requiresSuperAdmin && (
+                <span className="nav-divider" aria-hidden="true" />
+              )}
+            {isNavigationLocked || (item.requiresAuth && !verified) ? (
               <span
-                key={item.to}
                 className="nav-link is-disabled"
                 aria-disabled="true"
                 title={
@@ -86,7 +129,6 @@ export default function AppHeader() {
               </span>
             ) : (
               <NavLink
-                key={item.to}
                 to={item.to}
                 end={item.to === '/'}
                 className={({ isActive }) =>
@@ -95,8 +137,9 @@ export default function AppHeader() {
               >
                 {item.label}
               </NavLink>
-            )
-          )}
+            )}
+          </Fragment>
+        ))}
       </nav>
 
       <div className="header-actions">
@@ -121,21 +164,10 @@ export default function AppHeader() {
             </button>
           </>
         ) : (
+          /* Sign up first, then Log in — the same order as the hero's
+             "Start Scanning (Sign Up)" / "I have an account" pair, so the eye
+             meets the two choices in one consistent order on the page. */
           <>
-            {isNavigationLocked ? (
-              <span
-                className="text-link is-disabled"
-                aria-disabled="true"
-                title={navigationDisabledTitle}
-              >
-                Log in
-              </span>
-            ) : (
-              <Link className="text-link" to="/login">
-                Log in
-              </Link>
-            )}
-            <span className="header-divider" aria-hidden="true" />
             {isNavigationLocked ? (
               <span
                 className="text-link is-disabled"
@@ -147,6 +179,20 @@ export default function AppHeader() {
             ) : (
               <Link className="text-link" to="/signup">
                 Sign up
+              </Link>
+            )}
+            <span className="header-divider" aria-hidden="true" />
+            {isNavigationLocked ? (
+              <span
+                className="text-link is-disabled"
+                aria-disabled="true"
+                title={navigationDisabledTitle}
+              >
+                Log in
+              </span>
+            ) : (
+              <Link className="text-link" to="/login">
+                Log in
               </Link>
             )}
           </>

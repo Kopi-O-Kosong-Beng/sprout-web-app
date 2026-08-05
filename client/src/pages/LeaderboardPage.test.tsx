@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Leaderboards } from '../services/sproutApi';
 import LeaderboardPage from './LeaderboardPage';
+import { AuthContext, type AuthContextValue } from '../context/AuthContext';
 
 const apiMocks = vi.hoisted(() => ({
   getLeaderboards: vi.fn(),
@@ -55,13 +56,30 @@ function boards(overrides: Partial<Leaderboards> = {}): Leaderboards {
   };
 }
 
-function renderPage() {
+/** Ranking reads without a session now, so the page asks useAuth which of the
+ *  two "where do I stand" lines to show. Default to a signed-in player: that is
+ *  what every assertion below was written against. */
+function authValue(status: AuthContextValue['status']): AuthContextValue {
+  return {
+    status,
+    firebaseUser: null,
+    profile: null,
+    login: vi.fn(),
+    loginWithGoogle: vi.fn(),
+    logout: vi.fn(),
+    refreshProfile: vi.fn(),
+  };
+}
+
+function renderPage(status: AuthContextValue['status'] = 'authenticated') {
   return render(
     <MemoryRouter initialEntries={['/leaderboard']}>
-      <Routes>
-        <Route path="/leaderboard" element={<LeaderboardPage />} />
-        <Route path="/battle" element={<h1>Battle page</h1>} />
-      </Routes>
+      <AuthContext.Provider value={authValue(status)}>
+        <Routes>
+          <Route path="/leaderboard" element={<LeaderboardPage />} />
+          <Route path="/battle" element={<h1>Battle page</h1>} />
+        </Routes>
+      </AuthContext.Provider>
     </MemoryRouter>
   );
 }

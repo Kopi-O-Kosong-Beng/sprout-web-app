@@ -68,7 +68,8 @@ function renderLogin(
         <Route path="/verify-email" element={<p>Verify your email to continue</p>} />
         <Route path="/archive" element={<p>Private archive</p>} />
         <Route path="/admin" element={<p>Sprout accounts dashboard</p>} />
-        <Route path="/home" element={<p>In-game hub</p>} />
+        {/* No /home route: the hub is archived, so a redirect there would
+            render nothing and fail loudly rather than quietly pass. */}
         <Route path="/" element={<p>Public landing page</p>} />
       </Routes>
     </MemoryRouter>
@@ -102,23 +103,26 @@ describe('LoginPage auth redirects', () => {
     expect(screen.getByText(/sprout accounts dashboard/i)).toBeInTheDocument();
   });
 
-  it('routes a player into the game, not back to the landing page', () => {
+  // The separate /home hub is archived: '/' is where a signed-in player lands
+  // and where the nav's Home tab points, so login goes there rather than to a
+  // game screen the player did not ask for.
+  it('routes a player to the landing page, which is now their home', () => {
     renderLogin('authenticated', { from: null, profile: profileFor(false) });
 
-    expect(screen.getByText(/in-game hub/i)).toBeInTheDocument();
-    expect(screen.queryByText(/public landing page/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/public landing page/i)).toBeInTheDocument();
+    expect(screen.queryByText(/in-game hub/i)).not.toBeInTheDocument();
   });
 
   // The tiers are distinct: a plain ADMIN_EMAILS badge-holder is not an
   // operator, and sending them to /admin would just bounce them off the
   // route guard.
-  it('routes a plain admin to the game hub, not the operator dashboard', () => {
+  it('routes a plain admin to the landing page, not the operator dashboard', () => {
     renderLogin('authenticated', {
       from: null,
       profile: { ...profileFor(false), isAdmin: true, isSuperAdmin: false },
     });
 
-    expect(screen.getByText(/in-game hub/i)).toBeInTheDocument();
+    expect(screen.getByText(/public landing page/i)).toBeInTheDocument();
     expect(screen.queryByText(/sprout accounts dashboard/i)).not.toBeInTheDocument();
   });
 
@@ -133,10 +137,10 @@ describe('LoginPage auth redirects', () => {
 
   // /api/auth/me can fail transiently, leaving status authenticated with no
   // profile. That must land somewhere usable rather than blank.
-  it('falls back to the game hub when the profile has not loaded', () => {
+  it('falls back to the landing page when the profile has not loaded', () => {
     renderLogin('authenticated', { from: null, profile: null });
 
-    expect(screen.getByText(/in-game hub/i)).toBeInTheDocument();
+    expect(screen.getByText(/public landing page/i)).toBeInTheDocument();
   });
 
   it('shows mode-neutral copy after requesting a reset code', async () => {
@@ -232,7 +236,7 @@ describe('LoginPage holds the redirect until Google sign-in settles', () => {
       <MemoryRouter initialEntries={['/login']}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/home" element={<p>In-game hub</p>} />
+          <Route path="/" element={<p>Public landing page</p>} />
         </Routes>
       </MemoryRouter>
     );
@@ -244,10 +248,10 @@ describe('LoginPage holds the redirect until Google sign-in settles', () => {
     authState.status = 'authenticated';
     rerender(tree());
 
-    expect(screen.queryByText('In-game hub')).not.toBeInTheDocument();
+    expect(screen.queryByText('Public landing page')).not.toBeInTheDocument();
 
     finishSignIn?.();
-    expect(await screen.findByText('In-game hub')).toBeInTheDocument();
+    expect(await screen.findByText('Public landing page')).toBeInTheDocument();
   });
 
   it('redirects once the sign-in call has returned', async () => {
@@ -255,6 +259,6 @@ describe('LoginPage holds the redirect until Google sign-in settles', () => {
 
     renderLogin('authenticated', { from: null });
 
-    expect(await screen.findByText('In-game hub')).toBeInTheDocument();
+    expect(await screen.findByText('Public landing page')).toBeInTheDocument();
   });
 });

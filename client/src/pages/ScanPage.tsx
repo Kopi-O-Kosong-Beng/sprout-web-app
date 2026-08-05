@@ -232,8 +232,14 @@ export default function ScanPage() {
     abortRef.current = controller;
     let finalSprite: string | null = null;
     let finalName = customName ?? '';
-    /** Set when the server gives up on a too-unsure identification. */
-    let lowConfidence: { name: string; probability: number; threshold: number } | null = null;
+    /** Set when the server gives up on a too-unsure identification.
+     *
+     *  Widened on the initializer rather than annotated: the only writer is the
+     *  stream callback below, and control flow analysis does not look inside a
+     *  nested function. A plain `: T | null = null` would leave this pinned to
+     *  `null` for the rest of the run, so the read after the stream could not
+     *  narrow back to the object. */
+    let lowConfidence = null as { name: string; probability: number; threshold: number } | null;
     let savedOutcome: { saved: boolean; saveError?: string; discovery: ScanDiscovery | null } = {
       saved: true,
       discovery: null,
@@ -551,7 +557,7 @@ export default function ScanPage() {
 /** The scan stages, in order, for the progress stepper. */
 const SCAN_STEPS: { key: ScanStep; label: string }[] = [
   { key: 'identify', label: 'Identifying plant' },
-  { key: 'sprite', label: 'Creating sprite' },
+  { key: 'sprite', label: 'Creating Plantemon' },
   { key: 'finish', label: 'Finishing the art' },
 ];
 
@@ -770,7 +776,7 @@ function ResultDialog({
         download={`${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`}
         className="press pixel-button is-primary mt-4 block w-full px-2 py-2 text-center text-[9px]"
       >
-        Save sprite
+        Save Plantemon
       </a>
       <button
         type="button"

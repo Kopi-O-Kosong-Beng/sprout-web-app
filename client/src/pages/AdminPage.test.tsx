@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AdminPage from './AdminPage';
+import { AuthContext, type AuthContextValue } from '../context/AuthContext';
+import type { AuthProfile } from '../services/sproutApi';
 
 const apiMocks = vi.hoisted(() => ({
   listAdminAccounts: vi.fn(),
@@ -10,6 +12,7 @@ const apiMocks = vi.hoisted(() => ({
   getAdminAlmanac: vi.fn(),
   getApiHealth: vi.fn(),
   runAdminCleanup: vi.fn(),
+  setAccountSuperAdmin: vi.fn(),
 }));
 
 vi.mock('../services/sproutApi', () => apiMocks);
@@ -59,6 +62,8 @@ const ACCOUNTS = {
       displayName: 'Member',
       isVerified: true,
       isAdmin: false,
+      isSuperAdmin: false,
+      isAllowlisted: false,
       pveXp: 40,
       pveWins: 2,
       pveLosses: 1,
@@ -71,6 +76,8 @@ const ACCOUNTS = {
       displayName: 'Sprout Team',
       isVerified: true,
       isAdmin: true,
+      isSuperAdmin: true,
+      isAllowlisted: false,
       pveXp: 0,
       pveWins: 0,
       pveLosses: 0,
@@ -81,10 +88,35 @@ const ACCOUNTS = {
   total: 2,
 };
 
-function renderAdmin() {
+/** The signed-in operator. Deliberately not one of the fixture rows, so both
+ *  of them offer a promote/revoke control rather than "Your account". */
+const OPERATOR: AuthProfile = {
+  uid: 'uid-operator',
+  email: 'operator@example.com',
+  displayName: 'Operator',
+  emailVerified: true,
+  isAdmin: true,
+  isSuperAdmin: true,
+};
+
+function authValue(profile: AuthProfile | null): AuthContextValue {
+  return {
+    status: profile ? 'authenticated' : 'signed-out',
+    firebaseUser: null,
+    profile,
+    login: vi.fn(),
+    loginWithGoogle: vi.fn(),
+    logout: vi.fn(),
+    refreshProfile: vi.fn(),
+  };
+}
+
+function renderAdmin(profile: AuthProfile | null = OPERATOR) {
   return render(
     <MemoryRouter>
-      <AdminPage />
+      <AuthContext.Provider value={authValue(profile)}>
+        <AdminPage />
+      </AuthContext.Provider>
     </MemoryRouter>
   );
 }
@@ -120,15 +152,15 @@ describe('AdminPage', () => {
     });
   });
 
-  it('lists every account and marks the admin', async () => {
+  it('lists every account and marks the superadmin', async () => {
     renderAdmin();
 
     expect(await screen.findByText('member@example.com')).toBeInTheDocument();
     expect(
-      within(rowFor('hello.sprout.team@gmail.com')).getByText('admin')
+      within(rowFor('hello.sprout.team@gmail.com')).getByText('superadmin')
     ).toBeInTheDocument();
     expect(
-      within(rowFor('member@example.com')).queryByText('admin')
+      within(rowFor('member@example.com')).queryByText('superadmin')
     ).not.toBeInTheDocument();
   });
 

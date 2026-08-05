@@ -15,8 +15,16 @@ firestore-debug.log
 **/*firebase-adminsdk*.json
 **/sprout-dev-*.json
 
+.env
 .env.local
+serviceAccountKey.json
 .env.*.local
+# Anything derived from a real .env — backups, per-host copies, scratch edits.
+# The bare `.env` rule above does not cover `.env.bak`, `.env.prod` or
+# `server/.env.bak.1234`, and a secrets file only has to be committable once.
+.env.*
+!.env.example
+
 
 # Dashboard-import env files with real secrets (deploy/README.md is tracked)
 deploy/*.env
@@ -26,3 +34,7 @@ deploy/*.env
 
 # Local agent execution ledger and review artifacts
 .superpowers/
+
+# Knowledge-graph tool output: a derived cache, rebuilt on demand. Committing it
+# put 201 files and 136k lines into one review.
+.graphify/

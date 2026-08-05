@@ -364,3 +364,300 @@ describe('DELETE /api/admin/users/:uid', () => {
     expect(doc.exists).toBe(true);
   });
 });
+
+/**
+ * The superadmin grant has two independent sources: the Firestore
+ * `isSuperAdmin` flag (the normal path) and the ADMIN_EMAILS allowlist
+ * (break-glass). Either alone is sufficient, and both fail closed.
+ *
+ * The allowlist half is covered by the authorisation block above, which runs
+ * with ADMIN_EMAILS set. These clear it, so only the flag can be granting.
+ */
+describe('superadmin grant via the Firestore flag', () => {
+  beforeEach(() => {
+    delete process.env.ADMIN_EMAILS;
+  });
+
+  it('admits a caller carrying the flag with no allowlist configured', async () => {
+    await seedProfile(MEMBER_UID, MEMBER_EMAIL, { isSuperAdmin: true });
+
+    const res = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', asMember());
+
+    expect(res.status).toBe(200);
+  });
+
+  it('denies a caller whose flag is absent', async () => {
+    await seedProfile(MEMBER_UID, MEMBER_EMAIL);
+
+    const res = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', asMember());
+
+    expect(res.status).toBe(403);
+  });
+
+  it('denies a caller whose flag is explicitly false', async () => {
+    await seedProfile(MEMBER_UID, MEMBER_EMAIL, { isSuperAdmin: false });
+
+    const res = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', asMember());
+
+    expect(res.status).toBe(403);
+  });
+
+  /* Fail closed on anything that is not the boolean true. A string "true"
+   * written by hand in the Firebase console must not buy account deletion. */
+  it.each([['true'], [1], ['yes'], [{}]])(
+    'denies a caller whose flag is %p rather than boolean true',
+    async (value) => {
+      await seedProfile(MEMBER_UID, MEMBER_EMAIL, { isSuperAdmin: value });
+
+      const res = await request(app)
+        .get('/api/admin/users')
+        .set('Authorization', asMember());
+
+      expect(res.status).toBe(403);
+    }
+  );
+
+  it('has no profile to read for an unknown uid, so denies', async () => {
+    const res = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', authorization('ghost-uid', 'ghost@example.com'));
+
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('PATCH /api/admin/users/:uid/superadmin', () => {
+  it('grants the flag to another account', async () => {
+    await seedProfile(MEMBER_UID, MEMBER_EMAIL);
+
+    const res = await request(app)
+      .patch(`/api/admin/users/${MEMBER_UID}/superadmin`)
+      .set('Authorization', asAdmin())
+      .send({ isSuperAdmin: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: MEMBER_UID, isSuperAdmin: true });
+
+    const stored = await getDb().collection('users').doc(MEMBER_UID).get();
+    expect(stored.data()?.isSuperAdmin).toBe(true);
+  });
+
+  it('revokes the flag again', async () => {
+    await seedProfile(MEMBER_UID, MEMBER_EMAIL, { isSuperAdmin: true });
+
+    const res = await request(app)
+      .patch(`/api/admin/users/${MEMBER_UID}/superadmin`)
+      .set('Authorization', asAdmin())
+      .send({ isSuperAdmin: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ isSuperAdmin: false });
+
+    const stored = await getDb().collection('users').doc(MEMBER_UID).get();
+    expect(stored.data()?.isSuperAdmin).toBe(false);
+  });
+
+  /* The operator holding the console must not be able to lock themselves out
+   * of it with one click, for the same reason they cannot delete their own
+   * account. */
+  it('refuses to change your own row', async () => {
+    await seedProfile(ADMIN_UID, ADMIN_EMAIL, { isSuperAdmin: true });
+
+    const res = await request(app)
+      .patch(`/api/admin/users/${ADMIN_UID}/superadmin`)
+      .set('Authorization', asAdmin())
+      .send({ isSuperAdmin: false });
+
+    expect(res.status).toBe(400);
+    const stored = await getDb().collection('users').doc(ADMIN_UID).get();
+    expect(stored.data()?.isSuperAdmin).toBe(true);
+  });
+
+  /* Clearing the flag on an allowlisted address would report success while
+   * ADMIN_EMAILS kept granting. Refusing is the honest answer. */
+  it('refuses to revoke an account the allowlist is granting', async () => {
+    const otherAdmin = 'second-admin@example.com';
+    process.env.ADMIN_EMAILS = `${ADMIN_EMAIL},${otherAdmin}`;
+    await seedProfile('second-admin-uid', otherAdmin, { isSuperAdmin: true });
+
+    const res = await request(app)
+      .patch('/api/admin/users/second-admin-uid/superadmin')
+      .set('Authorization', asAdmin())
+      .send({ isSuperAdmin: false });
+
+    expect(res.status).toBe(409);
+    const stored = await getDb().collection('users').doc('second-admin-uid').get();
+    expect(stored.data()?.isSuperAdmin).toBe(true);
+  });
+
+  it('rejects a non-boolean payload', async () => {
+    await seedProfile(MEMBER_UID, MEMBER_EMAIL);
+
+    const res = await request(app)
+      .patch(`/api/admin/users/${MEMBER_UID}/superadmin`)
+      .set('Authorization', asAdmin())
+      .send({ isSuperAdmin: 'true' });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('answers 404 for an account that does not exist', async () => {
+    const res = await request(app)
+      .patch('/api/admin/users/ghost-uid/superadmin')
+      .set('Authorization', asAdmin())
+      .send({ isSuperAdmin: true });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('is closed to a caller without the grant', async () => {
+    await seedProfile(MEMBER_UID, MEMBER_EMAIL);
+
+    const res = await request(app)
+      .patch(`/api/admin/users/${MEMBER_UID}/superadmin`)
+      .set('Authorization', asMember())
+      .send({ isSuperAdmin: true });
+
+    expect(res.status).toBe(403);
+  });
+});
+
+/**
+ * Ticket Manager — the operator side of the Contact form.
+ *
+ * Unlike the public status check this returns whole tickets, message body and
+ * reporter included: answering a ticket means reading it, and the route sits
+ * behind requireSuperAdmin.
+ */
+describe('Ticket Manager endpoints', () => {
+  /** `omit` drops a field entirely. Setting it to `undefined` through
+   *  `overrides` would not work: the Admin SDK rejects a present-but-undefined
+   *  value outright, so the write throws before the decoder is ever reached —
+   *  which is the opposite of what a legacy-row test wants to exercise. */
+  async function seedTicket(
+    id: string,
+    overrides: Record<string, unknown> = {},
+    omit: string[] = []
+  ): Promise<void> {
+    const document: Record<string, unknown> = {
+      id,
+      refNumber: `SPR-20260721-${id.slice(-4)}`,
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+      organisation: '',
+      subject: 'Scan failed on a fern',
+      category: 'general',
+      message: 'The camera returned nothing.',
+      status: 'open',
+      submitterEmailStatus: 'sent',
+      adminEmailStatus: 'sent',
+      lastEmailError: null,
+      notificationUpdatedAt: null,
+      resolvedAt: null,
+      createdAt: '2026-07-21T02:00:00.000Z',
+      updatedAt: '2026-07-21T02:00:00.000Z',
+      ...overrides,
+    };
+    for (const field of omit) delete document[field];
+    await getDb().collection('query_tickets').doc(id).set(document);
+  }
+
+  it('is closed to a caller without the grant', async () => {
+    await seedProfile(MEMBER_UID, MEMBER_EMAIL);
+
+    const res = await request(app)
+      .get('/api/admin/tickets')
+      .set('Authorization', asMember());
+
+    expect(res.status).toBe(403);
+  });
+
+  it('lists tickets newest first', async () => {
+    await seedTicket('ticket-0001', { createdAt: '2026-07-21T02:00:00.000Z' });
+    await seedTicket('ticket-0002', { createdAt: '2026-07-23T02:00:00.000Z' });
+
+    const res = await request(app)
+      .get('/api/admin/tickets')
+      .set('Authorization', asAdmin());
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(2);
+    expect(res.body.items.map((t: { id: string }) => t.id)).toEqual([
+      'ticket-0002',
+      'ticket-0001',
+    ]);
+  });
+
+  /* Regression: tickets written before the notification fields existed used to
+   * make the whole listing throw, taking every healthy ticket down with them.
+   * A queue that 500s because of one old row is worse than one that shows it. */
+  it('lists tickets that predate the notification fields', async () => {
+    await seedTicket('ticket-0003', {}, [
+      'submitterEmailStatus',
+      'adminEmailStatus',
+      'subject',
+    ]);
+    await seedTicket('ticket-0004');
+
+    const res = await request(app)
+      .get('/api/admin/tickets')
+      .set('Authorization', asAdmin());
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(2);
+  });
+
+  it('resolves a ticket and stamps the reply time', async () => {
+    await seedTicket('ticket-0005');
+
+    const res = await request(app)
+      .patch('/api/admin/tickets/ticket-0005/status')
+      .set('Authorization', asAdmin())
+      .send({ status: 'resolved' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('resolved');
+    expect(Number.isNaN(Date.parse(res.body.resolvedAt))).toBe(false);
+  });
+
+  it('clears the reply time when reopened', async () => {
+    await seedTicket('ticket-0006', {
+      status: 'resolved',
+      resolvedAt: '2026-07-23T09:30:00.000Z',
+    });
+
+    const res = await request(app)
+      .patch('/api/admin/tickets/ticket-0006/status')
+      .set('Authorization', asAdmin())
+      .send({ status: 'open' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ status: 'open', resolvedAt: null });
+  });
+
+  it('rejects an unknown status', async () => {
+    await seedTicket('ticket-0007');
+
+    const res = await request(app)
+      .patch('/api/admin/tickets/ticket-0007/status')
+      .set('Authorization', asAdmin())
+      .send({ status: 'closed' });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('answers 404 for a ticket that does not exist', async () => {
+    const res = await request(app)
+      .patch('/api/admin/tickets/ghost-ticket/status')
+      .set('Authorization', asAdmin())
+      .send({ status: 'resolved' });
+
+    expect(res.status).toBe(404);
+  });
+});

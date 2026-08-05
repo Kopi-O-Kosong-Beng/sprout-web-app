@@ -20,6 +20,9 @@ interface MockFirebaseUser {
   displayName?: string;
   emailVerified: boolean;
   password?: string;
+  /** What Firebase reports as linked to the account. The service reads this to
+   *  decide whether an account is Google-only; absent means password. */
+  providerData?: { providerId: string }[];
   metadata?: {
     lastSignInTime?: string;
   };
@@ -1259,5 +1262,116 @@ describe('password reset OTP flow', () => {
     expect(row.resetOtpHash).toBeNull();
     expect(row.resetOtpExpiresAt).toBeNull();
     expect(row.resetOtpFailedAttempts).toBe(0);
+  });
+});
+
+/**
+ * Google taking over an address that already has a password account.
+ *
+ * Firebase runs one account per email and treats Google as a trusted provider,
+ * so signing in with Google on an *unverified* password account keeps the uid
+ * and swaps the credential: the password is unlinked, and the password the user
+ * chose at signup stops working. Nothing about the Firestore profile changes,
+ * which is why the login screen used to answer "Invalid email or password" and
+ * leave them with no way forward.
+ */
+describe('auth provider takeover', () => {
+  function linkGoogle(uid: string): void {
+    const user = mockUsersByUid.get(uid)!;
+    const updated: MockFirebaseUser = {
+      ...user,
+      emailVerified: true,
+      providerData: [{ providerId: 'google.com' }],
+    };
+    mockUsersByUid.set(uid, updated);
+    if (updated.email) mockUsersByEmail.set(updated.email, updated);
+  }
+
+  it('tags a password signup as a password account', async () => {
+    const res = await request(app).post('/api/auth/signup').send({
+      email: 'tagged@example.com',
+      password: 'Password123!',
+      displayName: 'Tagged User',
+    });
+
+    expect(res.status).toBe(201);
+    const row = (await readUserByEmail('tagged@example.com'))!;
+    expect(row.authProvider).toBe('password');
+  });
+
+  it('retags the profile to google after a takeover, without deleting it', async () => {
+    const user = await createLocalUser({
+      email: 'taken-over@example.com',
+      isVerified: false,
+    });
+    // Progression hanging off this uid is exactly what deleting the document
+    // would destroy, so assert it survives.
+    await updateUser(user.id, { pveXp: 250, pveWins: 7 });
+    linkGoogle(user.id);
+    mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
+      uid: user.id,
+      email: user.email,
+      email_verified: true,
+    });
+
+    const res = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer google-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.authProvider).toBe('google');
+    const row = (await readUserById(user.id))!;
+    expect(row.authProvider).toBe('google');
+    expect(row.pveXp).toBe(250);
+    expect(row.pveWins).toBe(7);
+  });
+
+  it('tells the login screen that a taken-over address now uses Google', async () => {
+    const user = await createLocalUser({
+      email: 'now-google@example.com',
+      isVerified: false,
+    });
+    linkGoogle(user.id);
+
+    const res = await request(app)
+      .post('/api/auth/sign-in-method')
+      .send({ email: 'now-google@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.method).toBe('google');
+  });
+
+  /* Password accounts and addresses with no account must be indistinguishable,
+     or the endpoint becomes an account-enumeration oracle. */
+  it('answers unknown for a password account and for no account at all', async () => {
+    await createLocalUser({ email: 'still-password@example.com' });
+
+    const password = await request(app)
+      .post('/api/auth/sign-in-method')
+      .send({ email: 'still-password@example.com' });
+    const absent = await request(app)
+      .post('/api/auth/sign-in-method')
+      .send({ email: 'nobody@example.com' });
+
+    expect(password.status).toBe(absent.status);
+    expect(password.body).toEqual(absent.body);
+    expect(password.body.method).toBe('unknown');
+  });
+
+  it('points a manual signup at Google when the address is already Google-linked', async () => {
+    const user = await createLocalUser({
+      email: 'google-owned@example.com',
+      isVerified: false,
+    });
+    linkGoogle(user.id);
+
+    const res = await request(app).post('/api/auth/signup').send({
+      email: 'google-owned@example.com',
+      password: 'Password123!',
+      displayName: 'Someone Else',
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/continue with google/i);
   });
 });
