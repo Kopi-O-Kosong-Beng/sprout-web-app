@@ -1271,6 +1271,55 @@ describe('BattlePage', () => {
       await waitFor(() => expect(narration()).toBeNull(), { timeout: 2500 });
     }, 15000);
 
+    it('locks the move grid and Abandon while the turn plays out', async () => {
+      const resolved = battleSession({
+        turnNumber: 2,
+        player: { currentHp: 89 },
+        log: [
+          {
+            turnNumber: 1,
+            type: 'move_used',
+            actor: 'player',
+            moveId: 'vine-tap',
+            message: 'Fern Ward used Vine Tap.',
+          },
+          {
+            turnNumber: 1,
+            type: 'damage_dealt',
+            actor: 'bot',
+            amount: 12,
+            message: 'Thornback dealt 12 damage.',
+          },
+        ],
+      });
+      apiMocks.submitPveAction.mockResolvedValue(actionResult(resolved));
+
+      const view = await enterActiveBattle();
+      const narration = () => view.container.querySelector('.battle-narration');
+      await view.user.click(screen.getByRole('button', { name: /vine tap/i }));
+
+      // Mid-playback: the session in state is already turn 2, but the player
+      // has not seen turn 1 resolve. Rapid clicks here used to commit turn 2's
+      // move blind, skipping the intent and log entirely.
+      await waitFor(
+        () =>
+          expect(narration()?.textContent).toContain('Fern Ward used Vine Tap.'),
+        { timeout: 2000 }
+      );
+      expect(screen.getByRole('button', { name: /vine tap/i })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: /abandon match/i })
+      ).toBeDisabled();
+      expect(apiMocks.submitPveAction).toHaveBeenCalledTimes(1);
+
+      // Playback over: the grid unlocks for the turn the player can now see.
+      await waitFor(() => expect(narration()).toBeNull(), { timeout: 4000 });
+      expect(screen.getByRole('button', { name: /vine tap/i })).toBeEnabled();
+      expect(
+        screen.getByRole('button', { name: /abandon match/i })
+      ).toBeEnabled();
+    }, 15000);
+
     it('holds the outcome panel until the final turn finishes playing', async () => {
       const won = battleSession({
         status: 'won',

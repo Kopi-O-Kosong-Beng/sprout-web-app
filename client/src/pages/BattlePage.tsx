@@ -1006,6 +1006,12 @@ export default function BattlePage() {
     ? boundedEnergy(session.bot.energy, session.bot.maxEnergy)
     : null;
   const commandLocked = pendingCommand !== null;
+  /** The choreography window. The server has already answered — the session
+   *  in state is the NEXT turn — but the player has not seen this turn play
+   *  out yet. Moves clicked now would commit to an intent the player has
+   *  never been shown, which is how four rapid clicks advanced the game two
+   *  turns with one turn's log unseen. */
+  const turnResolving = cinematic !== null;
   const sessionCommandFailed = view === 'error' && session !== null;
   const showSelection = session === null && view !== 'loading';
 
@@ -1421,9 +1427,12 @@ export default function BattlePage() {
                         "being saved" note. Printing it four times said nothing
                         the spinner above does not, and adding four lines at once
                         is what made the board jump on click. The per-move notes
-                        that are actually about the move still show.
+                        that are actually about the move still show. Same for
+                        the cinematic window — the narration strip is already
+                        saying what is happening.
                       */
-                      const shownReason = commandLocked ? null : reason;
+                      const shownReason =
+                        commandLocked || turnResolving ? null : reason;
                       const reasonId = `move-reason-${index}`;
                       return (
                         <div className="move-slot" key={move.id}>
@@ -1434,13 +1443,15 @@ export default function BattlePage() {
                                 : ''
                             }`}
                             type="button"
-                            disabled={commandLocked}
+                            disabled={commandLocked || turnResolving}
                             aria-disabled={
-                              reason !== null && !commandLocked ? true : undefined
+                              reason !== null && !commandLocked && !turnResolving
+                                ? true
+                                : undefined
                             }
                             aria-describedby={shownReason ? reasonId : undefined}
                             onClick={() => {
-                              if (reason !== null) return;
+                              if (reason !== null || turnResolving) return;
                               void runAction(session.id, move.id, session.turnNumber);
                             }}
                           >
@@ -1508,7 +1519,9 @@ export default function BattlePage() {
                     className="mt-3 w-full py-2 text-[12px] font-semibold underline underline-offset-2 disabled:opacity-45"
                     style={{ color: 'var(--color-hp-low)' }}
                     type="button"
-                    disabled={commandLocked || sessionCommandFailed}
+                    disabled={
+                      commandLocked || sessionCommandFailed || turnResolving
+                    }
                     onClick={() => void runAbandon(session.id)}
                   >
                     Abandon Match
