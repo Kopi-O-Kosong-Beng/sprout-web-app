@@ -110,6 +110,13 @@ jobs:
         run: npm ci
         working-directory: .
 
+      # Vite strips types without checking them, so before this step `tsc` only
+      # ever ran inside `npm run build` — that is, on Vercel, after merge. A
+      # client type error passed every check here and failed the deploy instead
+      # (PR #14, TS2698 in ScanPage). Same command the build front-ends.
+      - name: Typecheck client
+        run: npm run typecheck
+
       - name: 'Group 5: BattlePage + AppHeader navigation lock'
         run: npm exec -- vitest run src/pages/BattlePage.test.tsx src/components/common/AppHeader.navigation-lock.test.tsx
 
