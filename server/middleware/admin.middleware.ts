@@ -20,11 +20,33 @@
 import type { RequestHandler } from 'express';
 import authUserRepository from '../repositories/auth-users';
 
-export function adminEmailAllowlist(): string[] {
-  return (process.env.ADMIN_EMAILS ?? '')
+function parseEmailList(raw: string | undefined): string[] {
+  return (raw ?? '')
     .split(',')
     .map((entry) => entry.trim().toLowerCase())
     .filter((entry) => entry.length > 0);
+}
+
+/**
+ * The break-glass allowlist, read from ADMIN_EMAILS.
+ *
+ * SUPER_ADMIN_EMAILS is still honoured because it is the name every already
+ * deployed environment sets. Before this tier existed that variable was the
+ * only authority on /api/admin and /api/platform, and dropping it would have
+ * meant a deploy where the new flag is not set on anybody yet, ADMIN_EMAILS is
+ * empty (it shipped empty and gated nothing), and the allowlist that exists to
+ * survive a broken database is itself the thing that is empty — nobody able to
+ * reach the dashboard that grants the flag.
+ *
+ * Reading both is not a widening: ADMIN_EMAILS gated no route before this
+ * change, so no address gains authority it did not already have. Retire the
+ * fallback once every environment has been moved over.
+ */
+export function adminEmailAllowlist(): string[] {
+  return [
+    ...parseEmailList(process.env.ADMIN_EMAILS),
+    ...parseEmailList(process.env.SUPER_ADMIN_EMAILS),
+  ];
 }
 
 export function isAdminEmail(email: string | undefined): boolean {

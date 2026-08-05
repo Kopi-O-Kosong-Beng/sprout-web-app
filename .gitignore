@@ -34,3 +34,7 @@ deploy/*.env
 
 # Local agent execution ledger and review artifacts
 .superpowers/
+
+# Knowledge-graph tool output: a derived cache, rebuilt on demand. Committing it
+# put 201 files and 136k lines into one review.
+.graphify/

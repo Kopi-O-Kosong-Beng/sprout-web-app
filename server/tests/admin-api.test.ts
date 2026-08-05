@@ -472,32 +472,36 @@ describe('PATCH /api/admin/users/:uid/superadmin', () => {
  * behind requireSuperAdmin.
  */
 describe('Ticket Manager endpoints', () => {
+  /** `omit` drops a field entirely. Setting it to `undefined` through
+   *  `overrides` would not work: the Admin SDK rejects a present-but-undefined
+   *  value outright, so the write throws before the decoder is ever reached —
+   *  which is the opposite of what a legacy-row test wants to exercise. */
   async function seedTicket(
     id: string,
-    overrides: Record<string, unknown> = {}
+    overrides: Record<string, unknown> = {},
+    omit: string[] = []
   ): Promise<void> {
-    await getDb()
-      .collection('query_tickets')
-      .doc(id)
-      .set({
-        id,
-        refNumber: `SPR-20260721-${id.slice(-4)}`,
-        name: 'Ada Lovelace',
-        email: 'ada@example.com',
-        organisation: '',
-        subject: 'Scan failed on a fern',
-        category: 'general',
-        message: 'The camera returned nothing.',
-        status: 'open',
-        submitterEmailStatus: 'sent',
-        adminEmailStatus: 'sent',
-        lastEmailError: null,
-        notificationUpdatedAt: null,
-        resolvedAt: null,
-        createdAt: '2026-07-21T02:00:00.000Z',
-        updatedAt: '2026-07-21T02:00:00.000Z',
-        ...overrides,
-      });
+    const document: Record<string, unknown> = {
+      id,
+      refNumber: `SPR-20260721-${id.slice(-4)}`,
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+      organisation: '',
+      subject: 'Scan failed on a fern',
+      category: 'general',
+      message: 'The camera returned nothing.',
+      status: 'open',
+      submitterEmailStatus: 'sent',
+      adminEmailStatus: 'sent',
+      lastEmailError: null,
+      notificationUpdatedAt: null,
+      resolvedAt: null,
+      createdAt: '2026-07-21T02:00:00.000Z',
+      updatedAt: '2026-07-21T02:00:00.000Z',
+      ...overrides,
+    };
+    for (const field of omit) delete document[field];
+    await getDb().collection('query_tickets').doc(id).set(document);
   }
 
   it('is closed to a caller without the grant', async () => {
@@ -530,11 +534,11 @@ describe('Ticket Manager endpoints', () => {
    * make the whole listing throw, taking every healthy ticket down with them.
    * A queue that 500s because of one old row is worse than one that shows it. */
   it('lists tickets that predate the notification fields', async () => {
-    await seedTicket('ticket-0003', {
-      submitterEmailStatus: undefined,
-      adminEmailStatus: undefined,
-      subject: undefined,
-    });
+    await seedTicket('ticket-0003', {}, [
+      'submitterEmailStatus',
+      'adminEmailStatus',
+      'subject',
+    ]);
     await seedTicket('ticket-0004');
 
     const res = await request(app)

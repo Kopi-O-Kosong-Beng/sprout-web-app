@@ -52,6 +52,21 @@
   min-height: 100dvh;
   flex-direction: column;
   background-color: var(--color-sprout);
+  /*
+   * `isolation` is load-bearing, not tidiness. Every game screen paints its own
+   * backdrop on a negative layer — the camera preview on /scan is `-z-10` over a
+   * `-z-20` black sheet, and /archive and /battle each put a `fixed -z-10` image
+   * behind the board. Without a stacking context here those layers resolve
+   * against the root, where a plain in-flow block's background paints *after*
+   * them, and this colour covers the camera with a flat green rectangle.
+   * ScanPage's own comment warns about exactly this shape of bug.
+   *
+   * Making the shell a stacking context scopes those layers to it, so they
+   * paint above its background and below the board. `isolation` rather than
+   * `transform`, which would also make this the containing block for the
+   * `fixed` backdrops and change how they size.
+   */
+  isolation: isolate;
 }
 
 .game-shell-body {
