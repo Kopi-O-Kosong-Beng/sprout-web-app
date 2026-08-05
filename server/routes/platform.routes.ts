@@ -13,12 +13,12 @@
  */
 import { Router } from 'express';
 import authMiddleware from '../middleware/auth.middleware';
-import requireAdmin from '../middleware/admin.middleware';
+import requireSuperAdmin from '../middleware/admin.middleware';
 import { adminRouter as platformPortalRouter } from '../platform/adminRoutes';
 
 const router = Router();
 
-router.use(authMiddleware, requireAdmin);
+router.use(authMiddleware, requireSuperAdmin);
 router.use(platformPortalRouter);
 
 export default router;

@@ -13,8 +13,17 @@ import { Link } from 'react-router-dom';
 import BackButton from '../components/common/BackButton';
 import { extractApiError } from '../services/apiClient';
 import { getLeaderboards, type Leaderboards } from '../services/sproutApi';
+import { useAuth } from '../hooks/useAuth';
 
 type View = 'loading' | 'ready' | 'error';
+
+/** Ranking is one of the three tabs a signed-out visitor can open, so the
+ *  "where do I stand" line has to answer two different people. Telling a
+ *  visitor to "win a battle to appear" points at a game they have no account
+ *  for; they need the sign-up, not the instruction. */
+const VISITOR_XP_STANDING = 'Sign up to battle your way onto this board.';
+const VISITOR_DISCOVERY_STANDING =
+  'Sign up to scan a plant and claim a species first.';
 
 /** Rank is a numeral in a fixed slot, never a medal emoji — PRODUCT.md names
  *  emoji-as-iconography as an anti-reference, and numerals keep every row in
@@ -23,6 +32,8 @@ type View = 'loading' | 'ready' | 'error';
 const PODIUM_RANK = 3;
 
 export default function LeaderboardPage() {
+  const { status } = useAuth();
+  const signedIn = status === 'authenticated';
   const [boards, setBoards] = useState<Leaderboards | null>(null);
   const [view, setView] = useState<View>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +72,7 @@ export default function LeaderboardPage() {
       <div className="from-sprout/90 via-sprout/40 to-sprout/90 absolute inset-0 -z-10 bg-gradient-to-b" />
 
       <div className="safe-top flex items-center justify-between gap-2 px-3">
-        <BackButton fallback="/home" />
+        <BackButton fallback="/" />
         <Link
           to="/battle"
           className="press pixel-button px-3 py-2 text-xs"
@@ -114,7 +125,9 @@ export default function LeaderboardPage() {
               emptyLabel="No battles fought yet. Be the first."
               standing={
                 boards.xp.caller.rank === null
-                  ? 'You are not ranked yet — win a battle to appear.'
+                  ? signedIn
+                    ? 'You are not ranked yet — win a battle to appear.'
+                    : VISITOR_XP_STANDING
                   : `You are #${boards.xp.caller.rank} of ${boards.xp.totalPlayers} with ${boards.xp.caller.xp} XP.`
               }
               rows={boards.xp.entries.map((entry) => ({
@@ -134,7 +147,9 @@ export default function LeaderboardPage() {
               emptyLabel="No species claimed yet. Scan a plant to claim one."
               standing={
                 boards.discovery.caller.rank === null
-                  ? 'You have not been first to a species yet — scan something new.'
+                  ? signedIn
+                    ? 'You have not been first to a species yet — scan something new.'
+                    : VISITOR_DISCOVERY_STANDING
                   : `You are #${boards.discovery.caller.rank} of ${boards.discovery.totalPlayers} with ${boards.discovery.caller.discoveries} first finds.`
               }
               rows={boards.discovery.entries.map((entry) => ({

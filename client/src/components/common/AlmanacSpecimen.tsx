@@ -59,7 +59,7 @@ export function AlmanacSpecimen({
           {entry.spriteUrl ? (
             <img
               src={entry.spriteUrl}
-              alt={`Pixel-art sprite of ${entry.speciesName}`}
+              alt={`Pixel-art Plantemon of ${entry.speciesName}`}
               className="pixelated h-48 w-48 object-contain sm:h-64 sm:w-64"
             />
           ) : (

@@ -7,17 +7,21 @@ import {
   getApiHealth,
   listAdminAccounts,
   runAdminCleanup,
+  setAccountSuperAdmin,
   type AdminAccount,
   type AdminAlmanac,
   type ApiHealth,
   type CleanupReport,
 } from '../services/sproutApi';
 import { extractApiError } from '../services/apiClient';
+import { useAuth } from '../hooks/useAuth';
 
-/** Admin-only account list. Access is enforced by the server (ADMIN_EMAILS);
- *  this page simply renders whatever the API allows, so a non-admin who
- *  navigates here sees the 403 message rather than a partial dashboard. */
+/** Superadmin console. Access is enforced by the server (the Firestore
+ *  isSuperAdmin flag, or the ADMIN_EMAILS break-glass allowlist); this page
+ *  simply renders whatever the API allows, so anyone who reaches it without
+ *  the grant sees 403s rather than a partial dashboard. */
 export default function AdminPage() {
+  const { profile } = useAuth();
   const [accounts, setAccounts] = useState<AdminAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +45,27 @@ export default function AdminPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function handleSuperAdmin(account: AdminAccount, next: boolean) {
+    setPendingId(account.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await setAccountSuperAdmin(account.id, next);
+      setAccounts((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item))
+      );
+      setNotice(
+        next
+          ? `${updated.email} is now a superadmin.`
+          : `Superadmin revoked for ${updated.email}.`
+      );
+    } catch (err) {
+      setError(extractApiError(err, 'Could not change superadmin status.'));
+    } finally {
+      setPendingId(null);
+    }
+  }
 
   async function handleDelete(account: AdminAccount) {
     setPendingId(account.id);
@@ -67,9 +92,8 @@ export default function AdminPage() {
         <h1>Sprout admin</h1>
         <p>
           Accounts, live API health, Firestore cleanup and the full plant
-          almanac. Everything here is gated by the ADMIN_EMAILS allowlist on the
-          server, so a non-admin who navigates here sees 403s rather than a
-          partial dashboard.
+          almanac. Everything here is gated server-side by the superadmin grant,
+          so anyone without it sees 403s rather than a partial dashboard.
         </p>
       </section>
 
@@ -82,7 +106,9 @@ export default function AdminPage() {
         <p>
           Every registered Sprout account. Deleting one removes its Firebase
           login and profile, which frees the email address to sign up again —
-          useful for re-running the signup and OTP walkthrough.
+          useful for re-running the signup and OTP walkthrough. Promoting one
+          grants the operator tools: Studio, API Test, Ticket Manager and this
+          page.
         </p>
       </section>
 
@@ -114,7 +140,12 @@ export default function AdminPage() {
                 <tr key={account.id}>
                   <td>
                     {account.email}
-                    {account.isAdmin && <span className="pill">admin</span>}
+                    {account.isAdmin && <span className="pill">superadmin</span>}
+                    {account.isAllowlisted && (
+                      <span className="pill" title="Granted by ADMIN_EMAILS">
+                        allowlist
+                      </span>
+                    )}
                   </td>
                   <td>{account.displayName || '—'}</td>
                   <td>{account.isVerified ? 'Yes' : 'No'}</td>
@@ -149,16 +180,24 @@ export default function AdminPage() {
                         </button>
                       </span>
                     ) : (
-                      <button
-                        type="button"
-                        className="details-link"
-                        onClick={() => {
-                          setConfirmId(account.id);
-                          setNotice(null);
-                        }}
-                      >
-                        Delete
-                      </button>
+                      <span className="confirm-row">
+                        <SuperAdminToggle
+                          account={account}
+                          isSelf={account.id === profile?.uid}
+                          busy={pendingId === account.id}
+                          onChange={(next) => void handleSuperAdmin(account, next)}
+                        />
+                        <button
+                          type="button"
+                          className="details-link"
+                          onClick={() => {
+                            setConfirmId(account.id);
+                            setNotice(null);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -168,6 +207,49 @@ export default function AdminPage() {
         </div>
       )}
     </main>
+  );
+}
+
+/**
+ * Promote / revoke, or an explanation of why neither is offered.
+ *
+ * Two rows carry no button, because pressing it could only fail:
+ *   - your own, since the server refuses self-demotion — the operator holding
+ *     the console should not be able to lock themselves out of it in one click
+ *   - an allowlisted address, since clearing the flag leaves ADMIN_EMAILS
+ *     still granting, and a button that reports success while access continues
+ *     is worse than no button
+ */
+function SuperAdminToggle({
+  account,
+  isSelf,
+  busy,
+  onChange,
+}: {
+  account: AdminAccount;
+  isSelf: boolean;
+  busy: boolean;
+  onChange(next: boolean): void;
+}) {
+  if (isSelf) {
+    return <span className="status-meta">Your account</span>;
+  }
+  if (account.isAllowlisted) {
+    return <span className="status-meta">Set by ADMIN_EMAILS</span>;
+  }
+  return (
+    <button
+      type="button"
+      className="details-link"
+      disabled={busy}
+      onClick={() => onChange(!account.isSuperAdmin)}
+    >
+      {busy
+        ? 'Saving…'
+        : account.isSuperAdmin
+          ? 'Revoke superadmin'
+          : 'Make superadmin'}
+    </button>
   );
 }
 

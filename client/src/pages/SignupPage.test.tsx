@@ -73,3 +73,64 @@ describe('SignupPage verification handoff', () => {
     expect(signupUser).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The success screen. It used to print the server's explanation verbatim,
+ * which on a delivery failure meant an error message on what is otherwise a
+ * success — and an unactionable one, since logging in is the next step either
+ * way and the verify-email page can resend.
+ */
+describe('SignupPage success screen', () => {
+  const BASE = {
+    uid: 'user-1',
+    email: 'ada@example.com',
+    displayName: 'Ada',
+    emailVerified: false,
+  };
+
+  async function signUpWith(result: Record<string, unknown>) {
+    signupUser.mockResolvedValue({ ...BASE, ...result });
+    const user = userEvent.setup();
+    renderSignup();
+
+    await user.type(screen.getByLabelText(/display name/i), 'Ada');
+    await user.type(screen.getByLabelText(/email address/i), 'ada@example.com');
+    await user.type(screen.getByLabelText(/^password$/i), 'Password123!');
+    await user.type(screen.getByLabelText(/confirm password/i), 'Password123!');
+    await user.click(screen.getByRole('button', { name: /create account/i }));
+  }
+
+  it('confirms the account and points at login', async () => {
+    await signUpWith({
+      verificationEmailSent: true,
+      message: 'Check your email for the verification link.',
+    });
+
+    expect(
+      await screen.findByRole('heading', { name: 'Your account is created' })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/proceed to login to verify your account/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /go to login/i })).toHaveAttribute(
+      'href',
+      '/login'
+    );
+  });
+
+  it('hides a delivery failure rather than reporting it as an error', async () => {
+    await signUpWith({
+      verificationEmailSent: false,
+      message:
+        'Account created, but the verification email could not be sent. Sign in and request a new link.',
+    });
+
+    expect(
+      await screen.findByRole('heading', { name: 'Your account is created' })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/could not be sent/i)).toBeNull();
+    expect(
+      screen.queryByText(/log in to request a new verification email/i)
+    ).toBeNull();
+  });
+});

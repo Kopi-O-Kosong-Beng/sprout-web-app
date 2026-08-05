@@ -89,17 +89,14 @@ export default function SignupPage() {
         <section className="auth-panel" aria-labelledby="signup-success-title">
           <div>
             <p className="eyebrow">Account created</p>
-            <h1 id="signup-success-title">
-              {signupResult.verificationEmailSent
-                ? 'Check your inbox to verify'
-                : 'Your account is ready'}
-            </h1>
-            <p>{signupResult.message}</p>
-            <p>
-              {signupResult.verificationEmailSent
-                ? 'Open the verification link, then log in.'
-                : 'Log in to request a new verification email.'}
-            </p>
+            <h1 id="signup-success-title">Your account is created</h1>
+            {/* Only the success line is surfaced. When delivery fails the
+                server's explanation ("...the verification email could not be
+                sent") used to be printed here, which handed the user an error
+                on what is otherwise a success screen — and an unactionable one,
+                since logging in is the next step either way. The verify-email
+                page they land on can resend. */}
+            {signupResult.verificationEmailSent && <p>{signupResult.message}</p>}
           </div>
           <div className="auth-footer">
             <Link className="details-link" to="/login">
@@ -110,7 +107,7 @@ export default function SignupPage() {
         <aside className="auth-side">
           <div className="promise-card">
             <p className="eyebrow">Next step</p>
-            <h2>Verify your email, then sign in to sync your archive.</h2>
+            <h2>Proceed to Login to verify your account</h2>
           </div>
         </aside>
       </main>
@@ -224,7 +221,7 @@ export default function SignupPage() {
           <ul>
             <li>Firebase-backed account profile</li>
             <li>Seeded demo avatar collection</li>
-            <li>Future GenAI plant sprite pipeline</li>
+            <li>Future GenAI Plantemon pipeline</li>
           </ul>
         </div>
       </aside>

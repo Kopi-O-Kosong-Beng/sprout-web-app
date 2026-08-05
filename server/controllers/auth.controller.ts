@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import {
   getCurrentUserProfile,
+  lookupSignInMethod,
   recordUserLogin,
   recordUserLogout,
   resendVerificationEmail,
@@ -9,26 +10,32 @@ import {
   verifyPasswordReset,
   type PublicProfile,
 } from '../services/auth.service';
-import { isAdminEmail } from '../middleware/admin.middleware';
+import { resolveSuperAdmin } from '../middleware/admin.middleware';
 
 export interface ProfileResponse extends PublicProfile {
   isAdmin: boolean;
+  isSuperAdmin: boolean;
 }
 
-/** The frontend has to know whether to route this account to the admin
- *  dashboard and show its nav link, and it cannot compute that itself:
- *  membership lives in the server's ADMIN_EMAILS allowlist.
+/** The frontend has to know whether to show the operator nav — Studio, API
+ *  Test, Ticket Manager, Admin — and it cannot compute that itself: the grant
+ *  is the Firestore flag OR the server's ADMIN_EMAILS allowlist, and the
+ *  allowlist is never sent to the client.
  *
- *  Attached here rather than stored on the user document, so revoking an admin
- *  stays a config edit — a persisted flag would have to be migrated instead.
- *  It is advisory only: /api/admin re-checks the allowlist on every request, so
- *  a forged isAdmin buys nothing but a dashboard that answers 403.
+ *  Advisory only. Every /api/admin and /api/platform request re-resolves the
+ *  grant server-side, so a forged flag in the browser buys nothing but a
+ *  dashboard that answers 403.
+ *
+ *  `isAdmin` is kept as an alias of the same value so existing callers and
+ *  tests keep working; there is one privilege level, not two.
  */
-function withAdminFlag(
+async function withAdminFlag(
   profile: PublicProfile,
+  uid: string,
   email: string | undefined
-): ProfileResponse {
-  return { ...profile, isAdmin: isAdminEmail(email) };
+): Promise<ProfileResponse> {
+  const isSuperAdmin = await resolveSuperAdmin(uid, email);
+  return { ...profile, isAdmin: isSuperAdmin, isSuperAdmin };
 }
 
 export const handleSignup: RequestHandler = async (req, res, next) => {
@@ -48,6 +55,16 @@ export const handleResendVerification: RequestHandler = async (req, res, next) =
   }
 };
 
+/** Unauthenticated by necessity — the caller could not sign in, which is the
+ *  whole reason they need the hint. Rate limited on the route. */
+export const handleSignInMethod: RequestHandler = async (req, res, next) => {
+  try {
+    res.status(200).json(await lookupSignInMethod(req.body.email));
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const handleMe: RequestHandler = async (req, res, next) => {
   try {
     const user = req.user!;
@@ -56,7 +73,7 @@ export const handleMe: RequestHandler = async (req, res, next) => {
       user.email,
       user.emailVerified
     );
-    res.status(200).json(withAdminFlag(profile, user.email));
+    res.status(200).json(await withAdminFlag(profile, user.uid, user.email));
   } catch (err) {
     next(err);
   }
@@ -66,7 +83,7 @@ export const handleSessionLogin: RequestHandler = async (req, res, next) => {
   try {
     const user = req.user!;
     const profile = await recordUserLogin(user.uid);
-    res.status(200).json(withAdminFlag(profile, user.email));
+    res.status(200).json(await withAdminFlag(profile, user.uid, user.email));
   } catch (err) {
     next(err);
   }
@@ -76,7 +93,7 @@ export const handleSessionLogout: RequestHandler = async (req, res, next) => {
   try {
     const user = req.user!;
     const profile = await recordUserLogout(user.uid);
-    res.status(200).json(withAdminFlag(profile, user.email));
+    res.status(200).json(await withAdminFlag(profile, user.uid, user.email));
   } catch (err) {
     next(err);
   }

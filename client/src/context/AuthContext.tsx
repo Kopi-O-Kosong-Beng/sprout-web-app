@@ -22,6 +22,7 @@ import {
 import axios from 'axios';
 import {
   getCurrentUser,
+  getSignInMethod,
   recordSessionLogin,
   recordSessionLogout,
   type AuthProfile,
@@ -49,6 +50,24 @@ export const AuthContext = createContext<AuthContextValue | null>(null);
  *  generic message so the UI never reveals which field was wrong.
  *  Exported so the /test page can present the same public-facing wording.
  */
+export const GOOGLE_ONLY_LOGIN_MESSAGE =
+  'This email signs in with Google. Use "Continue with Google" below.';
+
+/** True for the errors Firebase returns when the address exists but the
+ *  password does not open it — including the case where Google has taken the
+ *  account over and removed the password entirely. */
+function isCredentialRejection(err: unknown): boolean {
+  const code =
+    typeof err === 'object' && err !== null && 'code' in err
+      ? String((err as { code?: unknown }).code)
+      : '';
+  return (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/user-not-found' ||
+    code === 'auth/wrong-password'
+  );
+}
+
 export function mapFirebaseLoginError(err: unknown): string {
   const code =
     typeof err === 'object' && err !== null && 'code' in err
@@ -135,6 +154,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       await recordSessionLogin(await credential.user.getIdToken());
     } catch (err) {
+      // "Invalid email or password" is a dead end for an account Google has
+      // taken over: the password was right when it was set, and no amount of
+      // retrying or resetting will help. Only after the attempt has already
+      // failed do we ask the server which provider owns the address, so the
+      // hint costs nothing on the happy path and reveals nothing that a
+      // successful Google sign-in would not.
+      if (isCredentialRejection(err)) {
+        const hint = await getSignInMethod(email).catch(() => null);
+        if (hint?.method === 'google') throw new Error(GOOGLE_ONLY_LOGIN_MESSAGE);
+      }
       throw new Error(mapFirebaseLoginError(err));
     }
   }, []);

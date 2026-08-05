@@ -1,13 +1,16 @@
-/** Admin account-management controller. Every route here sits behind
- *  authMiddleware + requireAdmin (see routes/admin.routes.ts). */
+/** Superadmin console controller — accounts, tickets and operations. Every
+ *  route here sits behind authMiddleware + requireSuperAdmin (see
+ *  routes/admin.routes.ts). */
 import type { RequestHandler } from 'express';
 import {
   AdminOperationError,
   deleteAccount,
   listAccounts,
+  setSuperAdmin,
 } from '../services/admin.service';
 import { getAdminAlmanac } from '../services/almanac.service';
 import { CLEANUP_TARGETS, runCleanup } from '../services/cleanup.service';
+import { listTickets, setTicketStatus } from '../services/ticket.service';
 
 export const handleListAccounts: RequestHandler = async (_req, res, next) => {
   try {
@@ -55,6 +58,55 @@ export const handleAdminCleanup: RequestHandler = async (req, res, next) => {
       );
     }
     res.json(report);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/** Grant or revoke the superadmin flag. Body: `{ "isSuperAdmin": boolean }`. */
+export const handleSetSuperAdmin: RequestHandler = async (req, res, next) => {
+  try {
+    const targetUid = req.params.uid;
+    const { isSuperAdmin } = req.body ?? {};
+    if (typeof isSuperAdmin !== 'boolean') {
+      res.status(400).json({ error: 'isSuperAdmin must be true or false.' });
+      return;
+    }
+
+    const account = await setSuperAdmin(targetUid, req.user!.uid, isSuperAdmin);
+    // Privilege changes are the one thing worth being able to reconstruct from
+    // logs afterwards, so both parties and the direction are recorded.
+    console.warn(
+      `[admin] superadmin ${isSuperAdmin ? 'granted' : 'revoked'} ` +
+        `uid=${account.id} by=${req.user!.uid}`
+    );
+    res.json(account);
+  } catch (err) {
+    if (err instanceof AdminOperationError) {
+      res.status(err.status).json({ error: err.message });
+      return;
+    }
+    next(err);
+  }
+};
+
+export const handleListTickets: RequestHandler = async (_req, res, next) => {
+  try {
+    const items = await listTickets();
+    res.json({ items, total: items.length });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const handleSetTicketStatus: RequestHandler = async (req, res, next) => {
+  try {
+    const { status } = req.body ?? {};
+    if (status !== 'open' && status !== 'resolved') {
+      res.status(400).json({ error: 'status must be "open" or "resolved".' });
+      return;
+    }
+    res.json(await setTicketStatus(req.params.id, status));
   } catch (err) {
     next(err);
   }

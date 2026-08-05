@@ -451,7 +451,7 @@ export default function ScanPage() {
 /** The scan stages, in order, for the progress stepper. */
 const SCAN_STEPS: { key: ScanStep; label: string }[] = [
   { key: 'identify', label: 'Identifying plant' },
-  { key: 'sprite', label: 'Creating sprite' },
+  { key: 'sprite', label: 'Creating Plantemon' },
   { key: 'finish', label: 'Finishing the art' },
 ];
 
@@ -617,7 +617,7 @@ function ResultDialog({
         style={{ background: 'var(--color-hp-high)', color: '#fff' }}
         className="press pixel-button mt-4 block w-full px-2 py-2 text-center text-[9px]"
       >
-        Save sprite
+        Save Plantemon
       </a>
       <button
         type="button"

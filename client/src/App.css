@@ -38,6 +38,58 @@
   color: #ffffff;
 }
 
+/*
+ * Ground for the game boards, which now sit under the same permanent nav as
+ * the document pages.
+ *
+ * The board keeps `min-height: 100dvh` of its own, so without this it would
+ * claim a full viewport *below* the header and push its action row off the
+ * bottom. Letting the body flex and zeroing the board's floor makes it fill
+ * exactly what the header leaves.
+ */
+.game-shell {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  background-color: var(--color-sprout);
+}
+
+.game-shell-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.game-shell-body > .screen {
+  min-height: 0;
+  flex: 1;
+}
+
+/*
+ * Studio shell: the site nav above the pipeline console.
+ *
+ * Nothing here restyles the studio — every rule is on the wrapper the layout
+ * adds. Two properties do the work:
+ *
+ *   transform  makes this element the containing block for `position: fixed`
+ *              descendants, so the studio's own fixed sidebar (inset-y-0,
+ *              z-50) resolves against the wrapper and begins under the nav
+ *              rather than covering it.
+ *   static nav the site header gives up `position: sticky` here only. The
+ *              studio's sticky top bar pins to `top: 0`, and a sticky site nav
+ *              would sit in that exact space and swallow it. The console keeps
+ *              its own persistent bar; the site nav scrolls away with the page.
+ */
+.studio-shell > .site-header {
+  position: static;
+}
+
+.studio-shell-body {
+  position: relative;
+  transform: translateZ(0);
+}
+
 /* ============================================================================
    Header
    ========================================================================== */
@@ -89,6 +141,17 @@
   margin-right: auto;
 }
 
+/* Separates the player tabs from the operator tools. Decorative only —
+   aria-hidden, since the grouping is visual and screen readers already get the
+   nav landmark. */
+.nav-divider {
+  width: 2px;
+  align-self: stretch;
+  min-height: 1rem;
+  margin: 0 0.35rem;
+  background: rgb(255 255 255 / 0.25);
+}
+
 .nav-link {
   display: inline-block;
   padding: 0.5rem 0.55rem;
@@ -118,11 +181,25 @@
   box-shadow: 3px 3px 0 rgb(0 0 0 / 0.4);
 }
 
+/* Pulled 20px in from the right edge. Flush against the corner these are a
+   Fitts's-law worst case: the pointer has to be driven all the way out to the
+   screen edge to reach Sign up / Log in, and on a maximised window an overshoot
+   lands on the browser chrome instead. The header's own 1rem padding is not
+   enough on its own. */
 .header-actions {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+  margin-right: 20px;
+}
+
+/* On a narrow viewport the header wraps and this row is no longer in the
+   corner, so the inset stops paying for itself and just eats width. */
+@media (max-width: 640px) {
+  .header-actions {
+    margin-right: 0;
+  }
 }
 
 .header-user {
@@ -314,6 +391,166 @@
 
 .form-stack {
   margin-top: 1.25rem;
+}
+
+/* Guidance at the head of the form. Set apart by a rule rather than a panel:
+   it is prose to read once, not another field to fill in. */
+.form-intro {
+  padding-bottom: 0.9rem;
+  border-bottom: 2px solid rgb(26 26 26 / 0.15);
+}
+
+.form-intro h2 {
+  margin: 0 0 0.4rem;
+}
+
+.form-intro p {
+  margin: 0;
+}
+
+/* The label row, so the asterisk sits beside the text rather than becoming
+   another row of the label's flex column. */
+.field-label {
+  display: block;
+}
+
+.required-mark {
+  color: #b3261e;
+  font-weight: 700;
+}
+
+/* The status lookup in the support column: same controls as the contact form,
+   tightened up, since it sits inside a card rather than owning the page. */
+.status-check {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin: 0.85rem 0 0.25rem;
+}
+
+.status-check label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #1a1a1a;
+}
+
+.status-check input {
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  letter-spacing: normal;
+  width: 100%;
+  padding: 0.6rem 0.65rem;
+  border: 3px solid #1a1a1a;
+  border-radius: 0;
+  background: #ffffff;
+  color: #1a1a1a;
+}
+
+.status-result {
+  border: 3px solid #1a1a1a;
+  background: rgb(26 26 26 / 0.05);
+  padding: 0.75rem;
+}
+
+.status-result p {
+  margin: 0 0 0.25rem;
+}
+
+.status-meta {
+  font-size: 0.8125rem;
+  opacity: 0.7;
+}
+
+/* The reply line is the answer someone came to this form for, so it reads at
+   full strength rather than as muted metadata like the submitted date. */
+.status-replied {
+  font-weight: 600;
+  color: color-mix(in srgb, var(--color-hp-high) 75%, #1a1a1a);
+}
+
+/* ============================================================================
+   Ticket Manager
+   ========================================================================== */
+
+.ticket-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.ticket-filters .secondary-cta {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.ticket-filters .secondary-cta.is-active {
+  background: var(--color-hp-high);
+  color: #ffffff;
+}
+
+.ticket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ticket-card {
+  border: 3px solid #1a1a1a;
+  background: #ffffff;
+  padding: 0.9rem;
+}
+
+/* Resolved tickets stay legible but recede, so a queue filtered to "all"
+   still reads open-first at a glance. */
+.ticket-card.is-resolved {
+  opacity: 0.72;
+}
+
+.ticket-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ticket-card h2 {
+  margin: 0.35rem 0;
+}
+
+.ticket-badge {
+  font-family: var(--font-pixel);
+  font-size: 0.5625rem;
+  padding: 0.25rem 0.5rem;
+  border: 2px solid #1a1a1a;
+}
+
+.ticket-badge.is-open {
+  background: var(--color-hp-high);
+  color: #ffffff;
+}
+
+.ticket-badge.is-resolved {
+  background: rgb(26 26 26 / 0.1);
+  color: #1a1a1a;
+}
+
+/* The reported message is arbitrary user input: preserve the line breaks they
+   typed, but keep long unbroken strings from widening the card. */
+.ticket-message {
+  margin: 0.6rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .form-stack label,

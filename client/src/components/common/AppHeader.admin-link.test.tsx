@@ -62,7 +62,7 @@ describe('AppHeader admin link', () => {
     const nav = screen.getByRole('navigation', { name: /primary/i });
     expect(within(nav).queryByText('Admin')).not.toBeInTheDocument();
     // The player's own nav is untouched.
-    expect(within(nav).getByRole('link', { name: 'Play' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Scan' })).toBeInTheDocument();
   });
 
   it('hides it from a signed-out visitor', () => {
