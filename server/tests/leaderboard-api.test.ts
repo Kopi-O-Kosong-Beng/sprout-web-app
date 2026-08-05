@@ -207,16 +207,13 @@ describe('GET /api/leaderboard', () => {
 });
 
 /**
- * The XP board lists every account, battled or not.
- *
- * It briefly excluded idle accounts so zeros could not pad the ranking. That
- * reads well for a public board and badly for this one, which doubles as the
- * team's roster during a demo: a member who had not battled yet was simply
- * absent, which looks like a broken account rather than an idle one. The
- * discovery board still excludes zeros — it counts finds, not membership.
+ * The XP board used to list the whole user collection, so every account that
+ * registered and never battled sat on it at 0 XP — padding the board and
+ * turning totalPlayers into a signup count. The discovery board has always
+ * excluded them; this makes the two agree.
  */
 describe('XP board membership', () => {
-  it('lists accounts that have never battled', async () => {
+  it('leaves out accounts that have never battled', async () => {
     await seedPlayer('xp-active', 'Active', { pveXp: 40, pveWins: 2, pveLosses: 1 });
     await seedPlayer('xp-idle-a', 'Idle A', { pveXp: 0, pveWins: 0, pveLosses: 0 });
     await seedPlayer('xp-idle-b', 'Idle B', { pveXp: 0, pveWins: 0, pveLosses: 0 });
@@ -227,33 +224,8 @@ describe('XP board membership', () => {
 
     expect(response.status).toBe(200);
     const names = response.body.xp.entries.map((e: { displayName: string }) => e.displayName);
-    // Idle accounts fall below the player who battled, and the display name
-    // breaks the tie between the two sitting on 0.
-    expect(names).toEqual(['Active', 'Idle A', 'Idle B']);
-    expect(response.body.xp.totalPlayers).toBe(3);
-  });
-
-  it('gives the tied idle accounts the same rank', async () => {
-    // Standard competition ranking: 0 XP is still a score, so two accounts on
-    // it share second place rather than being ordered arbitrarily.
-    await seedPlayer('xp-active', 'Active', { pveXp: 40, pveWins: 2 });
-    await seedPlayer('xp-idle-a', 'Idle A');
-    await seedPlayer('xp-idle-b', 'Idle B');
-
-    const response = await request(app)
-      .get('/api/leaderboard')
-      .set('Authorization', authorization('xp-active'));
-
-    expect(
-      response.body.xp.entries.map((e: { displayName: string; rank: number }) => [
-        e.displayName,
-        e.rank,
-      ])
-    ).toEqual([
-      ['Active', 1],
-      ['Idle A', 2],
-      ['Idle B', 2],
-    ]);
+    expect(names).toEqual(['Active']);
+    expect(response.body.xp.totalPlayers).toBe(1);
   });
 
   it('keeps a player who has only ever lost', async () => {
@@ -268,9 +240,7 @@ describe('XP board membership', () => {
     expect(names).toContain('Loser');
   });
 
-  it('gives an unbattled caller a placed rank and a row on the board', async () => {
-    // Previously this caller was ranked null and kept off the board, so the
-    // page told them "you are not ranked yet". They are on it now.
+  it('still gives an unbattled caller their own unranked row', async () => {
     await seedPlayer('xp-active', 'Active', { pveXp: 40, pveWins: 2, pveLosses: 1 });
     await seedPlayer('xp-newbie', 'Newbie', { pveXp: 0, pveWins: 0, pveLosses: 0 });
 
@@ -281,10 +251,10 @@ describe('XP board membership', () => {
     expect(response.body.xp.caller).toMatchObject({
       displayName: 'Newbie',
       xp: 0,
-      rank: 2,
+      rank: null,
     });
     expect(
       response.body.xp.entries.map((e: { displayName: string }) => e.displayName)
-    ).toContain('Newbie');
+    ).not.toContain('Newbie');
   });
 });
