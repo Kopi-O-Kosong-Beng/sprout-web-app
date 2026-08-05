@@ -134,22 +134,21 @@ function byScoreThenName<T extends { displayName: string }>(
 }
 
 function buildXpBoard(players: PlayerRow[], callerId: string) {
-  // Only players who have actually played. The discovery board has always said
-  // this — "a board padded with zeros says nothing and buries the players it is
-  // meant to celebrate" — but the XP board listed the whole user collection, so
-  // every account that ever registered and never battled sat on it at 0 XP,
-  // pushing real players down and making totalPlayers a signup count.
+  // Every account appears, including those that have never battled. This board
+  // briefly excluded them on the reasoning that "a board padded with zeros says
+  // nothing", which is still true of a public ranking — but this one doubles as
+  // the roster the team reads during a demo, and a member missing from it looks
+  // like a broken account rather than an idle one.
   //
-  // The caller is exempt: someone with no battles yet still needs their own
-  // row, and it reads as unranked rather than as a placing.
-  const ranked = players.filter(
-    (player) => player.xp > 0 || player.wins > 0 || player.losses > 0
-  );
-  const sorted = [...ranked].sort(byScoreThenName<PlayerRow>((player) => player.xp));
+  // The cost is accepted deliberately: totalPlayers is a signup count again, and
+  // a 0 XP account holds a rank rather than reading as unranked. LEADERBOARD_SIZE
+  // still caps the rows, so zeros only ever fill seats real players left empty.
+  const sorted = [...players].sort(byScoreThenName<PlayerRow>((player) => player.xp));
   const ranks = assignRanks(sorted, (player) => player.xp);
-  const caller =
-    sorted.find((player) => player.userId === callerId) ??
-    players.find((player) => player.userId === callerId);
+  // `sorted` holds every player now, so one lookup finds the caller whether or
+  // not they have battled. Still optional: a caller with no user row at all
+  // (deleted mid-session) falls through to the zeroed standing below.
+  const caller = sorted.find((player) => player.userId === callerId);
 
   return {
     entries: sorted.slice(0, LEADERBOARD_SIZE).map((player) => ({
