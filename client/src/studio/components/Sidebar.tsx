@@ -15,7 +15,6 @@ interface SidebarProps {
   /** Mobile drawer state — the rail is always visible from lg upward. */
   open: boolean;
   onClose: () => void;
-  dexCount: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -26,10 +25,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   projectId,
   open,
   onClose,
-  dexCount,
 }) => {
   const counts: Partial<Record<RouteId, number>> = {
-    dex: dexCount,
   };
 
   return (

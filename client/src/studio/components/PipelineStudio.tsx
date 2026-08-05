@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   ArrowRight,
   Check,
-  Database,
   FileImage,
   Play,
   RefreshCw,
@@ -19,15 +18,12 @@ import {
   loadPhotoAsDataUrl,
   photoUrl,
 } from '../pipeline/goldenset';
-import type { DexDoc } from '../hooks/useDexCollection';
-import type { RouteId } from '../nav';
 import {
   Badge,
   Button,
   Empty,
   Panel,
   PanelHead,
-  Row,
   SpriteFrame,
   Spinner,
   Stat,
@@ -35,9 +31,11 @@ import {
   type Tone,
 } from './ui';
 
+// The studio's only remaining route is the live scanner, so this component no
+// longer branches on which one is showing. The prop stays accepted (and
+// ignored) so StudioPage's dispatch does not need a special case.
 interface PipelineStudioProps {
-  route: RouteId;
-  dexDocs: DexDoc[];
+  route?: string;
 }
 
 type StepStatus = 'pending' | 'processing' | 'success' | 'warn' | 'error';
@@ -113,7 +111,7 @@ const STATUS_TONE: Record<StepStatus, Tone> = {
   error: 'danger',
 };
 
-export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, dexDocs }) => {
+export const PipelineStudio: React.FC<PipelineStudioProps> = () => {
   // Input
   const [dragActive, setDragActive] = useState(false);
   const [uploadedImageB64, setUploadedImageB64] = useState<string | null>(null);
@@ -466,55 +464,6 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = ({ route, dexDocs }
         : doneCount === steps.length
           ? { label: 'Pipeline complete', tone: 'ok' }
           : { label: `Stopped after ${doneCount} of ${steps.length} stages`, tone: 'warn' };
-
-  /* ====================================================================== */
-  /* National Dex                                                            */
-  /* ====================================================================== */
-
-  if (route === 'dex') {
-    if (dexDocs.length === 0) {
-      return (
-        <Empty
-          icon={<Database className="h-10 w-10" />}
-          title="No species cached yet"
-          sub="Run a scan in the Live Scanner. Approved species are written to the Firestore dex/ collection and appear here."
-        />
-      );
-    }
-
-    return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {dexDocs.map((entry) => (
-          <Panel key={entry.id} className="overflow-hidden">
-            <div className="flex items-start gap-3 p-3">
-              <SpriteFrame src={entry.spriteUrl} alt={entry.canonicalName || entry.id} size="sm" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-body font-semibold text-txt">
-                  {entry.canonicalName || entry.id}
-                </div>
-                <div className="mt-0.5 truncate font-mono text-[10px] text-txt-4">
-                  {entry.commonNames?.[0] || entry.speciesKey}
-                </div>
-                <Badge
-                  tone={entry.status === 'approved' ? 'ok' : 'gate'}
-                  className="mt-1.5"
-                  dot
-                >
-                  {(entry.status || 'pending').toUpperCase()}
-                </Badge>
-              </div>
-            </div>
-
-            <div className="space-y-1.5 border-t border-line-soft px-3 py-2.5">
-              <Row label="Discovered by" value={entry.firstDiscoveredBy || 'Trainer'} />
-              <Row label="Tier" value={entry.producedByTier || 'gemma'} tone="info" />
-              <Row label="Palette" value={entry.paletteVersion || 'Spica72'} />
-            </div>
-          </Panel>
-        ))}
-      </div>
-    );
-  }
 
   /* ====================================================================== */
   /* Live Scanner                                                            */

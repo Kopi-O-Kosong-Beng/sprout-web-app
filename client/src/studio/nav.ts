@@ -1,8 +1,6 @@
 import {
   Activity,
   Code,
-  Database,
-  FileText,
   Key,
   FlaskConical,
   ScanLine,
@@ -21,14 +19,13 @@ import {
 export type RouteId =
   | 'scanner'
   | 'unittests'
-  | 'dex'
   | 'health'
   | 'keys'
   | 'topology'
   | 'logs'
   | 'gate'
   | 'bench'
-  | 'notes';
+;
 
 export interface RouteDef {
   id: RouteId;
@@ -69,14 +66,6 @@ export const NAV: NavGroup[] = [
         kicker: 'Studio',
         title: 'Unit Tests',
         sub: 'Runs the real Vitest suite. Each case shows what it asserts, the terminal output it produced, and its result.',
-      },
-      {
-        id: 'dex',
-        label: 'National Dex',
-        icon: Database,
-        kicker: 'Studio',
-        title: 'National Dex',
-        sub: 'Species records cached in the Firestore dex/ collection, synced live.',
       },
     ],
   },
@@ -133,20 +122,6 @@ export const NAV: NavGroup[] = [
       },
     ],
   },
-  {
-    label: 'Workspace',
-    routes: [
-      {
-        id: 'notes',
-        label: 'Documents',
-        icon: FileText,
-        kicker: 'Workspace',
-        title: 'Documents',
-        sub: 'Your Firestore document collection, isolated per user by security rules.',
-        requiresAuth: true,
-      },
-    ],
-  },
 ];
 
 export const ROUTES: Record<RouteId, RouteDef> = Object.fromEntries(
@@ -154,6 +129,6 @@ export const ROUTES: Record<RouteId, RouteDef> = Object.fromEntries(
 ) as Record<RouteId, RouteDef>;
 
 /** Routes owned by each feature component. */
-export const STUDIO_ROUTES: RouteId[] = ['scanner', 'dex'];
+export const STUDIO_ROUTES: RouteId[] = ['scanner'];
 export const TEST_ROUTE: RouteId = 'unittests';
 export const ADMIN_ROUTES: RouteId[] = ['health', 'keys', 'topology', 'logs', 'gate', 'bench'];
