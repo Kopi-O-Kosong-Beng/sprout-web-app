@@ -3,6 +3,7 @@ import { AuthProvider } from './context/AuthContext';
 import { NavigationLockProvider } from './context/NavigationLockProvider';
 import AppHeader from './components/common/AppHeader';
 import ProtectedRoute from './components/common/ProtectedRoute';
+import { ToastProvider } from './components/common/Toast';
 import SuperAdminRoute from './components/common/SuperAdminRoute';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
@@ -77,96 +78,98 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <NavigationLockProvider>
-          <Routes>
-            <Route element={<DocumentLayout />}>
-              <Route path="/" element={<LandingPage />} />
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/signup" element={<SignupPage />} />
-              <Route path="/verify-email" element={<VerifyEmailPage />} />
-              <Route path="/contact" element={<ContactPage />} />
-              {/* Operator tools. SuperAdminRoute is presentational; the
-                  server re-resolves the grant on every /api/admin and
-                  /api/platform call and returns 403 to everyone else. */}
-              <Route
-                path="/admin"
-                element={
-                  <SuperAdminRoute>
-                    <AdminPage />
-                  </SuperAdminRoute>
-                }
-              />
-              <Route
-                path="/tickets"
-                element={
-                  <SuperAdminRoute>
-                    <TicketManagerPage />
-                  </SuperAdminRoute>
-                }
-              />
-              {/* Was public. It enumerates the API surface and fires real
-                  requests at it, which is an operator's tool, not a
-                  visitor's. */}
-              <Route
-                path="/test"
-                element={
-                  <SuperAdminRoute>
-                    <BackendTestPage />
-                  </SuperAdminRoute>
-                }
-              />
-            </Route>
+        <ToastProvider>
+          <NavigationLockProvider>
+            <Routes>
+              <Route element={<DocumentLayout />}>
+                <Route path="/" element={<LandingPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/signup" element={<SignupPage />} />
+                <Route path="/verify-email" element={<VerifyEmailPage />} />
+                <Route path="/contact" element={<ContactPage />} />
+                {/* Operator tools. SuperAdminRoute is presentational; the
+                    server re-resolves the grant on every /api/admin and
+                    /api/platform call and returns 403 to everyone else. */}
+                <Route
+                  path="/admin"
+                  element={
+                    <SuperAdminRoute>
+                      <AdminPage />
+                    </SuperAdminRoute>
+                  }
+                />
+                <Route
+                  path="/tickets"
+                  element={
+                    <SuperAdminRoute>
+                      <TicketManagerPage />
+                    </SuperAdminRoute>
+                  }
+                />
+                {/* Was public. It enumerates the API surface and fires real
+                    requests at it, which is an operator's tool, not a
+                    visitor's. */}
+                <Route
+                  path="/test"
+                  element={
+                    <SuperAdminRoute>
+                      <BackendTestPage />
+                    </SuperAdminRoute>
+                  }
+                />
+              </Route>
 
-            {/* `/home` (the old "Play" hub) is archived: HomePage.tsx stays in
-                the tree but nothing routes to or links at it any more, so the
-                nav goes straight from the landing page to Scan. The catch-all
-                below sends any stale /home bookmark back to `/`. */}
-            <Route element={<GameLayout />}>
-              <Route
-                path="/scan"
-                element={
-                  <ProtectedRoute>
-                    <ScanPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/archive"
-                element={
-                  <ProtectedRoute>
-                    <ArchivePage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/battle"
-                element={
-                  <ProtectedRoute>
-                    <BattlePage />
-                  </ProtectedRoute>
-                }
-              />
-              {/* Open, unlike its neighbours: Ranking is one of the three tabs
-                  a signed-out visitor can use. The boards read anonymously;
-                  only the "where do I rank" panel needs a session, and the API
-                  returns an empty standing for callers without one. */}
-              <Route path="/leaderboard" element={<LeaderboardPage />} />
-            </Route>
+              {/* `/home` (the old "Play" hub) is archived: HomePage.tsx stays in
+                  the tree but nothing routes to or links at it any more, so the
+                  nav goes straight from the landing page to Scan. The catch-all
+                  below sends any stale /home bookmark back to `/`. */}
+              <Route element={<GameLayout />}>
+                <Route
+                  path="/scan"
+                  element={
+                    <ProtectedRoute>
+                      <ScanPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/archive"
+                  element={
+                    <ProtectedRoute>
+                      <ArchivePage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/battle"
+                  element={
+                    <ProtectedRoute>
+                      <BattlePage />
+                    </ProtectedRoute>
+                  }
+                />
+                {/* Open, unlike its neighbours: Ranking is one of the three tabs
+                    a signed-out visitor can use. The boards read anonymously;
+                    only the "where do I rank" panel needs a session, and the API
+                    returns an empty standing for callers without one. */}
+                <Route path="/leaderboard" element={<LeaderboardPage />} />
+              </Route>
 
-            <Route element={<StudioLayout />}>
-              <Route
-                path="/studio"
-                element={
-                  <SuperAdminRoute>
-                    <StudioPage />
-                  </SuperAdminRoute>
-                }
-              />
-            </Route>
+              <Route element={<StudioLayout />}>
+                <Route
+                  path="/studio"
+                  element={
+                    <SuperAdminRoute>
+                      <StudioPage />
+                    </SuperAdminRoute>
+                  }
+                />
+              </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </NavigationLockProvider>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </NavigationLockProvider>
+        </ToastProvider>
       </AuthProvider>
     </BrowserRouter>
   );

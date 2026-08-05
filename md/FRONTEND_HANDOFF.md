@@ -142,6 +142,7 @@ http://localhost:3001
 | `POST` | `/api/auth/verify-reset` | none | Verify OTP and update password |
 | `GET` | `/api/avatar` | Bearer token | Fetch current user's avatars |
 | `POST` | `/api/avatar` | Bearer token | Save a scanned plant into the archive |
+| `DELETE` | `/api/avatar/:avatarId` | Bearer token | Remove one owned avatar (archive shovel); 204 on success, 404 if not yours |
 | `POST` | `/api/query/submit` | none | Submit contact/query ticket |
 | `GET` | `/api/almanac` | **none** | 200-species almanac: taxonomy + found/not-found + counts |
 | `GET` | `/api/almanac/:speciesId` | Bearer token | Adds the first finder, the date and their photo |

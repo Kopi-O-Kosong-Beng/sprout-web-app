@@ -162,6 +162,49 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       result: identification,
     });
 
+    /*
+     * The confidence gate.
+     *
+     * MIN_CONFIDENCE_THRESHOLD has been declared in .env, .env.example and
+     * render.yaml since this pipeline was written, and nothing read it — so an
+     * identification the model was 12% sure of went straight on to generation
+     * like any other. That costs a render, a cutout and a judge call, and then
+     * files a confidently-wrong species in the player's archive and the shared
+     * dex, where it becomes the canonical sprite for that name.
+     *
+     * Stopping here rather than after generation is the point: the cheapest
+     * moment to give up is before the expensive hops, and a second photo is a
+     * far better use of the next ten seconds than a creature drawn from a
+     * guess.
+     *
+     * Two deliberate exemptions. An explicit species override is the player
+     * telling us what it is, which outranks the model. And the keyless mock
+     * path reports a hardcoded 0.92 for every photo, so gating on it would be
+     * gating on a fiction — identifiedSpecies already tracks exactly that.
+     */
+    const minConfidence = serverEnv.minConfidenceThreshold;
+    if (
+      idSuccess &&
+      !overrideName &&
+      identifiedSpecies &&
+      typeof identification.probability === 'number' &&
+      identification.probability < minConfidence
+    ) {
+      sendEvent({
+        event: 'low_confidence',
+        step: '1',
+        // The client renders its own copy; this is the fallback and the log line.
+        error:
+          `Only ${(identification.probability * 100).toFixed(0)}% sure this is ` +
+          `${identification.name}. Try again with a clearer photo.`,
+        name: identification.name,
+        probability: identification.probability,
+        threshold: minConfidence,
+      });
+      res.end();
+      return;
+    }
+
     // Step 2a: Prompt Crafting
     sendEvent({
       event: 'step_start',

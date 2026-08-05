@@ -24,11 +24,11 @@ export default function LoginPage() {
    *  point at is archived. Admins still get the account dashboard.
    *
    *  profile is null for the moment after a transient /api/auth/me failure, in
-   *  which case this falls to `/` and the Admin nav link (same isAdmin flag)
+   *  which case this falls to `/` and the Admin nav link (same isSuperAdmin flag)
    *  is how an admin gets across. It is not a security boundary either way —
    *  the server re-checks ADMIN_EMAILS on every /api/admin call.
    */
-  const from = bouncedFrom ?? (profile?.isAdmin ? '/admin' : '/');
+  const from = bouncedFrom ?? (profile?.isSuperAdmin ? '/admin' : '/');
 
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('demo@sprout.app');

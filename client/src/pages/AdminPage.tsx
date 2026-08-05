@@ -280,7 +280,7 @@ function ApiHealthPanel() {
   }, []);
 
   return (
-    <section className="page-heading">
+    <section className="panel">
       <h2>API health</h2>
       <p>
         Contacts Plant.id, Gemini and withoutBG once each and reports what came
@@ -369,7 +369,7 @@ function CleanupPanel() {
   const pendingDeletion = report?.dryRun === true && report.matched > 0;
 
   return (
-    <section className="page-heading">
+    <section className="panel">
       <h2>Firestore cleanup</h2>
       <p>
         Web uploads expire 24 hours after they are saved, but nothing has ever
@@ -457,7 +457,7 @@ function AdminAlmanacPanel() {
   const discoveries = almanac?.species.filter((entry) => entry.discovered) ?? [];
 
   return (
-    <section className="page-heading">
+    <section className="panel">
       <h2>Plant almanac</h2>
       {error && <p className="form-error">{error}</p>}
       {!almanac ? (
@@ -528,6 +528,7 @@ function AdminAlmanacPanel() {
             </label>
             <input
               id="admin-almanac-search"
+              className="admin-search"
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}

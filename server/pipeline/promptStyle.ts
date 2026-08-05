@@ -103,6 +103,25 @@ export const PROVIDER_PROMPT_LIMIT: Record<"flux" | "gemini", number | null> = {
 const positiveClause = (): string => POSITIVE_STYLE.join(", ");
 
 /**
+ * Characters left for the creature description once the fixed clauses have
+ * taken their share of the provider's cap: the style clause, the avoid-clause
+ * where the provider gets one, and the ". " separators that join them.
+ *
+ * Exported so the craft stage can hold its output to the same number the
+ * scaffold will later enforce. Two independent copies of this arithmetic is
+ * how a description comes to be written against one budget and trimmed
+ * against another.
+ */
+export function descriptionBudgetFor(provider: "flux" | "gemini"): number | null {
+  const limit = PROVIDER_PROMPT_LIMIT[provider];
+  if (limit === null) return null;
+
+  const fixed = [positiveClause(), negativeClauseFor(provider)].filter(Boolean);
+  const separators = (fixed.length + 1) * 2;
+  return Math.max(0, limit - fixed.join(". ").length - separators);
+}
+
+/**
  * Trims a description to fit `max` characters, preferring a sentence break and
  * falling back to a word break, so the prompt never ends mid-word.
  *
@@ -222,20 +241,13 @@ export function applyStyleScaffold(
 
   const style = positiveClause();
   const negative = negativeClauseFor(provider);
-  const limit = PROVIDER_PROMPT_LIMIT[provider];
+  const budget = descriptionBudgetFor(provider);
 
   let description = cleaned.replace(/\s*$/, "");
   let truncated = false;
 
-  if (limit !== null) {
-    // Everything the description has to share the budget with: the style clause,
-    // the avoid-clause where present, and the ". " separators and final period
-    // that join() and the return line add.
-    const fixed = [style, negative].filter(Boolean);
-    const separators = (fixed.length + 1) * 2;
-    const budget = limit - fixed.join(". ").length - separators;
-
-    const fitted = fitWithin(description, Math.max(0, budget));
+  if (budget !== null) {
+    const fitted = fitWithin(description, budget);
     description = fitted.text;
     truncated = fitted.truncated;
   }

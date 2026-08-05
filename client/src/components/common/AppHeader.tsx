@@ -72,7 +72,7 @@ export default function AppHeader() {
   const verified = status === 'authenticated';
   const identity = profile?.displayName ?? firebaseUser?.email ?? 'Account';
   const visibleNavItems = navItems.filter(
-    (item) => !item.requiresSuperAdmin || profile?.isAdmin
+    (item) => !item.requiresSuperAdmin || profile?.isSuperAdmin
   );
 
   async function handleLogout() {

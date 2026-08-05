@@ -230,3 +230,56 @@ describe('GET /api/leaderboard', () => {
     expect(body).not.toContain('"u-other"');
   });
 });
+
+/**
+ * The XP board used to list the whole user collection, so every account that
+ * registered and never battled sat on it at 0 XP — padding the board and
+ * turning totalPlayers into a signup count. The discovery board has always
+ * excluded them; this makes the two agree.
+ */
+describe('XP board membership', () => {
+  it('leaves out accounts that have never battled', async () => {
+    await seedPlayer('xp-active', 'Active', { pveXp: 40, pveWins: 2, pveLosses: 1 });
+    await seedPlayer('xp-idle-a', 'Idle A', { pveXp: 0, pveWins: 0, pveLosses: 0 });
+    await seedPlayer('xp-idle-b', 'Idle B', { pveXp: 0, pveWins: 0, pveLosses: 0 });
+
+    const response = await request(app)
+      .get('/api/leaderboard')
+      .set('Authorization', authorization('xp-active'));
+
+    expect(response.status).toBe(200);
+    const names = response.body.xp.entries.map((e: { displayName: string }) => e.displayName);
+    expect(names).toEqual(['Active']);
+    expect(response.body.xp.totalPlayers).toBe(1);
+  });
+
+  it('keeps a player who has only ever lost', async () => {
+    // 0 XP but they turned up — that is a player, not an empty signup.
+    await seedPlayer('xp-loser', 'Loser', { pveXp: 0, pveWins: 0, pveLosses: 3 });
+
+    const response = await request(app)
+      .get('/api/leaderboard')
+      .set('Authorization', authorization('xp-loser'));
+
+    const names = response.body.xp.entries.map((e: { displayName: string }) => e.displayName);
+    expect(names).toContain('Loser');
+  });
+
+  it('still gives an unbattled caller their own unranked row', async () => {
+    await seedPlayer('xp-active', 'Active', { pveXp: 40, pveWins: 2, pveLosses: 1 });
+    await seedPlayer('xp-newbie', 'Newbie', { pveXp: 0, pveWins: 0, pveLosses: 0 });
+
+    const response = await request(app)
+      .get('/api/leaderboard')
+      .set('Authorization', authorization('xp-newbie'));
+
+    expect(response.body.xp.caller).toMatchObject({
+      displayName: 'Newbie',
+      xp: 0,
+      rank: null,
+    });
+    expect(
+      response.body.xp.entries.map((e: { displayName: string }) => e.displayName)
+    ).not.toContain('Newbie');
+  });
+});

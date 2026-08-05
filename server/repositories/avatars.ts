@@ -260,6 +260,25 @@ function emptySpeciesNameError(): EmptySpeciesNameError {
   return error;
 }
 
+/**
+ * Whether Firestore will accept this as a document id.
+ *
+ * `.doc()` throws synchronously on an id it cannot address, and an id arriving
+ * from `/api/avatar/:avatarId` is whatever the caller typed. That threw out of
+ * the repository and surfaced as a 500 — `__proto__`, `a/b`, `..` and any
+ * `__x__` all did it — which reads as a broken server rather than a wrong id,
+ * and makes a scan for reserved names look like it found something. Screening
+ * here rather than in the route keeps every caller covered, and lets an
+ * unaddressable id take the same "not found" path as a well-formed one nobody
+ * owns. Rules per Firestore's own limits.
+ */
+function isAddressableDocumentId(id: string): boolean {
+  if (!id || id === '.' || id === '..') return false;
+  if (id.includes('/')) return false;
+  if (/^__.*__$/.test(id)) return false;
+  return Buffer.byteLength(id, 'utf8') <= 1500;
+}
+
 const firestoreAvatarRepository: AvatarRepository = {
   async listByUser(
     userId: string,
@@ -286,12 +305,27 @@ const firestoreAvatarRepository: AvatarRepository = {
   },
 
   async getOwned(userId: string, avatarId: string): Promise<AvatarRecord | null> {
+    if (!isAddressableDocumentId(avatarId)) return null;
     const db = getDb();
     const doc = await db.collection('avatar_records').doc(avatarId).get();
     if (!doc.exists) return null;
     const rawUserId = doc.data()?.userId;
     if (typeof rawUserId !== 'string' || rawUserId !== userId) return null;
     return toRecord(doc);
+  },
+
+  async deleteOwned(userId: string, avatarId: string): Promise<boolean> {
+    if (!isAddressableDocumentId(avatarId)) return false;
+    const db = getDb();
+    const ref = db.collection('avatar_records').doc(avatarId);
+    // Read and delete in one transaction so the ownership check and the
+    // removal cannot straddle a concurrent write to the same document.
+    return db.runTransaction(async (transaction) => {
+      const doc = await transaction.get(ref);
+      if (!doc.exists || doc.data()?.userId !== userId) return false;
+      transaction.delete(ref);
+      return true;
+    });
   },
 
   async upsertFromScan(userId: string, input: ScanUpsertInput) {

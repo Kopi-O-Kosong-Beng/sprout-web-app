@@ -1,12 +1,21 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+import { ToastProvider } from '../components/common/Toast';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PipelineEvent } from '../services/pipelineStream';
+import {
+  PipelineRequestError,
+  type PipelineEvent,
+} from '../services/pipelineStream';
 import ScanPage, { type ScanDiscovery } from './ScanPage';
 
 const streamPipeline = vi.hoisted(() => vi.fn());
-vi.mock('../services/pipelineStream', () => ({ streamPipeline }));
+// Partial mock: PipelineRequestError is a real class the page branches on, so
+// it must be the genuine one, not a stub.
+vi.mock('../services/pipelineStream', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/pipelineStream')>()),
+  streamPipeline,
+}));
 
 /** Drives the page's own onEvent callback with a scripted event sequence. */
 function scriptStream(events: PipelineEvent[]) {
@@ -86,7 +95,9 @@ async function startScan() {
   const user = userEvent.setup();
   render(
     <MemoryRouter>
-      <ScanPage />
+      <ToastProvider>
+        <ScanPage />
+      </ToastProvider>
     </MemoryRouter>
   );
   const trigger = await screen.findByRole('button', { name: /^test$/i });
@@ -146,10 +157,93 @@ describe('ScanPage save outcome', () => {
   });
 
   it('asks the user to sign in when the server rejects the request', async () => {
-    streamPipeline.mockRejectedValue(new Error('Pipeline API HTTP 401'));
+    streamPipeline.mockRejectedValue(
+      new PipelineRequestError('unauthorised', 'Pipeline API HTTP 401', 401)
+    );
     await startScan();
 
-    expect(await screen.findByText(/sign in/i)).toBeInTheDocument();
+    // Surfaced as a toast — the only place a scan failure appears now.
+    expect(await screen.findByText(/sign in to scan/i)).toBeInTheDocument();
     expect(screen.queryByText(/Pipeline API HTTP 401/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The bug this replaces: the page decided by `message.includes('401')`, so an
+   * offline device — whose Firebase token refresh fails before any request is
+   * sent — was told to sign in, the one thing that could not help.
+   */
+  it('tells an offline user to reconnect, not to sign in', async () => {
+    streamPipeline.mockRejectedValue(
+      new PipelineRequestError('offline', 'No connection.')
+    );
+    await startScan();
+
+    expect(await screen.findByText(/reconnect to wifi/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
+    // Offline is the one the player can fix, so the toast carries the way out.
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it('does not mistake an unrelated error mentioning 401 for a sign-in problem', async () => {
+    streamPipeline.mockRejectedValue(
+      new PipelineRequestError('http', 'Render failed after 401 ms', 500)
+    );
+    await startScan();
+
+    expect(await screen.findByText(/Render failed after 401 ms/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
+  });
+
+  /** Too unsure to be worth a render: ask for a better photo, do not invent a
+   *  creature from a guess. */
+  it('asks for a clearer photo when identification is not confident enough', async () => {
+    scriptStream([
+      {
+        event: 'low_confidence',
+        name: 'Ficus lyrata',
+        probability: 0.31,
+        threshold: 0.7,
+      },
+    ]);
+    await startScan();
+
+    expect(await screen.findByText(/not sure about this one/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ficus lyrata/)).toBeInTheDocument();
+    expect(screen.getByText(/31%/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /scan again/i })).toBeInTheDocument();
+  });
+
+  /**
+   * The reader used to wrap the onEvent call in its malformed-frame guard, so
+   * the deliberate throw on a pipeline_error was caught and logged as a parse
+   * failure. The run then closed cleanly and the player was told the pipeline
+   * "finished without producing a sprite" — hiding the reason the server gave.
+   */
+  it('surfaces the reason the server gave for a failed run', async () => {
+    scriptStream([
+      { event: 'step_start', step: '1' },
+      { event: 'pipeline_error', error: 'The image model refused the prompt.' },
+    ]);
+    await startScan();
+
+    expect(
+      await screen.findByText(/The image model refused the prompt\./i)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/finished without producing a sprite/i)
+    ).not.toBeInTheDocument();
+  });
+
+  /** A run the player cancelled is not a failure, so it must not be reported
+   *  to them as one. */
+  it('says nothing when the player cancels the run', async () => {
+    streamPipeline.mockRejectedValue(
+      Object.assign(new DOMException('Aborted', 'AbortError'))
+    );
+    await startScan();
+
+    expect(screen.queryByText(/no connection/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
   });
 });

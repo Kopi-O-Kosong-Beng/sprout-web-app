@@ -8,14 +8,12 @@
  *  Two ways to hold the grant, see resolveSuperAdmin below:
  *    1. `isSuperAdmin: true` on the caller's Firestore `users` document — the
  *       normal path, managed from the dashboard.
- *    2. The ADMIN_EMAILS allowlist — break-glass, for when the database the
- *       flag lives in is the thing that needs repairing.
+ *    2. The break-glass allowlist — for when the database the flag lives in is
+ *       the thing that needs repairing.
  *
- *  ADMIN_EMAILS is a comma-separated list, compared case-insensitively:
- *    ADMIN_EMAILS=hello.sprout.team@gmail.com,teammate@gmail.com
- *
- *  An unset or empty list grants nobody by itself. That fail-closed default
- *  matters: a misconfigured deploy must not silently expose account deletion.
+ *  An unset or empty allowlist grants nobody by itself. That fail-closed
+ *  default matters: a misconfigured deploy must not silently expose account
+ *  deletion.
  */
 import type { RequestHandler } from 'express';
 import authUserRepository from '../repositories/auth-users';
@@ -28,35 +26,45 @@ function parseEmailList(raw: string | undefined): string[] {
 }
 
 /**
- * The break-glass allowlist, read from ADMIN_EMAILS.
+ * Two allowlists, and the distinction between them is load-bearing.
  *
- * SUPER_ADMIN_EMAILS is still honoured because it is the name every already
- * deployed environment sets. Before this tier existed that variable was the
- * only authority on /api/admin and /api/platform, and dropping it would have
- * meant a deploy where the new flag is not set on anybody yet, ADMIN_EMAILS is
- * empty (it shipped empty and gated nothing), and the allowlist that exists to
- * survive a broken database is itself the thing that is empty — nobody able to
- * reach the dashboard that grants the flag.
+ * SUPER_ADMIN_EMAILS is the break-glass operator grant. ADMIN_EMAILS is
+ * advisory — a badge in the accounts table, opening no surface on its own.
  *
- * Reading both is not a widening: ADMIN_EMAILS gated no route before this
- * change, so no address gains authority it did not already have. Retire the
- * fallback once every environment has been moved over.
+ * This branch forked before that split, when ADMIN_EMAILS was the only
+ * authority, and built the Firestore flag on top of it. Folding the two names
+ * together on the merge would have promoted every advisory address on a
+ * deployed environment to a full operator, so they stay separate and
+ * SUPER_ADMIN_EMAILS keeps the meaning main gave it. The flag is added
+ * alongside, not instead: see resolveSuperAdmin.
  */
 export function adminEmailAllowlist(): string[] {
-  return [
-    ...parseEmailList(process.env.ADMIN_EMAILS),
-    ...parseEmailList(process.env.SUPER_ADMIN_EMAILS),
-  ];
+  return parseEmailList(process.env.ADMIN_EMAILS);
 }
 
+export function superAdminEmailAllowlist(): string[] {
+  return parseEmailList(process.env.SUPER_ADMIN_EMAILS);
+}
+
+/** The break-glass half of the operator grant. */
+export function isSuperAdminEmail(email: string | undefined): boolean {
+  if (!email) return false;
+  return superAdminEmailAllowlist().includes(email.trim().toLowerCase());
+}
+
+/** Advisory tier. An operator counts as an admin everywhere, so the super list
+ *  is a superset and nobody has to appear in both. */
 export function isAdminEmail(email: string | undefined): boolean {
   if (!email) return false;
-  return adminEmailAllowlist().includes(email.trim().toLowerCase());
+  return (
+    adminEmailAllowlist().includes(email.trim().toLowerCase()) ||
+    isSuperAdminEmail(email)
+  );
 }
 
 /**
- * Superadmin resolution: the Firestore flag is the normal path, the
- * ADMIN_EMAILS allowlist is break-glass.
+ * Superadmin resolution: the Firestore flag is the normal path,
+ * SUPER_ADMIN_EMAILS is break-glass.
  *
  * The flag is what the team actually manages day to day — promote and revoke
  * are a click in the dashboard, effective on the operator's next request. The
@@ -73,7 +81,7 @@ export async function resolveSuperAdmin(
   uid: string | undefined,
   email: string | undefined
 ): Promise<boolean> {
-  if (isAdminEmail(email)) return true;
+  if (isSuperAdminEmail(email)) return true;
   if (!uid) return false;
   try {
     const profile = await authUserRepository.getById(uid);
@@ -104,4 +112,7 @@ const requireSuperAdmin: RequestHandler = (req, res, next) => {
     .catch(next);
 };
 
+// Named as well as default: main's routes import the named binding, this
+// branch's import the default, and both spellings survive the merge.
+export { requireSuperAdmin };
 export default requireSuperAdmin;

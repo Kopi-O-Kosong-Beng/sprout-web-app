@@ -126,7 +126,8 @@ from a shared inbox. Re-running it is safe and is also how you reset a forgotten
 admin password: the uid, PVE stats and history survive.
 
 Creating the account is not what grants access. Add `--superadmin` to set the
-Firestore flag, or put the address in `ADMIN_EMAILS` in `server/.env` — either
+Firestore flag, or put the address in `SUPER_ADMIN_EMAILS` in `server/.env` (`ADMIN_EMAILS` is
+an advisory badge only and opens nothing) — either
 grant alone is enough, and both fail closed. The seed warns when the account
 ends up with neither.
 
@@ -255,6 +256,59 @@ See the database anytime:
 
 ```bash
 npm run inspect:firestore -w server
+```
+
+### Signing in locally without a password
+
+You do not need a real Firebase account to click through the app. On the login
+page, enter:
+
+```
+email:     test@sprout.com
+password:  anything at all — it is not read
+```
+
+That takes a local-only shortcut: no Firebase call, no ID token. The client
+stores a "dev session" and sends `x-dev-uid` / `x-dev-email` headers, which the
+backend's `AUTH_DEV_BYPASS` already understands. You land as an **operator**,
+so `/admin`, `/studio` and `/test` are reachable too.
+
+Two things have to be true for it to work, and both are already set by
+[Step 2](#step-2-create-backend-env-file):
+
+```
+AUTH_DEV_BYPASS=true
+SUPER_ADMIN_EMAILS=...,test@sprout.com    # the address must be on the operator allowlist
+```
+
+The operator part is not special-cased — the server derives `isSuperAdmin`
+from that email through the normal allowlist, so if you take `test@sprout.com`
+out of `SUPER_ADMIN_EMAILS` you still sign in, just as an ordinary player.
+Handy for checking what a non-operator sees. "Log out" clears the session as
+usual.
+
+> **This cannot activate on a deployment.** The client half goes through
+> `import.meta.env.DEV`, which compiles to a literal `false` in `vite build`
+> (it minifies to `function(){return!1}`), so the dev session is always `null`
+> and the headers are never sent. The server half independently requires
+> `AUTH_DEV_BYPASS=true` **and** `NODE_ENV !== 'production'`, and `render.yaml`
+> pins `AUTH_DEV_BYPASS=false`. Neither half alone opens anything: a deployed
+> API refuses these headers even from a locally-run client, and a deployed
+> client never sends them even against a local API.
+>
+> Note the shortcut is inert in the production bundle, not stripped from it —
+> `test@sprout.com` and `sprout-dev-session` are readable in the shipped JS.
+> Nothing relies on them being secret. Still, do not add `test@sprout.com` to
+> `SUPER_ADMIN_EMAILS` (or `ADMIN_EMAILS`) on a deployed environment: that
+> would make it a live operator address the moment anyone creates that
+> Firebase account for real.
+
+To act as a specific user instead — a different archive, say — set the dev
+session yourself in the browser console:
+
+```js
+localStorage.setItem('sprout-dev-session',
+  JSON.stringify({ uid: 'demo-user-0001', email: 'test@sprout.com' }))
 ```
 
 ### The almanac taxonomy
@@ -389,7 +443,9 @@ Render declares SMTP delivery but does not store credentials in `render.yaml`. F
 
 Before deployment, add the Vercel domain in Firebase Console -> Authentication -> Settings -> Authorized domains and set Render `FRONTEND_URL` to that HTTPS origin. Verification links must point to `https://<vercel-domain>/verify-email?...`, and the page must successfully apply the Firebase action code. Firebase remains the authority for identity: the client sends Firebase ID tokens and the backend verifies them.
 
-Firebase Storage is active at `sprout-dev-66f08.firebasestorage.app`. The live Node 22 Admin preflight passed write, exact read-back, and deletion on 2026-07-21. This proves backend credential/bucket access only; Admin SDK requests bypass client Security Rules. Direct client rules and the application Storage adapter remain untested, so Render stays pinned to `STORAGE_MODE=local`. The detailed status and procedure are in [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
+Firebase Storage is active at `sprout-dev-66f08.firebasestorage.app`, and it is the only place sprites go — every scan writes there through `server/services/sprite-storage.ts`. `FIREBASE_STORAGE_BUCKET` is therefore required, not optional: without it the whole scan-to-archive path throws and the player is told their plant could not be saved.
+
+`STORAGE_MODE` used to appear here as a pin holding that back. No code ever read it, so it has been removed from `render.yaml` and `.env` rather than left looking load-bearing. The live Node 22 Admin preflight passed write, exact read-back and deletion on 2026-07-21 (`npm run check:storage -w server` re-runs it). That proves backend credential and bucket access only — Admin SDK requests bypass client Security Rules, and the direct client rules remain untested. Details in [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
 
 ## 6. Backend layout (where to put things)
 
@@ -415,7 +471,7 @@ Rule of thumb: routes stay thin → controllers translate HTTP → services do t
 
 1. Claim your task in `md/tasks.md` (suggested owners are at the top) — put your name
 2. Branch: `git checkout -b feat/task-<n>-<slug>` (e.g. `feat/task-14-avatar-archive-ui`)
-3. Code against `md/requirements.md`; mock external APIs (`USE_MOCK_APIS=true` — never call real plant.id/Gemma/FLUX in dev)
+3. Code against `md/requirements.md`. Keep `USE_MOCK_APIS=true` in `server/.env` unless you are deliberately exercising the real pipeline — it withholds every upstream credential, so Plant.id, Gemini, NVIDIA and withoutBG are never called and a scan costs nothing. A mocked run finishes in well under a second against ~13s live, and ends with `renderSource: "placeholder"`. Set it to `false` when you need real art, and remember each run spends quota on five services.
 4. Done = happy path + error paths work, your module's tests pass, `npm run dev` still boots
 5. Push your branch → open a Pull Request on GitHub → someone else eyeballs it → merge
 6. `git pull` main regularly so integration stays boring

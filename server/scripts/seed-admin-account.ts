@@ -32,7 +32,7 @@
 import '../env';
 import bcrypt from 'bcrypt';
 import authUserRepository from '../repositories/auth-users';
-import { isAdminEmail } from '../middleware/admin.middleware';
+import { isAdminEmail, isSuperAdminEmail } from '../middleware/admin.middleware';
 import { getAuthAdmin } from '../firebase';
 
 const DEFAULT_EMAIL = 'sprout@gmail.com';
@@ -181,19 +181,27 @@ async function run(): Promise<void> {
     return;
   }
 
-  if (isAdminEmail(input.email)) {
+  if (isSuperAdminEmail(input.email)) {
     console.log(
-      'ADMIN_EMAILS lists this address, so the operator tools open via the\n' +
-        'break-glass allowlist even without the flag.'
+      'SUPER_ADMIN_EMAILS lists this address, so the operator tools open via\n' +
+        'the break-glass allowlist even without the flag.'
     );
     return;
   }
+
+  if (isAdminEmail(input.email)) {
+    console.warn(
+      '\nNOTE: this address is in ADMIN_EMAILS, which is advisory only and opens\n' +
+        'no operator surface on its own.'
+    );
+  }
+
   console.warn(
     '\nWARNING: this account has NO superadmin grant, so /api/admin will answer 403\n' +
       'and the dashboard will stay empty. Both grants fail closed by design.\n' +
       'Give it one of:\n\n' +
       `  npm run seed:admin -w server -- ${input.email} '<password>' --superadmin\n` +
-      `  ADMIN_EMAILS=${input.email}   (server/.env + deploy env, then restart)\n`
+      `  SUPER_ADMIN_EMAILS=${input.email}   (server/.env + deploy env, then restart)\n`
   );
 }
 

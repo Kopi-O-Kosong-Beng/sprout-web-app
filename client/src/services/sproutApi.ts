@@ -219,7 +219,9 @@ export interface AuthProfile {
    *  nav appears — it is not a permission. /api/admin and /api/platform
    *  re-resolve the grant on every request and answer 403 regardless. */
   isAdmin: boolean;
-  /** Alias of isAdmin; there is one privilege level, not two. */
+  /** Alias of isAdmin — one privilege level, not two, since the merge folded
+   *  the operator tier into the superadmin grant. Advisory only: /api/admin and
+   *  /api/platform re-resolve the grant on every request. */
   isSuperAdmin?: boolean;
   lastLogin?: string | null;
   lastLogout?: string | null;
@@ -266,6 +268,12 @@ export async function listOwnedAvatars(
     params: { page, pageSize },
   });
   return data;
+}
+
+/** Removes one owned avatar for good (DELETE /api/avatar/:id → 204).
+ *  The archive's shovel; the server answers 404 for anyone else's record. */
+export async function deleteAvatar(avatarId: string): Promise<void> {
+  await apiClient.delete(`/api/avatar/${encodeURIComponent(avatarId)}`);
 }
 
 export async function setDemoAvatars(

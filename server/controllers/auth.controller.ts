@@ -10,7 +10,7 @@ import {
   verifyPasswordReset,
   type PublicProfile,
 } from '../services/auth.service';
-import { resolveSuperAdmin } from '../middleware/admin.middleware';
+import { isAdminEmail, resolveSuperAdmin } from '../middleware/admin.middleware';
 
 export interface ProfileResponse extends PublicProfile {
   isAdmin: boolean;
@@ -19,15 +19,16 @@ export interface ProfileResponse extends PublicProfile {
 
 /** The frontend has to know whether to show the operator nav — Studio, API
  *  Test, Ticket Manager, Admin — and it cannot compute that itself: the grant
- *  is the Firestore flag OR the server's ADMIN_EMAILS allowlist, and the
- *  allowlist is never sent to the client.
+ *  is the Firestore flag OR the server's SUPER_ADMIN_EMAILS allowlist, and
+ *  neither is sent to the client.
  *
- *  Advisory only. Every /api/admin and /api/platform request re-resolves the
- *  grant server-side, so a forged flag in the browser buys nothing but a
- *  dashboard that answers 403.
+ *  Two values, because there are still two tiers. `isSuperAdmin` is the one
+ *  that opens anything; `isAdmin` stays the advisory badge ADMIN_EMAILS grants,
+ *  with an operator counting as an admin everywhere.
  *
- *  `isAdmin` is kept as an alias of the same value so existing callers and
- *  tests keep working; there is one privilege level, not two.
+ *  Both advisory in the browser: every /api/admin and /api/platform request
+ *  re-resolves the grant server-side, so a forged flag in devtools buys nothing
+ *  but a dashboard that answers 403.
  */
 async function withAdminFlag(
   profile: PublicProfile,
@@ -35,7 +36,7 @@ async function withAdminFlag(
   email: string | undefined
 ): Promise<ProfileResponse> {
   const isSuperAdmin = await resolveSuperAdmin(uid, email);
-  return { ...profile, isAdmin: isSuperAdmin, isSuperAdmin };
+  return { ...profile, isAdmin: isAdminEmail(email) || isSuperAdmin, isSuperAdmin };
 }
 
 export const handleSignup: RequestHandler = async (req, res, next) => {
