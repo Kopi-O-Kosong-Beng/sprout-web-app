@@ -1138,6 +1138,29 @@ details[open] > .log-toggle::before {
   background: color-mix(in srgb, var(--color-hp-high) 16%, #fff);
 }
 
+/* Players sharing a rank.
+ *
+ * Competition ranking means seven players on 0 XP are all "2nd", and seven
+ * identical numerals down the column reads as a bug — the same number stamped
+ * over and over, as though the board failed to sort. Alternating the fill makes
+ * the run legible as what it is: distinct people who genuinely tied.
+ *
+ * The shades are two tints of the same neutral rather than two colours, so the
+ * grouping never competes with is-caller's green or the podium fill for
+ * meaning, and both stay legible in greyscale. The caller's own row keeps its
+ * own background — being able to find yourself outranks showing the tie. */
+.rank-row.is-tied {
+  background: rgb(26 26 26 / 0.04);
+}
+
+.rank-row.is-tied.is-tied-alt {
+  background: rgb(255 255 255 / 0.62);
+}
+
+.rank-row.is-tied.is-caller {
+  background: color-mix(in srgb, var(--color-hp-high) 16%, #fff);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .damage-float,
   .hit-shake,
