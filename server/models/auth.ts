@@ -16,6 +16,9 @@ export interface AuthUserProfile {
   email: string;
   displayName: string;
   isVerified: boolean;
+  /** What auto-provisioning wanted to call them before it found the name
+   *  taken. Present until the client has told them and cleared it. */
+  displayNameAdjustedFrom?: string;
   authProvider?: AuthProviderTag;
   /** Grants the operator tools: Studio, API Test, Ticket Manager, Admin.
    *
@@ -46,6 +49,10 @@ export interface CreateAuthUserProfile {
   passwordHash: string;
   authProvider?: AuthProviderTag;
   isSuperAdmin?: boolean;
+  /** Set only when auto-provisioning had to change the name it derived from
+   *  the email because someone already had it. Holds what was asked for, so
+   *  the client can say what happened, and is cleared once it has. */
+  displayNameAdjustedFrom?: string;
 }
 
 export interface PasswordHistoryEntry {
@@ -60,6 +67,9 @@ export interface AuthUserRepository {
   getById(id: string): Promise<AuthUserProfile | null>;
   getByEmail(email: string): Promise<AuthUserProfile | null>;
   getByDisplayName(displayName: string): Promise<AuthUserProfile | null>;
+  /** Clears the one-time notice that auto-provisioning renamed this account,
+   *  once the client has shown it to the player. */
+  clearDisplayNameNotice(id: string): Promise<void>;
   markVerified(id: string): Promise<void>;
   setAuthProvider(id: string, authProvider: AuthProviderTag): Promise<void>;
   setSuperAdmin(id: string, isSuperAdmin: boolean): Promise<void>;

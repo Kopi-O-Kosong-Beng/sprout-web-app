@@ -1375,3 +1375,85 @@ describe('auth provider takeover', () => {
     expect(res.body.error).toMatch(/continue with google/i);
   });
 });
+
+/**
+ * Signup rejects a display name someone already holds. Auto-provisioning —
+ * Google sign-in, mainly — took the email's local part and wrote it unchecked,
+ * so two people at different domains called `nat@` both became "nat":
+ * indistinguishable on the leaderboard, and an almanac crediting a discovery to
+ * a name shared by two. Same rule both ways now, except that nobody is here to
+ * retype anything, so a collision is resolved rather than refused.
+ */
+describe('auto-provisioned display names', () => {
+  /** Signs the next request in as this identity, provisioning on first use. */
+  async function meAs(uid: string, email: string) {
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid,
+      email,
+      email_verified: true,
+    });
+    return request(app).get('/api/auth/me').set('Authorization', `Bearer ${uid}-token`);
+  }
+
+  async function ackAs(uid: string, email: string) {
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid,
+      email,
+      email_verified: true,
+    });
+    return request(app)
+      .post('/api/auth/display-name-notice/ack')
+      .set('Authorization', `Bearer ${uid}-token`);
+  }
+
+  it('keeps the name when nobody has it', async () => {
+    const response = await meAs('fresh-uid', 'solo@example.com');
+
+    expect(response.status).toBe(200);
+    expect(response.body.displayName).toBe('solo');
+    expect(response.body.displayNameAdjustedFrom).toBeUndefined();
+  });
+
+  it('assigns a free variant when the name is taken, and says which', async () => {
+    await meAs('first-uid', 'nat@gmail.com');
+    const second = await meAs('second-uid', 'nat@outlook.com');
+
+    expect(second.status).toBe(200);
+    expect(second.body.displayName).toBe('nat2');
+    // The client needs the wanted name to explain what happened.
+    expect(second.body.displayNameAdjustedFrom).toBe('nat');
+  });
+
+  it('keeps walking until it finds a free one', async () => {
+    await meAs('walk-0', 'sam@a.com');
+    await meAs('walk-1', 'sam@b.com');
+    await meAs('walk-2', 'sam@c.com');
+
+    const fourth = await meAs('walk-3', 'sam@d.com');
+
+    expect(fourth.body.displayName).toBe('sam4');
+  });
+
+  it('drops the notice once acknowledged, and stays dropped', async () => {
+    await meAs('ack-first', 'kim@gmail.com');
+    const renamed = await meAs('ack-second', 'kim@outlook.com');
+    expect(renamed.body.displayNameAdjustedFrom).toBe('kim');
+
+    const ack = await ackAs('ack-second', 'kim@outlook.com');
+    expect(ack.status).toBe(204);
+
+    const after = await meAs('ack-second', 'kim@outlook.com');
+    expect(after.body.displayNameAdjustedFrom).toBeUndefined();
+    expect(after.body.displayName).toBe('kim2');
+  });
+
+  it('treats a second acknowledgement as a no-op, since two tabs will both send it', async () => {
+    await meAs('twice-uid', 'lee@example.com');
+
+    const first = await ackAs('twice-uid', 'lee@example.com');
+    const second = await ackAs('twice-uid', 'lee@example.com');
+
+    expect(first.status).toBe(204);
+    expect(second.status).toBe(204);
+  });
+});

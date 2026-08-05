@@ -10,7 +10,11 @@ const FEATURES = [
     icon: Database,
     tone: 'text-brand',
     title: 'Firestore',
-    body: 'Documents sync in real time through onSnapshot observers.',
+    // Was "Documents sync in real time through onSnapshot observers", which
+    // described the browser-side subscription that firestore.rules has always
+    // denied. The reads it advertised are gone; the database is reached through
+    // the backend, and that is the claim worth making.
+    body: 'Every read and write goes through the backend, never the browser.',
   },
   {
     icon: Lock,

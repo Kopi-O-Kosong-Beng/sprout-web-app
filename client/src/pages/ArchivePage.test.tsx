@@ -253,6 +253,33 @@ describe('ArchivePage', () => {
     expect(screen.queryByText('Monstera Scout')).not.toBeInTheDocument();
   });
 
+  /**
+   * The specimen card keyed PlantAvatar and SpecimenPhoto on the bare avatar
+   * id. They are siblings, so both carried the same key: React warned about
+   * duplicate keys and then duplicated rather than replaced them, so every
+   * selection left the previous plant's sprite and pot behind and the card
+   * grew a stack. Deleting did it too, since removing a plant reselects.
+   */
+  it('shows only the selected plant on the card after switching', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue(collectedPage);
+    const { user } = renderArchive();
+
+    expect(await screen.findByRole('heading', { name: 'Fern Ward' })).toBeVisible();
+
+    const card = () => screen.getByRole('heading', { name: /Ward|Flare|Scout/ }).closest('.pixel-panel')!;
+    const spritesOn = (element: Element) =>
+      Array.from(element.querySelectorAll('img.plant-sprite'));
+
+    await user.click(screen.getByRole('button', { name: /select orchid flare/i }));
+    await user.click(screen.getByRole('button', { name: /select fern ward/i }));
+    await user.click(screen.getByRole('button', { name: /select orchid flare/i }));
+    await user.click(screen.getByRole('button', { name: /select fern ward/i }));
+
+    // One creature on the card, and it is the one just chosen.
+    expect(spritesOn(card())).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Fern Ward' })).toBeVisible();
+  });
+
   it('adds and removes only demo plants through the switch', async () => {
     apiMocks.listOwnedAvatars
       .mockResolvedValueOnce(emptyPage)

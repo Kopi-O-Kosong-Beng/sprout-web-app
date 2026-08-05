@@ -4,6 +4,7 @@ import { NavigationLockProvider } from './context/NavigationLockProvider';
 import AppHeader from './components/common/AppHeader';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import { ToastProvider } from './components/common/Toast';
+import DisplayNameNotice from './components/common/DisplayNameNotice';
 import SuperAdminRoute from './components/common/SuperAdminRoute';
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
@@ -79,6 +80,7 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
+          <DisplayNameNotice />
           <NavigationLockProvider>
             <Routes>
               <Route element={<DocumentLayout />}>

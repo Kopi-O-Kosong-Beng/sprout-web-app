@@ -166,3 +166,82 @@ describe('LeaderboardPage', () => {
     });
   });
 });
+
+/**
+ * Competition ranking gives every player on the same score the same number, so
+ * a board where nobody has battled is seven players all called "2nd". Seven
+ * identical numerals down the column reads as a bug, so a tied run alternates
+ * its fill — and says so to a screen reader, which cannot see the run at all.
+ */
+describe('players sharing a rank', () => {
+  function tiedBoards(): Leaderboards {
+    return boards({
+      xp: {
+        entries: [
+          { rank: 1, displayName: 'Ada', xp: 140, wins: 4, losses: 1, bestWinStreak: 3, isCaller: false },
+          { rank: 2, displayName: 'Bo', xp: 65, wins: 2, losses: 2, bestWinStreak: 1, isCaller: false },
+          { rank: 2, displayName: 'Cy', xp: 65, wins: 2, losses: 2, bestWinStreak: 1, isCaller: false },
+          { rank: 2, displayName: 'Di', xp: 65, wins: 2, losses: 2, bestWinStreak: 1, isCaller: false },
+        ],
+        caller: { rank: 1, displayName: 'Ada', xp: 140, wins: 4, losses: 1, bestWinStreak: 3 },
+        totalPlayers: 4,
+      },
+    });
+  }
+
+  /** Scoped to the XP board — the default fixture puts some of the same names
+   *  on the discovery board too. */
+  function rowFor(name: string): HTMLElement {
+    const board = screen.getByRole('list', { name: /experience ranking/i });
+    return within(board).getByText(name).closest('li')!;
+  }
+
+  it('alternates the fill across a tied run so it does not read as a repeat', async () => {
+    apiMocks.getLeaderboards.mockResolvedValue(tiedBoards());
+    renderPage();
+
+    // findAll, not find: the default fixture puts some names on both boards.
+    await screen.findAllByText('Ada');
+
+    // The run alternates; the untied leader is not part of it.
+    expect(rowFor('Ada').className).not.toContain('is-tied');
+    expect(rowFor('Bo').className).toContain('is-tied');
+    expect(rowFor('Bo').className).not.toContain('is-tied-alt');
+    expect(rowFor('Cy').className).toContain('is-tied-alt');
+    expect(rowFor('Di').className).not.toContain('is-tied-alt');
+  });
+
+  it('tells a screen reader the rank and that it is shared', async () => {
+    apiMocks.getLeaderboards.mockResolvedValue(tiedBoards());
+    renderPage();
+
+    await screen.findAllByText('Ada');
+
+    // The numeral itself is decorative; this is the only announcement there is.
+    expect(within(rowFor('Ada')).getByText('Rank 1.')).toBeInTheDocument();
+    expect(
+      within(rowFor('Bo')).getByText('Rank 2, tied with 2 other players.')
+    ).toBeInTheDocument();
+  });
+
+  it('says "player" rather than "players" for a tie of two', async () => {
+    apiMocks.getLeaderboards.mockResolvedValue(
+      boards({
+        xp: {
+          entries: [
+            { rank: 1, displayName: 'Bo', xp: 65, wins: 2, losses: 2, bestWinStreak: 1, isCaller: false },
+            { rank: 1, displayName: 'Cy', xp: 65, wins: 2, losses: 2, bestWinStreak: 1, isCaller: false },
+          ],
+          caller: { rank: 1, displayName: 'Bo', xp: 65, wins: 2, losses: 2, bestWinStreak: 1 },
+          totalPlayers: 2,
+        },
+      })
+    );
+    renderPage();
+
+    const board = await screen.findByRole('list', { name: /experience ranking/i });
+    expect(
+      within(board).getAllByText('Rank 1, tied with 1 other player.')
+    ).toHaveLength(2);
+  });
+});

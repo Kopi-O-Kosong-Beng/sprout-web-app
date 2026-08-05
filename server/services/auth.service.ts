@@ -51,6 +51,9 @@ export interface PublicProfile {
   email: string;
   displayName: string;
   emailVerified: boolean;
+  /** Present once, on the sign-in where the name was taken and a variant was
+   *  assigned. The client tells the player and clears it. */
+  displayNameAdjustedFrom?: string;
   authProvider?: AuthProviderTag;
   lastLogin?: string | null;
   lastLogout?: string | null;
@@ -96,6 +99,9 @@ function toPublicProfile(profile: AuthUserProfile): PublicProfile {
     email: profile.email,
     displayName: profile.displayName,
     emailVerified: profile.isVerified,
+    ...(profile.displayNameAdjustedFrom
+      ? { displayNameAdjustedFrom: profile.displayNameAdjustedFrom }
+      : {}),
     ...(profile.authProvider ? { authProvider: profile.authProvider } : {}),
     lastLogin: profile.lastLogin ?? null,
     lastLogout: profile.lastLogout ?? null,
@@ -301,6 +307,30 @@ export async function resendVerificationEmail(
   );
 }
 
+/**
+ * The requested display name, or the first free variant of it.
+ *
+ * Suffixes rather than rejects because this runs where no human is waiting to
+ * retype: an auto-provisioned account is mid-sign-in. Bounded so a popular
+ * prefix cannot turn one sign-in into an unbounded scan; past the bound the
+ * uid is appended, which is unique by construction and ends the search.
+ */
+const MAX_DISPLAY_NAME_ATTEMPTS = 25;
+
+export async function findFreeDisplayName(
+  requested: string,
+  uid?: string
+): Promise<string> {
+  const base = requested.trim() || 'player';
+  if (!(await authUserRepository.getByDisplayName(base))) return base;
+
+  for (let suffix = 2; suffix <= MAX_DISPLAY_NAME_ATTEMPTS; suffix += 1) {
+    const candidate = `${base}${suffix}`;
+    if (!(await authUserRepository.getByDisplayName(candidate))) return candidate;
+  }
+  return uid ? `${base}-${uid.slice(0, 6)}` : `${base}-${Date.now().toString(36)}`;
+}
+
 export async function getCurrentUserProfile(
   uid: string,
   email: string | undefined,
@@ -310,12 +340,24 @@ export async function getCurrentUserProfile(
   let profile = await authUserRepository.getById(uid);
   if (!profile) {
     const fallbackEmail = email ?? `${uid}@unknown.sprout`;
+    // Signup rejects a display name someone already has; this path took the
+    // email's local part and wrote it unchecked, so nat@gmail.com and
+    // nat@outlook.com both became "nat" — two identical rows on the
+    // leaderboard, and an almanac crediting a discovery to a name shared by
+    // two people. Same rule both ways in now, except that nobody is here to
+    // retype anything: a collision is resolved rather than refused.
+    const requested = fallbackEmail.split('@')[0];
+    const displayName = await findFreeDisplayName(requested);
     profile = await authUserRepository.createProfile({
       id: uid,
       email: normalizeEmail(fallbackEmail),
-      displayName: fallbackEmail.split('@')[0],
+      displayName,
       isVerified: emailVerified === true,
       passwordHash: '',
+      // Recorded only when it had to be changed, so the client can say so once
+      // and then clear it. Nobody chose this name, so being told is the least
+      // it is owed.
+      ...(displayName === requested ? {} : { displayNameAdjustedFrom: requested }),
       ...(facts.authProvider ? { authProvider: facts.authProvider } : {}),
     });
   }

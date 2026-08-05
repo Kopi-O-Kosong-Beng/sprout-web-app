@@ -463,10 +463,20 @@ function SpecimenCard({
   return (
     <div className="pixel-panel mt-4 p-4">
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
+        {/*
+          Both are keyed on the plant so switching selection remounts them —
+          SpecimenPhoto holds a `failed` flag that must not carry over, or one
+          plant's broken image would hide the next plant's good one.
+
+          The prefixes are load-bearing. These are siblings, so keying both on
+          the bare id gave two children the same key: React warned, then
+          duplicated rather than replaced them, and the card grew a second
+          sprite and pot on every selection — three plants stacked after two
+          clicks, and the same on a delete, since that reselects too.
+        */}
         <div className="flex flex-col items-center gap-2">
-          <PlantAvatar key={avatar.id} avatar={avatar} large />
-          {/* Keyed so a failed load on one plant does not hide the next one's. */}
-          <SpecimenPhoto key={avatar.id} avatar={avatar} />
+          <PlantAvatar key={`avatar-${avatar.id}`} avatar={avatar} large />
+          <SpecimenPhoto key={`photo-${avatar.id}`} avatar={avatar} />
         </div>
 
         <div className="min-w-0 flex-1 text-center sm:text-left">

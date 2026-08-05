@@ -5,6 +5,7 @@ import {
   handleMe,
   handleRequestReset,
   handleResendVerification,
+  handleAckDisplayNameNotice,
   handleSessionLogin,
   handleSessionLogout,
   handleSignInMethod,
@@ -77,6 +78,11 @@ router.post(
   handleSignInMethod
 );
 router.get('/me', authMiddleware, handleMe);
+router.post(
+  '/display-name-notice/ack',
+  unverifiedAuthMiddleware,
+  handleAckDisplayNameNotice
+);
 router.post('/session/login', unverifiedAuthMiddleware, handleSessionLogin);
 router.post('/session/logout', unverifiedAuthMiddleware, handleSessionLogout);
 router.post(

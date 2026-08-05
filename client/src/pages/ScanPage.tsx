@@ -240,6 +240,9 @@ export default function ScanPage() {
      *  `null` for the rest of the run, so the read after the stream could not
      *  narrow back to the object. */
     let lowConfidence = null as { name: string; probability: number; threshold: number } | null;
+    /** Set when the server could not identify the plant at all and is asking
+     *  the player to name it themselves. */
+    let needsName = false;
     let savedOutcome: { saved: boolean; saveError?: string; discovery: ScanDiscovery | null } = {
       saved: true,
       discovery: null,
@@ -296,6 +299,10 @@ export default function ScanPage() {
             };
           }
 
+          if (event.event === 'needs_name') {
+            needsName = true;
+            return;
+          }
           if (event.event === 'low_confidence') {
             lowConfidence = {
               name: String(event.name ?? 'that plant'),
@@ -310,6 +317,14 @@ export default function ScanPage() {
         },
         controller.signal
       );
+
+      // Plant.id could not name it, so the player is asked. This is the state
+      // NameDialog has always been written for; nothing used to reach it,
+      // because the server invented "Unknown Plant Species" instead.
+      if (needsName) {
+        setStatus({ kind: 'naming', photo: jpegDataUrl, source });
+        return;
+      }
 
       // The server stops before generating when it is not sure enough, so a
       // missing sprite here is expected rather than a fault.

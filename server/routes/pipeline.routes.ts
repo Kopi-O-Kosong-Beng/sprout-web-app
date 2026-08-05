@@ -118,13 +118,42 @@ router.post('/run-stream', async (req: Request, res: Response) => {
     let identifiedSpecies = !isMockIdentification(serverEnv.plantApiKey);
 
     if ('error' in identification || identification.needsName) {
+      /*
+       * Ask, rather than invent.
+       *
+       * This substituted "Unknown Plant Species" and carried on: a render, a
+       * cutout and a judge call spent on a name nobody chose, filed in the
+       * archive under a label that says nothing. The Scan screen has had a
+       * dialog for this since the Android port — "Couldn't identify it
+       * automatically. What would you like to call it?" — and nothing ever
+       * opened it, because this branch answered the question itself.
+       *
+       * The run stops here and the client opens that dialog. Whatever the
+       * player types comes back as customName on a second run, which the
+       * override below already honours, so the naming path is the one that was
+       * always intended rather than a new one.
+       *
+       * A caller that already supplied a name skips this entirely — the
+       * question is answered.
+       */
+      const supplied = typeof customName === 'string' ? customName.trim() : '';
+      if (!supplied) {
+        sendEvent({
+          event: 'needs_name',
+          step: '1',
+          error: identification.error || 'Could not identify this plant.',
+        });
+        res.end();
+        return;
+      }
+
       idSuccess = false;
       identifiedSpecies = false;
       idMsg = identification.error || 'Plant identification low confidence';
       identification = {
-        name: customName || 'Unknown Plant Species',
+        name: supplied,
         probability: 0.5,
-        common_names: [customName || 'Plant Monster'],
+        common_names: [supplied],
         taxonomy: { Kingdom: 'Plantae' },
       };
     } else {
