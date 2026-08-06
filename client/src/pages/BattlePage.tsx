@@ -538,6 +538,17 @@ export default function BattlePage() {
   const [notice, setNotice] = useState<
     { kind: 'stale' | 'abandoned'; message: string } | null
   >(null);
+  /** Abandon is destructive, irreversible and one Enter away from the moves
+   *  in tab order, so it asks before it acts.
+   *
+   *  Stored as the exact match and turn the question was asked about, not a
+   *  boolean, so `confirmingAbandon` below can be derived. A boolean needed an
+   *  effect to clear it when the battle moved on underneath the prompt, and an
+   *  effect clears one render late — long enough for the panel to repaint
+   *  itself against the NEW turn while still describing the old one. */
+  const [abandonPromptFor, setAbandonPromptFor] = useState<
+    { sessionId: string; turnNumber: number } | null
+  >(null);
   const requestVersion = useRef(0);
   const inFlight = useRef(false);
   const releaseNavigationLock = useRef<(() => void) | null>(null);
@@ -755,6 +766,7 @@ export default function BattlePage() {
     if (!session) return;
     writeStoredSessionId(session.status === 'active' ? session.id : null);
   }, [session]);
+
 
   const runStart = useCallback(
     async (avatarId: string, kind: 'start' | 'replay') => {
@@ -1031,6 +1043,15 @@ export default function BattlePage() {
    *  turns with one turn's log unseen. */
   const turnResolving = cinematic !== null;
   const sessionCommandFailed = view === 'error' && session !== null;
+  /** Derived, so the prompt cannot outlive the exact state it described: any
+   *  change of match, turn or status makes this false in the very same render
+   *  that shows the change, with no stale frame in between. */
+  const confirmingAbandon =
+    session !== null &&
+    session.status === 'active' &&
+    abandonPromptFor !== null &&
+    abandonPromptFor.sessionId === session.id &&
+    abandonPromptFor.turnNumber === session.turnNumber;
   const showSelection = session === null && view !== 'loading';
 
   const selectAvatar = (avatarId: string) => {
@@ -1560,18 +1581,69 @@ export default function BattlePage() {
                     Quitting is not a move. Full-width solid red gave it more
                     visual weight than the four moves above it, which is exactly
                     backwards for the one control a player should rarely want.
+
+                    It is also destructive and irreversible — the match is
+                    ended server-side with no resume path — and it sits one
+                    Enter away from the four moves in tab order. So it asks
+                    first. Inline rather than a window.confirm: the same
+                    pixel-panel language as the rest of the board, and it says
+                    what is actually lost (this turn's progress, zero XP)
+                    rather than a bare "Are you sure?".
                   */}
-                  <button
-                    className="mt-3 w-full py-2 text-[12px] font-semibold underline underline-offset-2 disabled:opacity-45"
-                    style={{ color: 'var(--color-hp-low)' }}
-                    type="button"
-                    disabled={
-                      commandLocked || sessionCommandFailed || turnResolving
-                    }
-                    onClick={() => void runAbandon(session.id)}
-                  >
-                    Abandon Match
-                  </button>
+                  {confirmingAbandon ? (
+                    <div
+                      className="pixel-panel mt-3 p-3"
+                      role="alertdialog"
+                      aria-label="Confirm abandoning this match"
+                      ref={scrollErrorIntoView}
+                    >
+                      <strong className="font-pixel block text-[9px] leading-relaxed">
+                        Abandon this match?
+                      </strong>
+                      <p className="mt-1.5 text-[11px] leading-relaxed opacity-80">
+                        Turn {session.turnNumber} and everything before it is
+                        lost. The match ends now, it cannot be resumed, and it
+                        awards 0 XP.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          className="press pixel-button px-3 py-2 text-[9px]"
+                          type="button"
+                          onClick={() => setAbandonPromptFor(null)}
+                        >
+                          Keep playing
+                        </button>
+                        <button
+                          className="press pixel-button px-3 py-2 text-[9px]"
+                          style={{ color: 'var(--color-hp-low)' }}
+                          type="button"
+                          onClick={() => {
+                            setAbandonPromptFor(null);
+                            void runAbandon(session.id);
+                          }}
+                        >
+                          Abandon, lose progress
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      className="mt-3 w-full py-2 text-[12px] font-semibold underline underline-offset-2 disabled:opacity-45"
+                      style={{ color: 'var(--color-hp-low)' }}
+                      type="button"
+                      disabled={
+                        commandLocked || sessionCommandFailed || turnResolving
+                      }
+                      onClick={() =>
+                        setAbandonPromptFor({
+                          sessionId: session.id,
+                          turnNumber: session.turnNumber,
+                        })
+                      }
+                    >
+                      Abandon Match
+                    </button>
+                  )}
                 </>
               ) : cinematic ? (
                 /* Hold the result while the final turn's choreography drains

@@ -240,6 +240,17 @@ async function enterActiveBattle(session = battleSession()) {
   return view;
 }
 
+/** Abandon is a two-step gesture now — it asks before it ends the match. The
+ *  tests that are about what abandoning DOES go through both steps here, so
+ *  the confirmation is asserted in one place (the tests that own it) rather
+ *  than re-asserted in every one of them. */
+async function confirmAbandon(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /abandon match/i }));
+  await user.click(
+    screen.getByRole('button', { name: /abandon, lose progress/i })
+  );
+}
+
 describe('BattlePage', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -929,7 +940,7 @@ describe('BattlePage', () => {
     apiMocks.abandonPveBattle.mockReturnValue(request.promise);
     const { user } = await enterActiveBattle();
 
-    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    await confirmAbandon(user);
     expect(apiMocks.abandonPveBattle).toHaveBeenCalledWith('battle-1');
     expect(screen.getByRole('button', { name: /abandon match/i })).toBeDisabled();
     expect(screen.getByRole('status', { name: /abandoning battle/i })).toBeVisible();
@@ -951,7 +962,7 @@ describe('BattlePage', () => {
       .mockResolvedValueOnce(battleSession({ status: 'abandoned' }));
     const { user } = await enterActiveBattle();
 
-    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    await confirmAbandon(user);
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Abandon request failed.'
     );
@@ -1062,7 +1073,7 @@ describe('BattlePage', () => {
     const { user } = renderBattle();
 
     await screen.findByRole('heading', { name: /turn 1/i });
-    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    await confirmAbandon(user);
 
     // The abandon receipt must not be hostage to the roster's arrival…
     expect(
@@ -1072,6 +1083,65 @@ describe('BattlePage', () => {
     expect(
       await screen.findByRole('button', { name: /select fern ward/i })
     ).toBeVisible();
+  });
+
+  /*
+    Abandon ends the match server-side with no resume path and awards nothing,
+    and it sits one Enter away from the four moves in tab order. It used to
+    fire on the first press with no warning.
+  */
+  it('asks before abandoning, and does nothing if the player backs out', async () => {
+    const { user } = await enterActiveBattle();
+
+    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    const prompt = await screen.findByRole('alertdialog', {
+      name: /confirm abandoning this match/i,
+    });
+    expect(prompt).toHaveTextContent(/cannot be resumed/i);
+    expect(prompt).toHaveTextContent(/0 XP/i);
+    expect(apiMocks.abandonPveBattle).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /keep playing/i }));
+    expect(apiMocks.abandonPveBattle).not.toHaveBeenCalled();
+    // Still mid-battle, with the turn intact.
+    expect(screen.getByRole('heading', { name: /turn 1/i })).toBeVisible();
+  });
+
+  it('abandons only on the second, explicit confirmation', async () => {
+    const { user } = await enterActiveBattle();
+
+    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    await user.click(
+      screen.getByRole('button', { name: /abandon, lose progress/i })
+    );
+
+    expect(apiMocks.abandonPveBattle).toHaveBeenCalledWith('battle-1');
+    expect(
+      await screen.findByRole('status', { name: /battle abandoned/i })
+    ).toHaveTextContent(/0 xp awarded/i);
+  });
+
+  it('drops a stale confirmation if the battle moves on underneath it', async () => {
+    const { user } = await enterActiveBattle();
+    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    expect(
+      screen.getByRole('alertdialog', { name: /confirm abandoning/i })
+    ).toBeVisible();
+
+    // A bfcache revalidate lands a newer turn while the prompt is open. The
+    // prompt described turn 1; answering it now would answer for turn 3.
+    apiMocks.getPveBattle.mockResolvedValue(battleSession({ turnNumber: 3 }));
+    const restore = new Event('pageshow');
+    Object.defineProperty(restore, 'persisted', { value: true });
+    act(() => {
+      window.dispatchEvent(restore);
+    });
+
+    expect(await screen.findByRole('heading', { name: /turn 3/i })).toBeVisible();
+    expect(
+      screen.queryByRole('alertdialog', { name: /confirm abandoning/i })
+    ).not.toBeInTheDocument();
+    expect(apiMocks.abandonPveBattle).not.toHaveBeenCalled();
   });
 
   it('returns focus to the committed move once the turn settles', async () => {
