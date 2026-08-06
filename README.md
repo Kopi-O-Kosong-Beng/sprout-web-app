@@ -86,6 +86,7 @@ npm test -w client            # Vitest + React Testing Library
 | Server integration & API | 40 | Jest + Supertest against the Firestore Emulator |
 | Pipeline & fuzzing | 13 | Vitest |
 | Client components & routing | 26 | Vitest + React Testing Library |
+| End-to-end journeys | 3 | Playwright (Chromium) — on demand, `npm run test:e2e` |
 
 Test design is documented in [`md/FUZZ_TESTING.md`](md/FUZZ_TESTING.md) (the
 image ingest gate and its mutation fuzzer) and in the evidence records under
