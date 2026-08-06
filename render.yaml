@@ -19,10 +19,29 @@ services:
         value: "false"
       - key: DEMO_AUTH_BYPASS_USER_ID
         value: demo-user-0001
+      # resend, not smtp. Render's free tier blackholes outbound SMTP on 587,
+      # so the Gmail transport times out and delivers nothing — the reason the
+      # Resend HTTPS transport exists at all.
+      #
+      # This line previously said `smtp` while the dashboard had been switched
+      # to `resend` by hand. That is a silent trap rather than a harmless
+      # mismatch: the blueprint is the declared source of truth, so the next
+      # sync would have pushed `smtp` back and email would have stopped
+      # delivering with no code change and nothing in the diff to explain it.
       - key: EMAIL_MODE
-        value: smtp
+        value: resend
       - key: EMAIL_FROM
         value: hello.sprout.team@gmail.com
+      # Declared here, valued in the dashboard. Declaring a secret with
+      # `sync: false` is not the same as omitting it: it records that the
+      # service needs the variable — email.service.ts reads both — without the
+      # value entering git. Omitting them entirely is how the next person
+      # rebuilding this service from the blueprint ends up with a backend that
+      # boots fine and quietly cannot send anything.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
       # Three different jobs, not typos for each other:
       #   ADMIN_EMAIL        (singular) -> where UC8 contact tickets are sent
       #                                    (ticket.service.ts:10)

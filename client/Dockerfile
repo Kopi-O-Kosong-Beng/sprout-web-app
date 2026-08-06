@@ -1,3 +1,17 @@
+# check=skip=SecretsUsedInArgOrEnv
+#
+# The skip above is a judgement, not a silencing. BuildKit's linter matches on
+# variable NAMES, so `VITE_FIREBASE_API_KEY` trips its secrets rule. Firebase
+# *web* config is not a secret: it is an identifier that must reach the browser
+# to work, it is already publicly downloadable from our Vercel bundle
+# (client/dist/assets/index-*.js), and access is enforced by Firebase Security
+# Rules plus the server's ID-token verification — never by concealing this key.
+#
+# The values that ARE secret — FIREBASE_SERVICE_ACCOUNT_JSON, SMTP_PASS,
+# RESEND_API_KEY — appear in no Dockerfile in this repository, and the API image
+# receives them at run time from the platform rather than at build time. If that
+# ever stops being true, this skip must be removed rather than extended.
+#
 # Sprout frontend — production image.
 #
 # Build from the REPOSITORY ROOT:
