@@ -24,8 +24,8 @@ understate the suite by a third and would not reconcile against a live demo.
 | Server integration & API | 40 | **565** | Jest + Supertest, Firestore Emulator | `firebase emulators:exec --only firestore -- jest --runInBand` |
 | Client components & routing | 26 | **265** | Vitest + React Testing Library | `npm test -w client` |
 | Pipeline & fuzzing | 13 | **113** | Vitest | `npm run test:pipeline -w server` |
-| End-to-end journeys | 2 | **6** | Playwright, Chromium | `npm run test:e2e` |
-| **Total** | **81** | **949** | | |
+| End-to-end journeys | 5 | **11** | Playwright, Chromium + Firestore/Auth/Storage emulators | `npm run test:e2e` |
+| **Total** | **84** | **954** | | |
 
 All four suites green on commit `fb420d5`, 2026-08-06. Server suite runtime
 107.8 s; E2E ~50 s including stack boot.
@@ -44,10 +44,14 @@ coverage of the *right* things.
 - **Pipeline & fuzzing (113).** The six pipeline stages plus the image ingest
   gate and its mutation fuzzer — 8 mutation strategies against a seed corpus of
   real plant photos, deterministic by injected seed. See [[Robustness and Fuzzing]].
-- **E2E (6).** The only tier that starts at the user and ends at the user: a real
+- **E2E (11).** The only tier that starts at the user and ends at the user: a real
   browser drives the real React build, real Express, and a real Firestore
-  emulator. Nothing between the click and the database is substituted; the four
-  paid providers are, via `USE_MOCK_APIS`, and that seam is disclosed.
+  emulator — and, since 6 Aug evening, the Auth and Storage emulators too, so
+  real signup and the full scan→archive persist path are exercised. Nothing
+  between the click and the database is substituted; the four paid providers
+  are, via `USE_MOCK_APIS`, and that seam is disclosed. Coverage: UC1, UC4,
+  UC5, UC6→UC4, UC8, plus the public-route posture. Mapping in
+  `docs/TEST_TRACEABILITY.md`.
 
 ## Runs on every pull request
 

@@ -6,6 +6,13 @@ Sprout — the reasoning behind the code, kept alongside it.
 Open the folder in Obsidian for the linked graph view, or read any file as plain
 Markdown. The `[[double bracket]]` links are wiki-links between notes.
 
+![The vault's knowledge graph — 50+ interlinked decision notes](_attachments/obsidian-graph.png)
+
+*The graph above is this folder: every node is a decision note, every edge a
+`[[wiki-link]]` between two of them. Clusters form naturally around
+requirements, design, testing, and the meeting record — which is itself a
+picture of how the project's concerns connect.*
+
 ---
 
 ## Why this is in the repository

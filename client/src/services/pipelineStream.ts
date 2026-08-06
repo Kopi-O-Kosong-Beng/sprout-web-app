@@ -1,5 +1,6 @@
 import { getSproutFirebaseAuth, isFirebaseConfigured } from './firebaseClient';
 import { API_BASE_URL } from './apiClient';
+import { getDevSession } from './devSession';
 
 /**
  * Server-sent-event client for the sprite pipeline.
@@ -58,6 +59,24 @@ function isNetworkFailure(error: unknown): boolean {
 
 async function authHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+  // Mirror apiClient's dev-session branch exactly. This module cannot use
+  // apiClient (axios buffers the whole response; SSE needs the raw reader), so
+  // it authenticates on its own — and until it learned this branch, it only
+  // knew the Bearer path. The result was a hole in the local dev experience
+  // the E2E suite exposed: the dev sign-in shortcut could browse the archive
+  // and fight battles, but every scan answered 401, because this was the one
+  // authenticated call that never sent the x-dev headers. Same fencing as
+  // apiClient: getDevSession() is hard-wired null in production builds, and
+  // the server ignores these headers unless AUTH_DEV_BYPASS is on outside
+  // production.
+  const devSession = getDevSession();
+  if (devSession) {
+    headers['x-dev-uid'] = devSession.uid;
+    headers['x-dev-email'] = devSession.email;
+    return headers;
+  }
+
   if (isFirebaseConfigured()) {
     const token = await getSproutFirebaseAuth().currentUser?.getIdToken();
     if (token) headers.Authorization = `Bearer ${token}`;

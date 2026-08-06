@@ -1,5 +1,11 @@
 # 🌱 Sprout
 
+[![tests](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/tests.yml/badge.svg)](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/tests.yml)
+[![docker](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/docker.yml/badge.svg)](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/docker.yml)
+![TypeScript](https://img.shields.io/badge/TypeScript-100%25-3178c6)
+![tests](https://img.shields.io/badge/tests-954%20passing-2ea44f)
+![container](https://img.shields.io/badge/image-ghcr.io-blue)
+
 **Scan a real plant. Get a creature. Battle with it.**
 
 Sprout turns plant identification into a collection game. Photograph a plant, a
@@ -86,8 +92,8 @@ npm test -w client            # Vitest + React Testing Library
 | Server integration & API | 40 | 565 | Jest + Supertest against the Firestore Emulator |
 | Client components & routing | 26 | 265 | Vitest + React Testing Library |
 | Pipeline & fuzzing | 13 | 113 | Vitest |
-| End-to-end journeys | 2 | 6 | Playwright (Chromium) against the real stack |
-| **Total** | **81** | **949** | |
+| End-to-end journeys | 5 | 11 | Playwright (Chromium): real client, server, and Firestore/Auth/Storage emulators |
+| **Total** | **84** | **954** | |
 
 Measured 2026-08-06 by running each suite, not by counting `it(` declarations —
 parameterised cases expand at runtime, so a static count understates it.
@@ -126,6 +132,7 @@ docker pull ghcr.io/kopi-o-kosong-beng/sprout-web-app-server:latest
 | [`md/DESIGN.md`](md/DESIGN.md) | Visual design system |
 | [`md/requirements.md`](md/requirements.md) | Endpoint-level specification |
 | [`md/checkoff.md`](md/checkoff.md) | Flow-by-flow walkthrough with file references |
+| [`docs/TEST_TRACEABILITY.md`](docs/TEST_TRACEABILITY.md) | Use case → sequence diagram → test suite mapping, hyperlinked both ways |
 | [`docs/`](docs/) | Verification evidence records and design specs |
 | [`obsidian-vault/`](obsidian-vault/README.md) | **The decision record** — an Obsidian vault holding why each choice was made, with dated evidence labels |
 

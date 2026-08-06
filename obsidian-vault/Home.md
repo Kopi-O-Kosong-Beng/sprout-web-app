@@ -24,7 +24,7 @@ consultation is done. The active plan is **[[Final Deliverables Plan]]**;
 - **UC6 → UC4 chain closed** (PR #8, merged 2026-08-03): scans now persist to `avatar_records`, one canonical sprite per species is reused in Firebase Storage, battle stats are derived deterministically from the species key, and first-discoverer attribution records who found each species first. Remaining open item: the deployed Firebase Storage write path is still unproven — see [[Open Questions and Inconsistencies]]
 - Implemented on `main` (`a38e27b`): UC1, UC2 (plus Google sign-in), UC3, UC4, UC5, UC8. **UC7 is design only.** UC6 is implemented end-to-end on `features/zhifeng/scan-to-archive-persistence` — a scan now persists to the archive and survives a refresh, and is no longer a stateless pipeline
 - Test position needs re-measuring after the merge — the 293-case PM3 figure is stale; see [[Open Questions and Inconsistencies]]
-- Playwright **is installed and green** (PR #24, 6 Aug): 6 end-to-end specs run on every pull request against the real stack — see [[Testing Strategy]]
+- Playwright **is installed and green** (PR #24, 6 Aug): 11 end-to-end specs run on every pull request against the real client, server and Firestore/Auth/Storage emulators — see [[Testing Strategy]] and `docs/TEST_TRACEABILITY.md`
 - Known gap, now permanent: no email domain will be purchased, so live email delivery stays unproven. Disclose it
 - Zhi Feng is the **final PR reviewer/merger** and owns the Vercel and Render configuration — see [[Team and Roles]]
 

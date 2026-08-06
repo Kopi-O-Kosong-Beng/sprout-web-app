@@ -37,6 +37,8 @@ const SERVER_DIR = path.join(ROOT, 'server');
 const CLIENT_DIR = path.join(ROOT, 'client');
 
 const EMULATOR_PORT = 8080;
+const AUTH_EMULATOR_PORT = 9099;
+const STORAGE_EMULATOR_PORT = 9199;
 const API_PORT = 3001;
 const WEB_PORT = 5173;
 
@@ -163,19 +165,28 @@ async function main() {
     return;
   }
 
-  // ── 1. Firestore emulator ────────────────────────────────────────────────
+  // ── 1. Firebase emulators ────────────────────────────────────────────────
+  // Three, not one, and each buys a journey the suite could not otherwise make:
+  //   firestore — every read and write in the product
+  //   auth      — real server-side signup (auth.controller createUser goes to
+  //               the emulator instead of live Firebase)
+  //   storage   — the sprite write that completes a scan; without it,
+  //               sprite-storage.ts throws on FIREBASE_STORAGE_BUCKET and the
+  //               UC6→UC4 journey cannot be exercised end to end
   if (await isPortBusy(EMULATOR_PORT)) {
-    log(`port ${EMULATOR_PORT} in use — assuming an emulator is already running`);
+    log(`port ${EMULATOR_PORT} in use — assuming emulators are already running`);
   } else {
     start('emulator', 'npx', [
       'firebase',
       'emulators:start',
       '--only',
-      'firestore',
+      'firestore,auth,storage',
       '--project',
       'sprout-e2e',
     ]);
     await waitForPort(EMULATOR_PORT, 'firestore emulator');
+    await waitForPort(AUTH_EMULATOR_PORT, 'auth emulator');
+    await waitForPort(STORAGE_EMULATOR_PORT, 'storage emulator');
   }
 
   // ── 2. Seed ──────────────────────────────────────────────────────────────
@@ -203,6 +214,18 @@ async function main() {
       FRONTEND_URL: `http://127.0.0.1:${WEB_PORT}`,
       SUPER_ADMIN_EMAILS: 'test@sprout.com',
       ADMIN_EMAILS: 'test@sprout.com',
+
+      // Server-side Firebase Auth (signup's createUser, verification links)
+      // goes to the emulator. firebase-admin reads this variable natively.
+      FIREBASE_AUTH_EMULATOR_HOST: `127.0.0.1:${AUTH_EMULATOR_PORT}`,
+
+      // Sprite writes go to the Storage emulator, which makes the UC6→UC4
+      // scan-to-archive journey real end to end. Both spellings on purpose:
+      // @google-cloud/storage reads STORAGE_EMULATOR_HOST (scheme required),
+      // firebase-admin's own wrapper reads FIREBASE_STORAGE_EMULATOR_HOST.
+      FIREBASE_STORAGE_BUCKET: 'sprout-e2e.appspot.com',
+      STORAGE_EMULATOR_HOST: `http://127.0.0.1:${STORAGE_EMULATOR_PORT}`,
+      FIREBASE_STORAGE_EMULATOR_HOST: `127.0.0.1:${STORAGE_EMULATOR_PORT}`,
     },
   });
   await waitForPort(API_PORT, 'api');
