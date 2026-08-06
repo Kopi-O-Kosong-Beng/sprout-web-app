@@ -33,6 +33,10 @@ import '../env';
 import bcrypt from 'bcrypt';
 import authUserRepository from '../repositories/auth-users';
 import { isAdminEmail, isSuperAdminEmail } from '../middleware/admin.middleware';
+import {
+  isStrongPassword,
+  PASSWORD_POLICY_MESSAGE,
+} from '../services/password-policy';
 import { getAuthAdmin } from '../firebase';
 
 const DEFAULT_EMAIL = 'sprout@gmail.com';
@@ -74,19 +78,12 @@ export function resolveSeedInput(
         "  npm run seed:admin -w server -- sprout@gmail.com 'your-password'"
     );
   }
-  // The same rule signup enforces (auth.service.ts assertStrongPassword). A
-  // seeded account that could not have been created through the UI would be a
-  // silent hole in the password policy.
-  if (
-    password.length < 8 ||
-    !/[a-z]/.test(password) ||
-    !/[A-Z]/.test(password) ||
-    !/\d/.test(password) ||
-    !/[^A-Za-z0-9]/.test(password)
-  ) {
-    throw new Error(
-      'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol.'
-    );
+  // The same rule signup enforces. A seeded account that could not have been
+  // created through the UI would be a silent hole in the password policy —
+  // which is why this now shares services/password-policy with
+  // assertStrongPassword instead of restating the regexes and hoping.
+  if (!isStrongPassword(password)) {
+    throw new Error(PASSWORD_POLICY_MESSAGE);
   }
   if (!/^[A-Za-z0-9 _-]{1,50}$/.test(displayName)) {
     throw new Error(

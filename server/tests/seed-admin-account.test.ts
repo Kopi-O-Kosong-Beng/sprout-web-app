@@ -46,17 +46,22 @@ describe('resolveSeedInput', () => {
     expect(() => resolveSeedInput([], {})).toThrow(/SEED_ADMIN_PASSWORD/);
   });
 
-  // Same rule as auth.service.ts assertStrongPassword: a seeded account must
-  // not be weaker than one the signup form would have accepted.
+  // Same rule as auth.service.ts assertStrongPassword — both now call
+  // services/password-policy, so a seeded account cannot be weaker than one
+  // the signup form would have accepted.
   it.each([
     ['too short', 'hey$1A'],
     ['no uppercase', 'heysprout$1'],
     ['no lowercase', 'HEYSPROUT$1'],
     ['no digit', 'heySPROUT$$'],
     ['no symbol', 'heySPROUT11'],
+    // Past bcrypt's 72-byte truncation point: everything after it would be
+    // silently discarded by the hash, so it is refused rather than accepted
+    // as though it counted.
+    ['too many bytes', `heySPROUT11$${'a'.repeat(72)}`],
   ])('rejects a password with %s', (_case, password) => {
     expect(() => resolveSeedInput(['admin@example.com', password], {})).toThrow(
-      /at least 8 characters/
+      /8-72 characters/
     );
   });
 
