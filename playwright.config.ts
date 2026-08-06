@@ -20,11 +20,16 @@ import { defineConfig, devices } from '@playwright/test';
  * The seam is the provider boundary, and it is disclosed here and in the report
  * rather than left for a reader to discover.
  *
- * ── Why this does not run on every pull request ──────────────────────────────
- * The agreed CI budget policy: unit and mocked-integration on every commit, E2E
- * on demand. Booting an emulator, a server and a browser for every push would
- * cost minutes per commit to re-prove what the 79 focused suites already cover.
- * Run it before a demo, before a release, and when a journey changes.
+ * ── Why this DOES run on every pull request ─────────────────────────────────
+ * The CI budget policy reserved E2E for on-demand runs. That policy was written
+ * when E2E was hypothetical and assumed to be expensive: real provider calls,
+ * real credentials, minutes per run. This suite is none of those things — it
+ * needs no secret, makes no paid call, and finishes in under a minute — so the
+ * budget argument does not apply to it, and the evidence is worth more on every
+ * PR than on the days someone remembers to run it.
+ *
+ * The expensive thing the policy was protecting against still exists and is
+ * still gated: `fuzz:live` in .github/workflows/fuzz-live.yml is manual-only.
  */
 export default defineConfig({
   testDir: './e2e',

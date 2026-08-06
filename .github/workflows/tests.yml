@@ -141,3 +141,69 @@ jobs:
 
       - name: 'Group 8: auth pages (incl. Google sign-in) + admin dashboard'
         run: npm exec -- vitest run src/pages/LoginPage.test.tsx src/pages/SignupPage.test.tsx src/pages/AdminPage.test.tsx
+
+  e2e:
+    name: End-to-end journeys (Playwright + real stack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # The Firestore Emulator is a Java program — same requirement as the
+      # server suites above, and the reason docker/firestore-emulator/ exists
+      # so nobody has to install this by hand locally.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Firebase emulator binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            firebase-emulators-${{ runner.os }}-
+
+      - name: Install workspaces
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # NO SECRETS. Deliberately, and it is the reason this job can run on every
+      # pull request at all:
+      #   - Firestore is the emulator, which authenticates nobody
+      #   - USE_MOCK_APIS replaces all four paid providers, so a run cannot bill
+      #     the team and cannot fail because someone else exhausted a quota
+      #   - AUTH_DEV_BYPASS supplies the identity, fenced on the server by
+      #     NODE_ENV !== 'production'
+      # A suite that needs a secret cannot run on a fork, silently skips when
+      # the secret is missing, and reports green for having done nothing.
+      - name: Run E2E journeys
+        run: npm run test:e2e
+
+      # The trace is the difference between "the archive assertion failed" and
+      # seeing the DOM, the network calls and the console at that moment.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
