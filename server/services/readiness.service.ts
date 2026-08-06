@@ -126,16 +126,60 @@ export async function evaluateReadiness(
 }
 
 /**
+ * Is any Firebase credential source configured?
+ *
+ * Mirrors the resolution order in ../firebase.ts, plus the emulator, which
+ * needs no credential at all.
+ */
+export function hasFirebaseCredentialSource(env = process.env): boolean {
+  return Boolean(
+    env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+      env.FIREBASE_SERVICE_ACCOUNT_BASE64 ||
+      env.FIREBASE_SERVICE_ACCOUNT_PATH ||
+      env.GOOGLE_APPLICATION_CREDENTIALS ||
+      env.FIRESTORE_EMULATOR_HOST
+  );
+}
+
+/**
  * Firestore reachability.
  *
- * `listCollections()` is a real round trip to the service and needs no
- * document, no index and no seeded data, so it works identically against the
- * emulator and against production. A `.get()` on some chosen collection would
- * have coupled readiness to that collection continuing to exist.
+ * `listCollections()` is a real round trip that needs no document, index or
+ * seeded data, so it behaves identically against the emulator and against
+ * production. A `.get()` on a chosen collection would have coupled readiness to
+ * that collection continuing to exist.
+ *
+ * ── THE PRECHECK IS NOT AN OPTIMISATION ──────────────────────────────────────
+ * Without it, this probe CRASHES THE PROCESS IT IS PROBING when no credential
+ * is configured. CI caught it: the first version called listCollections()
+ * unconditionally, and on a container started without credentials the server
+ * died mid-request.
+ *
+ * The failure cannot be caught downstream. Calling Firestore lazily creates a
+ * gRPC stub, and google-gax's generated client attaches its own
+ * `.catch(err => { throw err })` to that stub promise. When the credential
+ * lookup fails, that rethrow becomes an unhandled rejection on a promise this
+ * code never holds a reference to — so neither `await`, nor `.catch()`, nor the
+ * async wrapper in runProbe can intercept it, and Node's default for unhandled
+ * rejections is to terminate.
+ *
+ * A readiness endpoint that kills a healthy process is worse than no readiness
+ * endpoint, and a misconfigured deploy is exactly when someone would call it. So
+ * the unusable case is detected before the call that would trigger it, and
+ * reported as an ordinary probe failure. server.ts installs a last-resort
+ * unhandled-rejection guard as defence in depth for any path not anticipated
+ * here.
  */
 export const firestoreProbe: Probe = {
   name: 'firestore',
-  check: () => getDb().listCollections(),
+  check: async () => {
+    if (!hasFirebaseCredentialSource()) {
+      throw new Error(
+        'no Firebase credential source configured (FIREBASE_SERVICE_ACCOUNT_JSON / _BASE64 / _PATH, GOOGLE_APPLICATION_CREDENTIALS, or FIRESTORE_EMULATOR_HOST)'
+      );
+    }
+    return getDb().listCollections();
+  },
 };
 
 /**

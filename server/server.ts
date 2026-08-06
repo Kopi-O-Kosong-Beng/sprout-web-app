@@ -1,5 +1,8 @@
 import app from './app';
-import { installShutdownHandlers } from './lifecycle';
+import { installShutdownHandlers, installUnhandledRejectionGuard } from './lifecycle';
+
+// Before listen: a rejection during startup must not take the process with it.
+installUnhandledRejectionGuard();
 
 const PORT = Number(process.env.PORT ?? 3001);
 const server = app.listen(PORT, () => {

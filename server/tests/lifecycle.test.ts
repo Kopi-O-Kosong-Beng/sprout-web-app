@@ -7,7 +7,7 @@
  * signal", and neither is reachable from a real SIGTERM without either killing
  * the test runner or waiting out a real ten-second timer.
  */
-import { createShutdownHandler } from '../lifecycle';
+import { createShutdownHandler, installUnhandledRejectionGuard } from '../lifecycle';
 
 interface FakeServer {
   close(callback: (error?: Error) => void): void;
@@ -125,5 +125,45 @@ describe('graceful shutdown', () => {
     server.finish(new Error('listener already closed'));
 
     expect(exits).toEqual([1]);
+  });
+});
+
+describe('unhandled rejection guard', () => {
+  // Defence in depth for the failure CI found: a dependency rejecting a promise
+  // this code never holds. Node's default is to terminate, which turns a logged
+  // dependency error into an outage of a process that is otherwise healthy.
+  const listenersBefore = process.listeners('unhandledRejection').slice();
+
+  afterEach(() => {
+    process.removeAllListeners('unhandledRejection');
+    for (const listener of listenersBefore) {
+      process.on('unhandledRejection', listener);
+    }
+  });
+
+  it('logs the rejection and leaves the process running', () => {
+    const logged: unknown[][] = [];
+    installUnhandledRejectionGuard((message, error) => logged.push([message, error]));
+
+    const listeners = process.listeners('unhandledRejection');
+    const installed = listeners[listeners.length - 1] as (reason: unknown) => void;
+
+    installed(new TypeError('stub credentials rejected'));
+
+    expect(logged).toHaveLength(1);
+    // The message must read as a defect, not as an acceptable outcome — this
+    // handler keeps the server alive, it does not make the bug acceptable.
+    expect(String(logged[0][0])).toContain('unhandled promise rejection');
+    expect(String(logged[0][1])).toBe('TypeError: stub credentials rejected');
+  });
+
+  it('does not register an uncaughtException handler', () => {
+    const before = process.listenerCount('uncaughtException');
+    installUnhandledRejectionGuard(() => {});
+
+    // Deliberate asymmetry. uncaughtException means the stack unwound
+    // mid-operation and process state may be corrupt; that one should still end
+    // the process.
+    expect(process.listenerCount('uncaughtException')).toBe(before);
   });
 });

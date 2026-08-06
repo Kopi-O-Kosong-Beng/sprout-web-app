@@ -10,7 +10,12 @@ import express from 'express';
 import request from 'supertest';
 import app from '../app';
 import { createReadinessHandler } from '../routes/health.routes';
-import { evaluateReadiness, type Probe } from '../services/readiness.service';
+import {
+  evaluateReadiness,
+  firestoreProbe,
+  hasFirebaseCredentialSource,
+  type Probe,
+} from '../services/readiness.service';
 
 const ok = (name: string): Probe => ({ name, check: async () => undefined });
 const failing = (name: string): Probe => ({
@@ -105,6 +110,55 @@ describe('evaluateReadiness', () => {
     await expect(evaluateReadiness([exploding])).resolves.toEqual(
       expect.objectContaining({ status: 'not_ready' })
     );
+  });
+});
+
+describe('the firestore probe must not crash the process it is probing', () => {
+  // Regression. The first implementation called listCollections()
+  // unconditionally; on a container with no credentials the gRPC stub's own
+  // `.catch(err => { throw err })` produced an unhandled rejection on a promise
+  // this code never holds, and Node terminated. CI caught it. Neither .catch()
+  // nor await can intercept that, so the unusable case has to be detected
+  // before the call that triggers it.
+  const credentialVars = [
+    'FIREBASE_SERVICE_ACCOUNT_JSON',
+    'FIREBASE_SERVICE_ACCOUNT_BASE64',
+    'FIREBASE_SERVICE_ACCOUNT_PATH',
+    'GOOGLE_APPLICATION_CREDENTIALS',
+    'FIRESTORE_EMULATOR_HOST',
+  ] as const;
+
+  it('recognises each credential source the Admin SDK accepts', () => {
+    expect(hasFirebaseCredentialSource({})).toBe(false);
+    for (const variable of credentialVars) {
+      expect(hasFirebaseCredentialSource({ [variable]: 'set' })).toBe(true);
+    }
+  });
+
+  it('fails the probe instead of calling Firestore when nothing is configured', async () => {
+    const saved = new Map<string, string | undefined>();
+    for (const variable of credentialVars) {
+      saved.set(variable, process.env[variable]);
+      delete process.env[variable];
+    }
+
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const report = await evaluateReadiness([firestoreProbe]);
+
+      // Reported as an ordinary failure. Reaching this assertion at all is the
+      // proof: the unguarded version terminated the worker before it returned.
+      expect(report.status).toBe('not_ready');
+      expect(report.checks[0]).toEqual(
+        expect.objectContaining({ name: 'firestore', status: 'failed' })
+      );
+    } finally {
+      errorSpy.mockRestore();
+      for (const [variable, value] of saved) {
+        if (value === undefined) delete process.env[variable];
+        else process.env[variable] = value;
+      }
+    }
   });
 });
 

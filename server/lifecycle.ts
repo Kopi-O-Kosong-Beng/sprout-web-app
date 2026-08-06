@@ -111,3 +111,43 @@ export function installShutdownHandlers(
   process.on('SIGINT', () => shutdown('SIGINT'));
   return shutdown;
 }
+
+/**
+ * Last-resort guard for rejections nothing else can catch.
+ *
+ * Node terminates on an unhandled rejection by default, and a dependency can
+ * produce one on a promise this code never holds. The concrete case: calling
+ * Firestore lazily creates a gRPC stub, and google-gax's generated client
+ * attaches `.catch(err => { throw err })` to that stub promise — so a failed
+ * credential lookup rethrows into nothing and kills the process. CI caught
+ * exactly that, via a readiness probe, on a container started without
+ * credentials.
+ *
+ * The specific case is now prevented at its source (see
+ * services/readiness.service.ts). This stays because the general shape will
+ * recur: a third-party client, an async path nobody anticipated, and a web
+ * server dying for a reason unrelated to the request it was serving.
+ *
+ * WHY THIS DOES NOT EXIT, WHEN THE USUAL ADVICE IS TO EXIT. That advice is
+ * about `uncaughtException`, where the stack unwound mid-operation and process
+ * state may genuinely be corrupt. A rejected promise in a background client is
+ * different: no request handler was interrupted, no invariant was half-applied,
+ * and every piece of durable state lives in Firestore rather than in this
+ * process. Terminating would convert a logged dependency error into an outage.
+ * `uncaughtException` is deliberately NOT handled here — that one should still
+ * end the process.
+ *
+ * Installed from server.ts only, never from app.ts, so tests importing the app
+ * still surface unhandled rejections as failures.
+ */
+export function installUnhandledRejectionGuard(
+  log: (message: string, error: unknown) => void = (message, error) =>
+    console.error(message, error)
+): void {
+  process.on('unhandledRejection', (reason) => {
+    log(
+      '[lifecycle] unhandled promise rejection — continuing to serve; this is a defect, not a shrug:',
+      reason instanceof Error ? `${reason.name}: ${reason.message}` : reason
+    );
+  });
+}
