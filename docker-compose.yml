@@ -1,0 +1,125 @@
+# The whole Sprout stack, on one machine, in one command.
+#
+#     docker compose up --build
+#     → frontend  http://localhost:5173
+#     → API       http://localhost:3001/api/health
+#     → emulator  127.0.0.1:8080 (also usable by `npm test` on the host)
+#
+# ── What this is for ─────────────────────────────────────────────────────────
+# Two things, and the second is the one that pays.
+#
+#  1. It proves the images compose: the API image and the frontend image are
+#     built from this repository and actually talk to each other.
+#  2. It removes the manual setup a new teammate currently has to perform —
+#     install Node 22, install a JRE for the Firestore emulator, get the native
+#     builds of sharp and bcrypt to resolve on their OS. That list is not
+#     written down anywhere in package.json, and it has cost the team time.
+#
+# ── What this is NOT ─────────────────────────────────────────────────────────
+# Not the production topology. Production is Vercel (frontend, CDN) plus Render
+# (API) plus managed Firebase — see render.yaml and vercel.json. This stack runs
+# a local Firestore emulator in place of managed Firestore, so it is a
+# development and demonstration environment, not a deployment.
+
+name: sprout
+
+services:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Firestore emulator — the managed backing service, substituted locally.
+  # 12-factor IV: a backing service is attached by configuration, so swapping
+  # managed Firestore for the emulator is an env var, not a code change.
+  # ───────────────────────────────────────────────────────────────────────────
+  firestore:
+    build:
+      context: ./docker/firestore-emulator
+    container_name: sprout-firestore
+    ports:
+      # Host 8080 on purpose: server/tests/setup-env.ts pins
+      # FIRESTORE_EMULATOR_HOST=127.0.0.1:8080, so `npm test` on the laptop can
+      # use this container instead of a hand-installed JRE. The frontend is
+      # therefore published on 5173 rather than competing for this port.
+      - "8080:8080"
+      - "4400:4400"
+    healthcheck:
+      # The API must not start querying before the JVM is listening. Without
+      # this gate the API wins the race on a fast machine and its first
+      # readiness probe fails for a reason that has nothing to do with the code.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # API
+  # ───────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: sprout-api
+    depends_on:
+      firestore:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+
+      # Points the Admin SDK at the emulator. `firestore` is the service name —
+      # compose provides DNS on its default network, which is service discovery
+      # without a service registry.
+      FIRESTORE_EMULATOR_HOST: firestore:8080
+      GCLOUD_PROJECT: sprout-local
+      GOOGLE_CLOUD_PROJECT: sprout-local
+
+      # The browser reaches the API on localhost, not on the compose network —
+      # the bundle runs on the user's machine, outside compose's DNS.
+      CORS_ORIGIN: http://localhost:5173
+      FRONTEND_URL: http://localhost:5173
+
+      # No credentials in this file, by design. Providers are mocked and email
+      # prints to the log, so the stack runs with no secrets at all — which is
+      # what makes it safe to hand to a teammate or run on a demo laptop.
+      USE_MOCK_APIS: "true"
+      EMAIL_MODE: console
+
+      # Storage is not emulated here. The readiness probe reports this
+      # dependency as unconfigured rather than pretending otherwise; a scan will
+      # fail at sprite upload, which is the honest local behaviour.
+      AUTH_DEV_BYPASS: "false"
+      DEMO_AUTH_BYPASS: "false"
+    healthcheck:
+      # Liveness — same reasoning as the Dockerfile: readiness deliberately
+      # reports not_ready here because Storage is unconfigured, and that must
+      # not make the container look broken.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # Compose's default stop signal is SIGTERM and it waits before SIGKILL, so
+    # this exercises the graceful drain in server/lifecycle.ts on every
+    # `docker compose down`. 15s leaves room above the handler's own 10s bound.
+    stop_grace_period: 15s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Frontend
+  # ───────────────────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+      args:
+        # Baked into the bundle at build time — see client/Dockerfile for why
+        # these cannot be runtime configuration.
+        VITE_API_URL: http://localhost:3001
+        VITE_ENABLE_DEMO_TOOLS: "false"
+    container_name: sprout-web
+    depends_on:
+      - api
+    ports:
+      # 5173 mirrors the Vite dev port the team already uses, and 8080 is taken
+      # by the emulator so `npm test` on the host keeps working.
+      - "5173:80"

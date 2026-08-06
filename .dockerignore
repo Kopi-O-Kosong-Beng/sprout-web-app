@@ -1,0 +1,74 @@
+# Build context exclusions.
+#
+# Two jobs. The first is speed: the context is tarred and sent to the daemon
+# before any instruction runs, and node_modules alone is hundreds of megabytes
+# that `npm ci` is about to reinstall for Linux anyway.
+#
+# The second is safety, and it is the one that matters. Anything reaching the
+# context can be COPYed into a layer, and a layer that once held a secret still
+# holds it after a later instruction deletes the file. A published image is
+# public. So every pattern .gitignore uses for credentials is repeated here —
+# .gitignore does not apply to Docker builds, and assuming it does is how keys
+# ship.
+
+# Dependencies and build output — reinstalled/rebuilt inside the image
+node_modules/
+**/node_modules/
+server/dist/
+client/dist/
+coverage/
+**/coverage/
+
+# Secrets. Mirrors .gitignore; see the note above about why this is not
+# redundant.
+.env
+.env.*
+!.env.example
+server/.env
+**/serviceAccountKey*.json
+**/*firebase-adminsdk*.json
+**/sprout-dev-*.json
+deploy/*.env
+
+# Version control and local tooling state
+.git/
+.gitignore
+.github/
+.vercel/
+.worktrees/
+.superpowers/
+.graphify/
+.claude/
+.agents/
+
+# Editor and OS noise
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Emulator and debug artefacts
+firebase-debug.log
+firestore-debug.log
+*.log
+
+# Documentation and course material — none of it is needed at runtime, and it
+# is a large share of the repository by file count.
+md/
+docs/
+Sprout_Vault/
+Raw dump/
+transcripts/
+**/*.md
+!server/FIREBASE_SETUP.md
+
+# Test fixtures the runtime image never reads
+**/__tests__/
+server/tests/
+client/src/**/*.test.ts
+client/src/**/*.test.tsx
+
+# Docker's own files — changing compose must not invalidate the build cache
+docker-compose*.yml
+**/Dockerfile
+.dockerignore

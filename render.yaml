@@ -1,16 +1,47 @@
 services:
   - type: web
     name: sprout-backend
-    runtime: node
+    # Docker, not the Node buildpack (changed 2026-08-06).
+    #
+    # Render has always run this service in a container — it built one from our
+    # source using a buildpack we never saw or controlled. So this is not
+    # "adding containers"; it is taking ownership of the recipe. The base image,
+    # the Node patch version, the OS libraries beneath sharp's libvips, and the
+    # user the process runs as are now declared in server/Dockerfile and
+    # reviewed like any other code.
+    #
+    # The image is built and smoke-tested on every PR by
+    # .github/workflows/docker.yml — non-root, liveness answering with no
+    # credentials present, and a clean SIGTERM stop are all asserted there
+    # before anything reaches this file.
+    #
+    # ROLLBACK, if a deploy misbehaves: revert this one commit. It touches
+    # nothing else. Manually, that is `runtime: node` plus
+    #     buildCommand: npm install --include=dev && npm run build -w server
+    #     startCommand: npm start -w server
+    # and dropping dockerfilePath/dockerContext. No application code depends on
+    # which path built it, and the env vars below are identical either way.
+    #
+    # WATCH ON FIRST DEPLOY: the build is heavier than the buildpack's (it
+    # resolves sharp and bcrypt from scratch), and the free tier is the smallest
+    # machine Render offers. If the build times out, that — not the image — is
+    # the thing to fix.
+    runtime: docker
+    # Context is the repository ROOT: the root package.json declares the npm
+    # workspaces, and an install rooted at server/ cannot resolve the graph.
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: .
     plan: free
     region: singapore
-    buildCommand: npm install --include=dev && npm run build -w server
-    startCommand: npm start -w server
     healthCheckPath: /api/health
     autoDeployTrigger: commit
     envVars:
       - key: NODE_ENV
         value: production
+      # Inert under `runtime: docker` — the FROM line in server/Dockerfile is
+      # the only thing deciding the Node version now. Retained so the rollback
+      # above restores a pinned runtime rather than whatever the buildpack would
+      # pick that week.
       - key: NODE_VERSION
         value: "22.13.1"
       - key: AUTH_DEV_BYPASS
@@ -19,10 +50,29 @@ services:
         value: "false"
       - key: DEMO_AUTH_BYPASS_USER_ID
         value: demo-user-0001
+      # resend, not smtp. Render's free tier blackholes outbound SMTP on 587,
+      # so the Gmail transport times out and delivers nothing — the reason the
+      # Resend HTTPS transport exists at all.
+      #
+      # This line previously said `smtp` while the dashboard had been switched
+      # to `resend` by hand. That is a silent trap rather than a harmless
+      # mismatch: the blueprint is the declared source of truth, so the next
+      # sync would have pushed `smtp` back and email would have stopped
+      # delivering with no code change and nothing in the diff to explain it.
       - key: EMAIL_MODE
-        value: smtp
+        value: resend
       - key: EMAIL_FROM
         value: hello.sprout.team@gmail.com
+      # Declared here, valued in the dashboard. Declaring a secret with
+      # `sync: false` is not the same as omitting it: it records that the
+      # service needs the variable — email.service.ts reads both — without the
+      # value entering git. Omitting them entirely is how the next person
+      # rebuilding this service from the blueprint ends up with a backend that
+      # boots fine and quietly cannot send anything.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
       # Three different jobs, not typos for each other:
       #   ADMIN_EMAIL        (singular) -> where UC8 contact tickets are sent
       #                                    (ticket.service.ts:10)
