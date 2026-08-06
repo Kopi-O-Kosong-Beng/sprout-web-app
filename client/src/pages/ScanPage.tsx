@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '../components/common/BackButton';
+import { CaptureBadge, StatGrid, type PlantAvatarData } from '../components/common/PlantVisuals';
 import { useToast } from '../hooks/useToast';
 import {
   PipelineRequestError,
   streamPipeline,
   type PipelineEvent,
 } from '../services/pipelineStream';
+import { getAvatar } from '../services/sproutApi';
+import { toPlantAvatarData } from '../utils/avatarPresentation';
 
 /**
  * Scan screen — ported from plantemon-web's (app)/scan/page.tsx, itself a port
@@ -68,6 +71,8 @@ type Status =
       kind: 'done';
       sprite: string;
       name: string;
+      source: CaptureSource;
+      avatarId: string | null;
       saved: boolean;
       saveError?: string;
       discovery: ScanDiscovery | null;
@@ -128,6 +133,25 @@ const STEP_FOR_HOP: Record<string, ScanStep> = {
 
 const MAX_IMAGE_EDGE = 1024;
 
+/** UC6 alt-flow 2a: accepted upload formats and the 5 MB size ceiling. Client
+ *  side only — the server remains authoritative and checks magic bytes, not
+ *  just this declared MIME type. Decimal MB (1000 x 1000), matching what
+ *  Finder/most file browsers report as a file's size in MB — using the
+ *  binary 1024 x 1024 reading here let some 5.x MB files slip under a
+ *  "5 MB" cap that looked, to the user, like it should have caught them. */
+const ACCEPTED_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_UPLOAD_BYTES = 5 * 1000 * 1000;
+
+function validateUploadFile(file: File): string | null {
+  if (!ACCEPTED_UPLOAD_TYPES.includes(file.type)) {
+    return 'Please upload a JPEG, PNG, or WEBP image.';
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return 'That file is too large — the maximum size is 5 MB.';
+  }
+  return null;
+}
+
 /** Downscales to a JPEG data URL — the shape the pipeline endpoint expects. */
 async function fileToJpegDataUrl(file: Blob): Promise<string> {
   const bitmap = await createImageBitmap(file);
@@ -163,13 +187,19 @@ export default function ScanPage() {
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  // The pipeline's `complete` event only carries `maxHealth`/`speed` (from
+  // assemblePlant, no attack/defense at all) — the real, complete stats live
+  // on the AvatarRecord that persistScan already wrote. Fetched separately via
+  // the existing GET /api/avatar/:avatarId once we have an id, rather than
+  // widening the SSE payload.
+  const [avatarDetails, setAvatarDetails] = useState<PlantAvatarData | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  // Two inputs: uploadInput picks from the gallery/files (no capture); the
-  // camera ring falls back to cameraInput (capture) when the live preview is
-  // unavailable, which opens the native camera on a phone.
-  const uploadInputRef = useRef<HTMLInputElement>(null);
+  // The camera ring falls back to cameraInput (capture) when the live preview
+  // is unavailable, which opens the native camera on a phone. The upload path
+  // has its own file input inside UploadDialog instead of one here.
   const cameraInputRef = useRef<HTMLInputElement>(null);
   // Guards against overlapping runs, like ScanActivity's AtomicBoolean.
   const processingRef = useRef(false);
@@ -224,6 +254,31 @@ export default function ScanPage() {
     }
   }, [cameraReady]);
 
+  // Fetches the real, persisted stats/species record once a scan finishes and
+  // actually saved — the SSE stream itself never carries a complete stat set.
+  // Cleared whenever we leave the 'done' state so stale details can't leak
+  // into the next scan's result screen.
+  useEffect(() => {
+    if (status.kind !== 'done' || !status.avatarId) {
+      setAvatarDetails(null);
+      return;
+    }
+    let cancelled = false;
+    void getAvatar(status.avatarId).then(
+      (record) => {
+        if (!cancelled) setAvatarDetails(toPlantAvatarData(record));
+      },
+      () => {
+        // Best-effort: the result screen still works without this, just
+        // without the species/stats detail (falls back to name + sprite).
+        if (!cancelled) setAvatarDetails(null);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
   /** The shared tail of every input path. */
   const runPipeline = useCallback(
     async (jpegDataUrl: string, source: CaptureSource, customName?: string) => {
@@ -245,8 +300,14 @@ export default function ScanPage() {
     /** Set when the server could not identify the plant at all and is asking
      *  the player to name it themselves. */
     let needsName = false;
-    let savedOutcome: { saved: boolean; saveError?: string; discovery: ScanDiscovery | null } = {
+    let savedOutcome: {
+      saved: boolean;
+      saveError?: string;
+      avatarId: string | null;
+      discovery: ScanDiscovery | null;
+    } = {
       saved: true,
+      avatarId: null,
       discovery: null,
     };
 
@@ -297,6 +358,7 @@ export default function ScanPage() {
             savedOutcome = {
               saved: event.saved !== false,
               saveError: event.saveError ? String(event.saveError) : undefined,
+              avatarId: event.avatarId ? String(event.avatarId) : null,
               discovery: (event.discovery ?? null) as ScanDiscovery | null,
             };
           }
@@ -345,6 +407,8 @@ export default function ScanPage() {
         kind: 'done',
         sprite: finalSprite,
         name: finalName || 'Unknown Plant',
+        source,
+        avatarId: savedOutcome.avatarId,
         saved: savedOutcome.saved,
         saveError: savedOutcome.saveError,
         discovery: savedOutcome.discovery,
@@ -410,10 +474,19 @@ export default function ScanPage() {
   );
 
   const onTestImage = useCallback(async () => {
-    const response = await fetch('/img/test_plant.jpg');
-    // The bundled photo is a file like any other, so it saves as a web upload.
-    void runPipeline(await fileToJpegDataUrl(await response.blob()), 'web');
-  }, [runPipeline]);
+    try {
+      const response = await fetch('/img/test_plant.jpg');
+      if (!response.ok) throw new Error('Could not load the test image.');
+      // The bundled photo is a file like any other, so it saves as a web upload.
+      void runPipeline(await fileToJpegDataUrl(await response.blob()), 'web');
+    } catch (error) {
+      // Raised as a toast, not a status: there is no 'error' variant on this
+      // screen any more (see the Status union). The thrown text is a fetch/DOM
+      // message, so it stays in the log and the player gets fixed copy.
+      if (import.meta.env.DEV) console.warn('Could not load the test image:', error);
+      showToast({ tone: 'error', message: 'Could not load the test image.' });
+    }
+  }, [runPipeline, showToast]);
 
   const busy = status.kind === 'busy';
 
@@ -495,7 +568,7 @@ export default function ScanPage() {
         <button
           type="button"
           disabled={busy}
-          onClick={() => uploadInputRef.current?.click()}
+          onClick={() => setIsUploadDialogOpen(true)}
           className="press pixel-button px-3 py-2 text-[9px] disabled:cursor-not-allowed"
         >
           Upload
@@ -521,18 +594,6 @@ export default function ScanPage() {
         </button>
       </div>
 
-      {/* Upload: gallery / files. No `capture`, so it does NOT launch the camera. */}
-      <input
-        ref={uploadInputRef}
-        type="file"
-        accept="image/*"
-        hidden
-        onChange={(event) => {
-          void onFilePicked(event.target.files?.[0], 'web');
-          event.target.value = '';
-        }}
-      />
-
       {/*
         Camera fallback for the capture ring. capture="environment" asks the OS
         for the rear camera directly — the dependable path on a phone when the
@@ -550,6 +611,16 @@ export default function ScanPage() {
         }}
       />
 
+      {isUploadDialogOpen && (
+        <UploadDialog
+          onCancel={() => setIsUploadDialogOpen(false)}
+          onFileAccepted={(file) => {
+            setIsUploadDialogOpen(false);
+            void onFilePicked(file, 'web');
+          }}
+        />
+      )}
+
       {status.kind === 'naming' && (
         <NameDialog
           onCancel={() => setStatus({ kind: 'idle' })}
@@ -561,10 +632,19 @@ export default function ScanPage() {
         <ResultDialog
           sprite={status.sprite}
           name={status.name}
+          source={status.source}
+          avatarId={status.avatarId}
+          avatarDetails={avatarDetails}
           saved={status.saved}
           saveError={status.saveError}
           discovery={status.discovery}
-          onScanAnother={() => setStatus({ kind: 'idle' })}
+          onBattleNow={() => {
+            if (!status.avatarId) return;
+            navigate('/battle', {
+              state: { avatarId: status.avatarId, avatar: avatarDetails },
+            });
+          }}
+          onGenerateAnother={() => setStatus({ kind: 'idle' })}
           onLeave={() => {
             // Same rule as BackButton: pop history when there is any, else the
             // landing page — a scan opened as a deep link has nothing to pop.
@@ -672,6 +752,132 @@ function StepMarker({ state }: { state: 'done' | 'active' | 'pending' }) {
 }
 
 /**
+ * The pop-up opened by the Upload button: a drag-and-drop zone plus a Browse
+ * File fallback, with real client-side format/size checks (UC6 alt-flow 2a) —
+ * the picker's `accept` attribute is only a hint, browsers don't enforce it,
+ * so this is the only place that actually rejects a bad file before it ever
+ * reaches the pipeline. Styled like Archive's pop-ups (`.pixel-panel` on a
+ * dark backdrop) rather than reusing this page's own `Overlay`, which is
+ * hardcoded to a narrower width than a comfortable dropzone needs.
+ */
+function UploadDialog({
+  onFileAccepted,
+  onCancel,
+}: {
+  onFileAccepted: (file: File) => void;
+  onCancel: () => void;
+}) {
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onCancel();
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
+  function handleFile(file: File | undefined) {
+    if (!file) return;
+    const error = validateUploadFile(file);
+    if (error) {
+      setValidationError(error);
+      return;
+    }
+    setValidationError(null);
+    onFileAccepted(file);
+  }
+
+  return (
+    <div
+      className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-6"
+      onClick={onCancel}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="upload-dialog-heading"
+        tabIndex={-1}
+        onClick={(event) => event.stopPropagation()}
+        className="pixel-panel w-full max-w-md p-8 outline-none"
+      >
+        <h2 id="upload-dialog-heading" className="font-pixel text-center text-xs leading-relaxed">
+          Upload a plant photo
+        </h2>
+
+        <div
+          onDragOver={(event) => {
+            event.preventDefault();
+            setIsDraggingOver(true);
+          }}
+          onDragLeave={() => setIsDraggingOver(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setIsDraggingOver(false);
+            handleFile(event.dataTransfer.files?.[0]);
+          }}
+          className={`mt-4 flex flex-col items-center gap-3 border-4 border-dashed px-6 py-14 text-center transition-colors ${
+            isDraggingOver
+              ? 'border-[color:var(--color-brand)] bg-[color:var(--color-brand)]/10'
+              : 'border-black/40'
+          }`}
+        >
+          <p className="font-pixel text-[9px] leading-relaxed">Drag a photo here</p>
+          <p className="text-[9px] leading-relaxed opacity-70">or</p>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="press pixel-button px-3 py-2 text-[9px]"
+          >
+            Browse File
+          </button>
+        </div>
+
+        <p className="mt-3 text-center text-[8px] leading-relaxed opacity-60">
+          Accepted formats: JPEG, PNG, or WEBP · Maximum size: 5 MB
+        </p>
+
+        {validationError && (
+          <p
+            role="alert"
+            className="pixel-panel mt-3 px-3 py-2 text-center text-[9px] leading-relaxed text-red-700"
+          >
+            {validationError}
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={onCancel}
+          className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
+        >
+          Cancel
+        </button>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          hidden
+          onChange={(event) => {
+            handleFile(event.target.files?.[0]);
+            event.target.value = '';
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
  * "I'm not sure what this is."
  *
  * Shown when Plant.id's confidence falls under MIN_CONFIDENCE_THRESHOLD. The
@@ -754,18 +960,35 @@ function NameDialog({
 function ResultDialog({
   sprite,
   name,
+  source,
+  avatarId,
+  avatarDetails,
   saved,
   saveError,
   discovery,
-  onScanAnother,
+  onBattleNow,
+  onGenerateAnother,
   onLeave,
 }: {
   sprite: string;
   name: string;
+  /** Decides whether the Web Upload badge + 24h expiry line show at all — an
+   *  IRL (camera) scan is permanent, so neither applies (RetentionNote in
+   *  ArchivePage.tsx follows the same rule: silent for a mobile-sourced
+   *  avatar, only web uploads carry an expiry). */
+  source: CaptureSource;
+  avatarId: string | null;
+  /** The real persisted record (species/family/full stats), fetched
+   *  separately — see the effect that populates this in ScanPage. Null while
+   *  loading, or if the fetch failed; the dialog just omits that section
+   *  rather than showing anything fake. */
+  avatarDetails: PlantAvatarData | null;
   saved: boolean;
   saveError?: string;
   discovery: ScanDiscovery | null;
-  onScanAnother: () => void;
+  onBattleNow: () => void;
+  /** Returns to the viewfinder for another run — the dialog's dismiss action. */
+  onGenerateAnother: () => void;
   /** Leaves the scan screen, the way the page's own Back button does. */
   onLeave: () => void;
 }) {
@@ -779,7 +1002,7 @@ function ResultDialog({
      * navigated away would be a surprising way to lose a sprite in the one case
      * where it is only in the browser.
      */
-    <Overlay onDismiss={onScanAnother} labelledBy="scan-result-title">
+    <Overlay onDismiss={onGenerateAnother} labelledBy="scan-result-title">
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
@@ -789,22 +1012,60 @@ function ResultDialog({
           ← Back
         </button>
         <h2 id="scan-result-title" className="flex-1 text-center text-xs">
-          Done!
+          New Discovery!
         </h2>
-        {/* Balances the row so the heading stays centred against the button. */}
-        <span aria-hidden="true" className="w-[3.25rem]" />
+        {/*
+          Two different exits, so both are offered: ← Back leaves the scan
+          screen, × returns to the viewfinder for another run. The × sits in
+          the slot that used to hold a balancing spacer rather than being
+          absolutely positioned, so it cannot land on top of the heading.
+        */}
+        <button
+          type="button"
+          onClick={onGenerateAnother}
+          aria-label="Close"
+          className="press pixel-button pixel-button-icon flex h-6 w-6 shrink-0 items-center justify-center text-sm leading-none"
+        >
+          ×
+        </button>
       </div>
-      <img src={sprite} alt="" className="pixelated mx-auto mt-3 h-40 w-40 object-contain" />
-      <p className="mt-2 text-center text-[10px] leading-relaxed">{name}</p>
-      <p className="mt-1 text-center text-[9px] leading-relaxed opacity-70">
-        Rendered at 192×192 and snapped to the Florentine24 palette.
-      </p>
 
-      {!saved && (
-        <p className="pixel-panel mt-3 px-3 py-2 text-center text-[9px] leading-relaxed text-red-700">
-          Your plant was generated, but it could not be saved.{saveError ? ` ${saveError}` : ''}
+      <div className="scan-result-glow relative mx-auto mt-3 h-40 w-40">
+        <img src={sprite} alt="" className="pixelated relative z-10 h-40 w-40 object-contain" />
+      </div>
+      <p className="mt-2 text-center text-[10px] leading-relaxed">{name}</p>
+      {avatarDetails?.family && (
+        <p className="text-center text-[9px] leading-relaxed opacity-70">
+          {avatarDetails.species} from {avatarDetails.family}
         </p>
       )}
+
+      <p className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
+        <CaptureBadge source={source} />
+        {source === 'web' && (
+          <span className="text-[9px] leading-relaxed opacity-70">
+            Expires 24 hours after upload
+          </span>
+        )}
+      </p>
+
+      {avatarDetails && (
+        <div className="mt-3">
+          <StatGrid avatar={avatarDetails} compact />
+        </div>
+      )}
+
+      <p
+        className={
+          saved
+            ? 'mt-3 text-center text-[9px] leading-relaxed opacity-80'
+            : 'pixel-panel mt-3 px-3 py-2 text-center text-[9px] leading-relaxed text-red-700'
+        }
+      >
+        {saved
+          ? 'Saved to your archive.'
+          : `Your plant was generated, but it could not be saved.${saveError ? ` ${saveError}` : ''}`}
+      </p>
 
       {discovery &&
         (discovery.isFirstDiscoverer ? (
@@ -819,6 +1080,19 @@ function ResultDialog({
           </div>
         ))}
 
+      {/* Battling needs a real, saved avatarId — nothing to load in a battle
+          if the save itself failed. Takes the primary slot because it is the
+          thing a player most likely wants next from a fresh discovery. */}
+      {saved && avatarId && (
+        <button
+          type="button"
+          onClick={onBattleNow}
+          className="press pixel-button is-primary mt-4 w-full px-2 py-2 text-[9px]"
+        >
+          Battle Now
+        </button>
+      )}
+
       {/* Only when the record exists: sending someone to the archive to admire
           a plant that failed to save would be a worse answer than the error
           above it. */}
@@ -826,12 +1100,22 @@ function ResultDialog({
         <button
           type="button"
           onClick={() => navigate('/archive')}
-          className="press pixel-button is-primary mt-4 w-full px-2 py-2 text-[9px]"
+          className="press pixel-button mt-2 w-full px-2 py-2 text-[9px]"
         >
           See it in your archive
         </button>
       )}
 
+      <button
+        type="button"
+        onClick={onGenerateAnother}
+        className="press pixel-button mt-2 w-full px-2 py-2 text-[9px]"
+      >
+        Generate Another
+      </button>
+
+      {/* Promoted to primary when the save failed: the download is then the
+          only way the player keeps this sprite at all. */}
       <a
         href={sprite}
         download={`${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`}
@@ -839,15 +1123,8 @@ function ResultDialog({
           saved ? '' : ' is-primary'
         }`}
       >
-        Save Plantemon
+        Download Sprite
       </a>
-      <button
-        type="button"
-        onClick={onScanAnother}
-        className="press pixel-button mt-2 w-full px-2 py-2 text-[9px]"
-      >
-        Scan another
-      </button>
     </Overlay>
   );
 }

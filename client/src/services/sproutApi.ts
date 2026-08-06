@@ -274,6 +274,16 @@ export async function listOwnedAvatars(
   return data;
 }
 
+/** One owned avatar (GET /api/avatar/:id). The scan result screen reads the
+ *  persisted record for its full stat block — the pipeline's `complete` event
+ *  only carries maxHealth/speed. */
+export async function getAvatar(avatarId: string): Promise<AvatarRecord> {
+  const { data } = await apiClient.get<AvatarRecord>(
+    `/api/avatar/${encodeURIComponent(avatarId)}`
+  );
+  return data;
+}
+
 /** Removes one owned avatar for good (DELETE /api/avatar/:id → 204).
  *  The archive's shovel; the server answers 404 for anyone else's record. */
 export async function deleteAvatar(avatarId: string): Promise<void> {

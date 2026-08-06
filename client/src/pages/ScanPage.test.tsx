@@ -75,6 +75,7 @@ function stubDemoImageLoading() {
   vi.stubGlobal(
     'fetch',
     vi.fn().mockResolvedValue({
+      ok: true,
       blob: () => Promise.resolve(new Blob(['fake-jpeg'], { type: 'image/jpeg' })),
     })
   );
@@ -310,7 +311,10 @@ describe('ScanPage save outcome', () => {
       const user = await startScan();
 
       const dialog = await screen.findByRole('dialog');
-      await user.click(within(dialog).getByText('Done!'));
+      // Any element inside the panel proves the point; the heading is matched
+      // by role rather than by its wording so a copy change to the result
+      // screen doesn't fail a test about dismissal.
+      await user.click(within(dialog).getByRole('heading', { level: 2 }));
 
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
