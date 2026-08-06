@@ -63,13 +63,18 @@ would have been: it runs on Linux, on every PR, and its result is a link.
 | Graceful shutdown drains, bounds, and is idempotent | `server/tests/lifecycle.test.ts`, 5 cases | **PASS**, local |
 | Readiness reports per-dependency status, times out, never throws | `server/tests/readiness.test.ts`, 10 cases | **PASS**, local |
 | Liveness stays dependency-free | `readiness.test.ts` + a CI assertion with no credentials present | **PASS** |
-| API image builds on Linux | `docker.yml` → `server-image` | CI |
-| Image runs as non-root | `docker.yml`, asserts `Config.User = node` | CI |
-| Container answers `/api/health` with no credentials | `docker.yml` | CI |
-| Container stops on SIGTERM in under 10s with exit code 0 | `docker.yml` | CI |
-| Frontend image serves the shell and deep links | `docker.yml` → `client-image` | CI |
-| API and emulator talk over the compose network | `docker.yml` → `compose-stack`, asserts the firestore probe reports `ok` | CI |
-| Image published to GHCR | `docker.yml` → `publish`, on push to main | CI |
+| API image builds on Linux | `docker.yml` → `server-image` | **PASS** — 1m27s, 464 MB |
+| Image runs as non-root | `docker.yml`, asserts `Config.User = node` | **PASS** — `configured user: 'node'` |
+| Container answers `/api/health` with no credentials | `docker.yml` | **PASS** — healthy after 2s |
+| Readiness reports per-dependency status without 500ing | `docker.yml` | **PASS** — `HTTP 503`, both probes named and `failed` |
+| Container stops on SIGTERM in under 10s with exit code 0 | `docker.yml` | **PASS** — stopped in **1s**, exit 0, logged `drained cleanly` |
+| Frontend image serves the shell and deep links | `docker.yml` → `client-image` | **PASS** — 24s |
+| API and emulator talk over the compose network | `docker.yml` → `compose-stack`, asserts the firestore probe reports `ok` | **PASS** — 2m2s |
+| Image published to GHCR | `docker.yml` → `publish`, on push to main | Pending — runs on merge |
+
+All CI rows verified on run
+[31097344997](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/runs/31097344997),
+commit `05fb060`, 6 Aug 2026.
 
 **Not verified, and must not be claimed:** that the image runs on Render. The
 production service is still `runtime: node` in `render.yaml` — the buildpack
@@ -150,9 +155,14 @@ docker pull ghcr.io/kopi-o-kosong-beng/sprout-web-app-server:latest
 
 **Debian slim, not Alpine.** Alpine is musl-libc; the prebuilt binaries npm
 fetches for `sharp` and `bcrypt` target glibc, so an Alpine base silently
-compiles from source or fails. The image still lands far below a full `node:22`
-base. The frontend image *does* use Alpine — nginx has no native Node modules to
-resolve, so the smaller base is free there.
+compiles from source or fails. Measured cost: **464 MB** (CI, 6 Aug 2026) —
+larger than the "about 200 MB" first estimated here, and the estimate is
+corrected rather than quietly dropped. Most of the weight is `firebase-admin`,
+`google-gax` and libvips, none of which shrink on a different base, so the
+honest lever for reducing it is trimming dependencies rather than switching to
+Alpine and paying for a source build of `sharp` on every image. The frontend
+image *does* use Alpine — nginx has no native Node modules to resolve, so the
+smaller base is free there.
 
 **Three stages in the API image.** `deps` resolves production dependencies only,
 `builder` takes the full tree and compiles, `runtime` starts clean and copies one

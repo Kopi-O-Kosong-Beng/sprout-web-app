@@ -17,8 +17,13 @@
 # ── Why Debian slim and not Alpine ────────────────────────────────────────────
 # Alpine is musl-libc. The prebuilt binaries npm fetches for sharp and bcrypt
 # target glibc, so an Alpine base falls back to compiling from source or fails
-# outright. Debian slim keeps the prebuilds usable; the image still lands around
-# 200 MB rather than the ~1 GB a full node:22 base would cost.
+# outright. Debian slim keeps the prebuilds usable.
+#
+# Measured cost of that choice: 464 MB (CI, 6 Aug 2026). Larger than a
+# hand-waved "about 200 MB" — most of it is firebase-admin, google-gax and
+# libvips, none of which shrink on a different base. If the size ever needs to
+# come down, the honest lever is trimming dependencies, not switching to Alpine
+# and paying for a source build of sharp on every image.
 #
 # ── Why three stages ──────────────────────────────────────────────────────────
 # `deps` resolves production dependencies only. `builder` takes the full tree
