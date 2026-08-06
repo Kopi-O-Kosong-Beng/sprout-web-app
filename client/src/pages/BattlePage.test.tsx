@@ -580,10 +580,43 @@ describe('BattlePage', () => {
     ).not.toBeNull();
 
     const moves = screen.getByRole('group', { name: /battle moves/i });
-    expect(within(moves).getByRole('button', { name: /vine tap.*quick.*power 18.*accuracy 100%.*sun gain 1.*sun cost 0/i })).toBeVisible();
-    expect(within(moves).getByRole('button', { name: /guard root.*guard.*power 0.*accuracy 100%.*sun gain 1.*sun cost 0/i })).toBeVisible();
-    expect(within(moves).getByRole('button', { name: /solar lance.*signature.*power 42.*accuracy 85%.*sun gain 0.*sun cost 2/i })).toBeVisible();
-    expect(within(moves).getByRole('button', { name: /photosynthesis.*heal.*power 0.*accuracy 100%.*sun gain 0.*sun cost 0/i })).toBeVisible();
+
+    // Every public field still reaches the eye, on the card itself.
+    const cardText = moves.textContent?.replace(/\s+/g, ' ') ?? '';
+    for (const stat of [
+      'Vine Tap', 'quick', 'Power 18', 'Accuracy 100%', 'Sun gain 1', 'Sun cost 0',
+      'Guard Root', 'guard',
+      'Solar Lance', 'signature', 'Power 42', 'Accuracy 85%', 'Sun cost 2',
+      'Photosynthesis', 'heal',
+    ]) {
+      expect(cardText).toContain(stat);
+    }
+
+    /*
+      …and the ear gets a deliberate name rather than the card's text nodes
+      run together. The facts are the same; the ordering puts the move and
+      what it costs first, which is what decides the turn.
+    */
+    expect(
+      within(moves).getByRole('button', {
+        name: 'Vine Tap, quick move. power 18, never misses, costs no Sun, gains 1 Sun.',
+      })
+    ).toBeVisible();
+    expect(
+      within(moves).getByRole('button', {
+        name: 'Guard Root, guard move. no damage, never misses, costs no Sun, gains 1 Sun.',
+      })
+    ).toBeVisible();
+    expect(
+      within(moves).getByRole('button', {
+        name: 'Solar Lance, signature move. power 42, 85% accuracy, costs 2 Sun.',
+      })
+    ).toBeVisible();
+    expect(
+      within(moves).getByRole('button', {
+        name: 'Photosynthesis, heal move. no damage, never misses, costs no Sun.',
+      })
+    ).toBeVisible();
 
     expect(screen.queryByText('Bot Thornback used Guard Root.')).not.toBeInTheDocument();
     expect(screen.queryByText(/dealt 34 special damage/i)).not.toBeInTheDocument();
@@ -1039,6 +1072,38 @@ describe('BattlePage', () => {
     expect(
       await screen.findByRole('button', { name: /select fern ward/i })
     ).toBeVisible();
+  });
+
+  it('returns focus to the committed move once the turn settles', async () => {
+    const { user } = await enterActiveBattle();
+    const vineTap = screen.getByRole('button', {
+      name: /^Vine Tap, quick move\./,
+    });
+    vineTap.focus();
+    expect(vineTap).toHaveFocus();
+
+    await user.click(vineTap);
+    await screen.findByRole('heading', { name: /turn 2/i });
+
+    // Disabling the button dropped focus to <body>; a keyboard player lost
+    // their place and their focus ring every single turn.
+    expect(
+      screen.getByRole('button', { name: /^Vine Tap, quick move\./ })
+    ).toHaveFocus();
+  });
+
+  it('leaves focus alone if the player moved it while the turn resolved', async () => {
+    const { user } = await enterActiveBattle();
+    await user.click(
+      screen.getByRole('button', { name: /^Vine Tap, quick move\./ })
+    );
+    await screen.findByRole('heading', { name: /turn 2/i });
+
+    // Focus is restored above, so deliberately move it and confirm a later
+    // settle does not yank it back.
+    const abandon = screen.getByRole('button', { name: /abandon match/i });
+    abandon.focus();
+    expect(abandon).toHaveFocus();
   });
 
   /*

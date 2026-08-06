@@ -404,6 +404,24 @@ function hpBeforeScript(
 
 /** What a move actually does, in words. The stat row alone reads "Power 0" for
  *  Guard, which says nothing about the one thing Guard is for. */
+/** What a screen reader should hear for a move card.
+ *
+ *  Without this the name falls out of the card's own text nodes, which reads
+ *  as one unpunctuated run — "Vine Tap quick Reliable chip damage. Never
+ *  misses. Power 18 Accuracy 100% Sun gain 1 Sun cost 0". Same facts, but the
+ *  listener has to hold all of it to find the two numbers that decide the
+ *  turn. Naming the button explicitly puts the move and its cost first and
+ *  punctuates the rest; the visual card is unchanged. */
+function moveAccessibleName(move: BattleMove): string {
+  const cost =
+    move.energyCost > 0 ? `costs ${move.energyCost} Sun` : 'costs no Sun';
+  const gain = move.energyGain > 0 ? `, gains ${move.energyGain} Sun` : '';
+  const power = move.power > 0 ? `power ${move.power}` : 'no damage';
+  const accuracy =
+    move.accuracy < 100 ? `, ${move.accuracy}% accuracy` : ', never misses';
+  return `${move.name}, ${move.kind} move. ${power}${accuracy}, ${cost}${gain}.`;
+}
+
 function moveDescription(move: BattleMove): string {
   switch (move.kind) {
     case 'guard':
@@ -1024,6 +1042,32 @@ export default function BattlePage() {
     setView('selecting');
   };
 
+  /*
+    Committing a move disables its button, and a browser drops focus from a
+    disabled element to <body> — so every turn a keyboard player lost their
+    focus ring and the visible indicator vanished. (DOM order meant the next
+    Tab still landed sensibly, which is why this read as a styling bug rather
+    than a focus one.) Widening the disabled window to cover the choreography
+    made it last longer, so it is fixed here rather than left.
+
+    Only restores when focus was actually orphaned onto <body>: if the player
+    has since tabbed somewhere deliberately, or is using a mouse and focus sits
+    elsewhere, this must not yank them back. `preventScroll` because the button
+    is already in view — the player just pressed it.
+  */
+  const lastMoveButton = useRef<HTMLButtonElement | null>(null);
+  const gridLocked = commandLocked || turnResolving;
+
+  useEffect(() => {
+    if (gridLocked) return;
+    const button = lastMoveButton.current;
+    lastMoveButton.current = null;
+    if (!button || !button.isConnected || button.disabled) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    button.focus?.({ preventScroll: true });
+  }, [gridLocked]);
+
   /** Stable identity on purpose: as a ref callback it then fires only when
    *  the error panel mounts, not on every rerender while it is visible. */
   const scrollErrorIntoView = useCallback((node: HTMLDivElement | null) => {
@@ -1443,6 +1487,7 @@ export default function BattlePage() {
                                 : ''
                             }`}
                             type="button"
+                            aria-label={moveAccessibleName(move)}
                             disabled={commandLocked || turnResolving}
                             aria-disabled={
                               reason !== null && !commandLocked && !turnResolving
@@ -1450,8 +1495,9 @@ export default function BattlePage() {
                                 : undefined
                             }
                             aria-describedby={shownReason ? reasonId : undefined}
-                            onClick={() => {
+                            onClick={(event) => {
                               if (reason !== null || turnResolving) return;
+                              lastMoveButton.current = event.currentTarget;
                               void runAction(session.id, move.id, session.turnNumber);
                             }}
                           >

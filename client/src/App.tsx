@@ -21,16 +21,39 @@ import TicketManagerPage from './pages/TicketManagerPage';
 import StudioPage from './pages/StudioPage';
 import './App.css';
 
+/** The nav is eight tab stops, repeated on every page, and a keyboard user had
+ *  no way past it — WCAG 2.4.1. First focusable thing in the document, visible
+ *  only while focused, and it targets the id each shell puts on its content
+ *  box. `tabIndex={-1}` on that box is what lets the jump actually move focus:
+ *  without it the browser scrolls but leaves focus in the header, so the next
+ *  Tab returns to nav item two. */
+const MAIN_CONTENT_ID = 'main-content';
+
+function SkipLink() {
+  return (
+    <a className="skip-link" href={`#${MAIN_CONTENT_ID}`}>
+      Skip to main content
+    </a>
+  );
+}
+
 /**
  * Chrome for the document pages: the painted app shell and the primary nav.
  * The landing page lives here too — it is a scrolling document, and the header
  * is how a signed-out visitor reaches log in / sign up.
+ *
+ * The content box is a plain wrapper rather than a styled one: `.app-shell` is
+ * a flex column and `.screen` carries its own `min-height`, so an unstyled
+ * flex item around it lands at exactly the size the page had before.
  */
 function DocumentLayout() {
   return (
     <div className="app-shell">
+      <SkipLink />
       <AppHeader />
-      <Outlet />
+      <div id={MAIN_CONTENT_ID} tabIndex={-1}>
+        <Outlet />
+      </div>
     </div>
   );
 }
@@ -46,8 +69,11 @@ function DocumentLayout() {
 function GameLayout() {
   return (
     <div className="game-shell">
+      <SkipLink />
       <AppHeader />
-      <div className="game-shell-body">
+      {/* The id rides the existing body box rather than a new wrapper —
+          `.game-shell-body > .screen` is a direct-child selector. */}
+      <div className="game-shell-body" id={MAIN_CONTENT_ID} tabIndex={-1}>
         <Outlet />
       </div>
     </div>
@@ -67,8 +93,9 @@ function GameLayout() {
 function StudioLayout() {
   return (
     <div className="studio-shell">
+      <SkipLink />
       <AppHeader />
-      <div className="studio-shell-body">
+      <div className="studio-shell-body" id={MAIN_CONTENT_ID} tabIndex={-1}>
         <Outlet />
       </div>
     </div>
