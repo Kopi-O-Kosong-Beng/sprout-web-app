@@ -142,14 +142,20 @@ function boundedEnergy(
   return { current, max };
 }
 
+/** The server's intent taxonomy (battle-engine intentForMove): `building`
+ *  means the chosen move is a quick attack or a guard, `committed` means the
+ *  signature or the heal, and `uncertain` is deliberate ambiguity whenever an
+ *  honest split would leak the pending move. The copy says what each hint
+ *  actually covers — "building momentum" read as "an attack is coming" and
+ *  then a guard halved the player's damage with no stated reason. */
 function intentMessage(name: string, intent: BattleIntent | null): string {
   switch (intent) {
     case 'building':
-      return `${name} is building momentum.`;
+      return `${name} is building up — expect a light hit or a guard.`;
     case 'committed':
       return `${name} is committed to a decisive action.`;
     case 'uncertain':
-      return `${name}'s next action remains uncertain.`;
+      return `${name} is unreadable — anything could come, big or small.`;
     default:
       return `${name}'s intent is not available.`;
   }
@@ -398,6 +404,24 @@ function hpBeforeScript(
 
 /** What a move actually does, in words. The stat row alone reads "Power 0" for
  *  Guard, which says nothing about the one thing Guard is for. */
+/** What a screen reader should hear for a move card.
+ *
+ *  Without this the name falls out of the card's own text nodes, which reads
+ *  as one unpunctuated run — "Vine Tap quick Reliable chip damage. Never
+ *  misses. Power 18 Accuracy 100% Sun gain 1 Sun cost 0". Same facts, but the
+ *  listener has to hold all of it to find the two numbers that decide the
+ *  turn. Naming the button explicitly puts the move and its cost first and
+ *  punctuates the rest; the visual card is unchanged. */
+function moveAccessibleName(move: BattleMove): string {
+  const cost =
+    move.energyCost > 0 ? `costs ${move.energyCost} Sun` : 'costs no Sun';
+  const gain = move.energyGain > 0 ? `, gains ${move.energyGain} Sun` : '';
+  const power = move.power > 0 ? `power ${move.power}` : 'no damage';
+  const accuracy =
+    move.accuracy < 100 ? `, ${move.accuracy}% accuracy` : ', never misses';
+  return `${move.name}, ${move.kind} move. ${power}${accuracy}, ${cost}${gain}.`;
+}
+
 function moveDescription(move: BattleMove): string {
   switch (move.kind) {
     case 'guard':
@@ -513,6 +537,17 @@ export default function BattlePage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<
     { kind: 'stale' | 'abandoned'; message: string } | null
+  >(null);
+  /** Abandon is destructive, irreversible and one Enter away from the moves
+   *  in tab order, so it asks before it acts.
+   *
+   *  Stored as the exact match and turn the question was asked about, not a
+   *  boolean, so `confirmingAbandon` below can be derived. A boolean needed an
+   *  effect to clear it when the battle moved on underneath the prompt, and an
+   *  effect clears one render late — long enough for the panel to repaint
+   *  itself against the NEW turn while still describing the old one. */
+  const [abandonPromptFor, setAbandonPromptFor] = useState<
+    { sessionId: string; turnNumber: number } | null
   >(null);
   const requestVersion = useRef(0);
   const inFlight = useRef(false);
@@ -643,6 +678,44 @@ export default function BattlePage() {
     [beginRequest, finishRequest, loadRoster, refreshRosterQuietly]
   );
 
+  /** The server has contradicted the client's picture of this battle — a
+   *  command bounced with a conflict, or the session vanished. Retrying the
+   *  same command can never succeed, so fetch the session and show what
+   *  actually happened: its result screen if it ended, the live turn if the
+   *  client was merely behind, or the roster if it is gone entirely. */
+  const resyncSession = useCallback(
+    async (sessionId: string) => {
+      const request = beginRequest();
+      if (request === null) return;
+      setView('loading');
+      setError(null);
+      setRetryCommand(null);
+
+      try {
+        const current = await getPveBattle(sessionId);
+        if (request !== requestVersion.current) return;
+        setSession(current);
+        setNotice({
+          kind: 'stale',
+          message:
+            current.status === 'active'
+              ? 'Battle synchronized to the latest server turn.'
+              : 'This battle had already ended — showing its final result.',
+        });
+        setView(viewForSession(current));
+        finishRequest(request);
+      } catch {
+        if (request !== requestVersion.current) return;
+        // Gone entirely (or unreachable) — the roster is the only place left,
+        // and a dead pointer must not resurrect this session on the next visit.
+        writeStoredSessionId(null);
+        finishRequest(request);
+        void loadRoster();
+      }
+    },
+    [beginRequest, finishRequest, loadRoster]
+  );
+
   useEffect(() => {
     const storedSessionId = readStoredSessionId();
     // An explicit route avatarId is the player mid-gesture (Archive's Battle
@@ -662,6 +735,30 @@ export default function BattlePage() {
     };
   }, [loadRoster, preferredAvatarId, resumeStoredSession]);
 
+  /** Back/forward can restore this document from the back/forward cache with
+   *  a finished battle frozen on screen, fully playable-looking — turn number,
+   *  HP, live move buttons. The frozen state is not evidence of anything:
+   *  re-run the entry decision against the server exactly as a fresh mount
+   *  would (the stored pointer already reflects how the battle ended). */
+  useEffect(() => {
+    const revalidate = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      // Whatever was in flight when the document froze is dead. A stuck lock
+      // here would make the revalidation a silent no-op.
+      requestVersion.current += 1;
+      inFlight.current = false;
+      setPendingCommand(null);
+      const storedSessionId = readStoredSessionId();
+      if (storedSessionId) {
+        void resumeStoredSession(storedSessionId);
+      } else {
+        void loadRoster();
+      }
+    };
+    window.addEventListener('pageshow', revalidate);
+    return () => window.removeEventListener('pageshow', revalidate);
+  }, [loadRoster, resumeStoredSession]);
+
   /** The stored pointer follows the session: written while a battle is live,
    *  cleared the moment it ends, so a reload can only ever resume something
    *  the server still considers active. */
@@ -669,6 +766,7 @@ export default function BattlePage() {
     if (!session) return;
     writeStoredSessionId(session.status === 'active' ? session.id : null);
   }, [session]);
+
 
   const runStart = useCallback(
     async (avatarId: string, kind: 'start' | 'replay') => {
@@ -717,6 +815,7 @@ export default function BattlePage() {
       setError(null);
       setRetryCommand(null);
       setNotice(null);
+      let conflicted = false;
 
       try {
         const result = await submitPveAction(
@@ -737,20 +836,32 @@ export default function BattlePage() {
         setView(viewForSession(result.session));
       } catch (caught) {
         if (request !== requestVersion.current) return;
-        setError(extractApiError(caught, 'Could not submit this move.'));
-        setRetryCommand({
-          kind: 'action',
-          sessionId,
-          moveId,
-          expectedTurn,
-        });
-        setView('error');
+        const status = axios.isAxiosError(caught)
+          ? caught.response?.status
+          : undefined;
+        // 409/404: the server says this session is complete, mismatched, or
+        // gone. A Retry of the same command can never succeed (the bfcache
+        // resurrection dead-ended exactly here), so resync to the truth
+        // instead of offering one.
+        if (status === 409 || status === 404) {
+          conflicted = true;
+        } else {
+          setError(extractApiError(caught, 'Could not submit this move.'));
+          setRetryCommand({
+            kind: 'action',
+            sessionId,
+            moveId,
+            expectedTurn,
+          });
+          setView('error');
+        }
       } finally {
         if (request === requestVersion.current) setPendingCommand(null);
         finishRequest(request);
       }
+      if (conflicted) await resyncSession(sessionId);
     },
-    [beginRequest, finishRequest]
+    [beginRequest, finishRequest, resyncSession]
   );
 
   const runAbandon = useCallback(
@@ -762,6 +873,7 @@ export default function BattlePage() {
       setError(null);
       setRetryCommand(null);
       setNotice(null);
+      let conflicted = false;
 
       try {
         const abandonedSession = await abandonPveBattle(sessionId);
@@ -780,15 +892,31 @@ export default function BattlePage() {
         if (records.length === 0) void refreshRosterQuietly();
       } catch (caught) {
         if (request !== requestVersion.current) return;
-        setError(extractApiError(caught, 'Could not abandon this battle.'));
-        setRetryCommand({ kind: 'abandon', sessionId });
-        setView('error');
+        const status = axios.isAxiosError(caught)
+          ? caught.response?.status
+          : undefined;
+        // Same conflict rule as runAction: if the session already ended or is
+        // gone, retrying the abandon is pointless — show what the server has.
+        if (status === 409 || status === 404) {
+          conflicted = true;
+        } else {
+          setError(extractApiError(caught, 'Could not abandon this battle.'));
+          setRetryCommand({ kind: 'abandon', sessionId });
+          setView('error');
+        }
       } finally {
         if (request === requestVersion.current) setPendingCommand(null);
         finishRequest(request);
       }
+      if (conflicted) await resyncSession(sessionId);
     },
-    [beginRequest, finishRequest, records.length, refreshRosterQuietly]
+    [
+      beginRequest,
+      finishRequest,
+      records.length,
+      refreshRosterQuietly,
+      resyncSession,
+    ]
   );
 
   const handleRetry = () => {
@@ -908,7 +1036,22 @@ export default function BattlePage() {
     ? boundedEnergy(session.bot.energy, session.bot.maxEnergy)
     : null;
   const commandLocked = pendingCommand !== null;
+  /** The choreography window. The server has already answered — the session
+   *  in state is the NEXT turn — but the player has not seen this turn play
+   *  out yet. Moves clicked now would commit to an intent the player has
+   *  never been shown, which is how four rapid clicks advanced the game two
+   *  turns with one turn's log unseen. */
+  const turnResolving = cinematic !== null;
   const sessionCommandFailed = view === 'error' && session !== null;
+  /** Derived, so the prompt cannot outlive the exact state it described: any
+   *  change of match, turn or status makes this false in the very same render
+   *  that shows the change, with no stale frame in between. */
+  const confirmingAbandon =
+    session !== null &&
+    session.status === 'active' &&
+    abandonPromptFor !== null &&
+    abandonPromptFor.sessionId === session.id &&
+    abandonPromptFor.turnNumber === session.turnNumber;
   const showSelection = session === null && view !== 'loading';
 
   const selectAvatar = (avatarId: string) => {
@@ -919,6 +1062,39 @@ export default function BattlePage() {
     setNotice(null);
     setView('selecting');
   };
+
+  /*
+    Committing a move disables its button, and a browser drops focus from a
+    disabled element to <body> — so every turn a keyboard player lost their
+    focus ring and the visible indicator vanished. (DOM order meant the next
+    Tab still landed sensibly, which is why this read as a styling bug rather
+    than a focus one.) Widening the disabled window to cover the choreography
+    made it last longer, so it is fixed here rather than left.
+
+    Only restores when focus was actually orphaned onto <body>: if the player
+    has since tabbed somewhere deliberately, or is using a mouse and focus sits
+    elsewhere, this must not yank them back. `preventScroll` because the button
+    is already in view — the player just pressed it.
+  */
+  const lastMoveButton = useRef<HTMLButtonElement | null>(null);
+  const gridLocked = commandLocked || turnResolving;
+
+  useEffect(() => {
+    if (gridLocked) return;
+    const button = lastMoveButton.current;
+    lastMoveButton.current = null;
+    if (!button || !button.isConnected || button.disabled) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    button.focus?.({ preventScroll: true });
+  }, [gridLocked]);
+
+  /** Stable identity on purpose: as a ref callback it then fires only when
+   *  the error panel mounts, not on every rerender while it is visible. */
+  const scrollErrorIntoView = useCallback((node: HTMLDivElement | null) => {
+    // jsdom has no scrollIntoView, hence the optional call.
+    node?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, []);
 
   const dismissSessionError = () => {
     if (!session || commandLocked) return;
@@ -1145,7 +1321,15 @@ export default function BattlePage() {
               </p>
             )}
             {error && (
-              <div className="pixel-panel p-3" role="alert">
+              <div
+                className="pixel-panel p-3"
+                role="alert"
+                // The panel renders above the arena; a player who was looking
+                // at the move grid saw every control grey out with the
+                // explanation sitting off-screen above the fold. The stable
+                // ref callback brings it into view once, on mount.
+                ref={scrollErrorIntoView}
+              >
                 <strong className="font-pixel block text-[9px] leading-relaxed">
                   Battle command not saved
                 </strong>
@@ -1308,9 +1492,12 @@ export default function BattlePage() {
                         "being saved" note. Printing it four times said nothing
                         the spinner above does not, and adding four lines at once
                         is what made the board jump on click. The per-move notes
-                        that are actually about the move still show.
+                        that are actually about the move still show. Same for
+                        the cinematic window — the narration strip is already
+                        saying what is happening.
                       */
-                      const shownReason = commandLocked ? null : reason;
+                      const shownReason =
+                        commandLocked || turnResolving ? null : reason;
                       const reasonId = `move-reason-${index}`;
                       return (
                         <div className="move-slot" key={move.id}>
@@ -1321,13 +1508,17 @@ export default function BattlePage() {
                                 : ''
                             }`}
                             type="button"
-                            disabled={commandLocked}
+                            aria-label={moveAccessibleName(move)}
+                            disabled={commandLocked || turnResolving}
                             aria-disabled={
-                              reason !== null && !commandLocked ? true : undefined
+                              reason !== null && !commandLocked && !turnResolving
+                                ? true
+                                : undefined
                             }
                             aria-describedby={shownReason ? reasonId : undefined}
-                            onClick={() => {
-                              if (reason !== null) return;
+                            onClick={(event) => {
+                              if (reason !== null || turnResolving) return;
+                              lastMoveButton.current = event.currentTarget;
                               void runAction(session.id, move.id, session.turnNumber);
                             }}
                           >
@@ -1390,16 +1581,69 @@ export default function BattlePage() {
                     Quitting is not a move. Full-width solid red gave it more
                     visual weight than the four moves above it, which is exactly
                     backwards for the one control a player should rarely want.
+
+                    It is also destructive and irreversible — the match is
+                    ended server-side with no resume path — and it sits one
+                    Enter away from the four moves in tab order. So it asks
+                    first. Inline rather than a window.confirm: the same
+                    pixel-panel language as the rest of the board, and it says
+                    what is actually lost (this turn's progress, zero XP)
+                    rather than a bare "Are you sure?".
                   */}
-                  <button
-                    className="mt-3 w-full py-2 text-[12px] font-semibold underline underline-offset-2 disabled:opacity-45"
-                    style={{ color: 'var(--color-hp-low)' }}
-                    type="button"
-                    disabled={commandLocked || sessionCommandFailed}
-                    onClick={() => void runAbandon(session.id)}
-                  >
-                    Abandon Match
-                  </button>
+                  {confirmingAbandon ? (
+                    <div
+                      className="pixel-panel mt-3 p-3"
+                      role="alertdialog"
+                      aria-label="Confirm abandoning this match"
+                      ref={scrollErrorIntoView}
+                    >
+                      <strong className="font-pixel block text-[9px] leading-relaxed">
+                        Abandon this match?
+                      </strong>
+                      <p className="mt-1.5 text-[11px] leading-relaxed opacity-80">
+                        Turn {session.turnNumber} and everything before it is
+                        lost. The match ends now, it cannot be resumed, and it
+                        awards 0 XP.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          className="press pixel-button px-3 py-2 text-[9px]"
+                          type="button"
+                          onClick={() => setAbandonPromptFor(null)}
+                        >
+                          Keep playing
+                        </button>
+                        <button
+                          className="press pixel-button px-3 py-2 text-[9px]"
+                          style={{ color: 'var(--color-hp-low)' }}
+                          type="button"
+                          onClick={() => {
+                            setAbandonPromptFor(null);
+                            void runAbandon(session.id);
+                          }}
+                        >
+                          Abandon, lose progress
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      className="mt-3 w-full py-2 text-[12px] font-semibold underline underline-offset-2 disabled:opacity-45"
+                      style={{ color: 'var(--color-hp-low)' }}
+                      type="button"
+                      disabled={
+                        commandLocked || sessionCommandFailed || turnResolving
+                      }
+                      onClick={() =>
+                        setAbandonPromptFor({
+                          sessionId: session.id,
+                          turnNumber: session.turnNumber,
+                        })
+                      }
+                    >
+                      Abandon Match
+                    </button>
+                  )}
                 </>
               ) : cinematic ? (
                 /* Hold the result while the final turn's choreography drains

@@ -17,6 +17,49 @@
    ========================================================================== */
 
 /* ============================================================================
+   Skip link
+   ----------------------------------------------------------------------------
+   Off-screen until focused rather than `display: none`, which would take it
+   out of the tab order and defeat the point. z-index clears the sticky header
+   (z-index: 50), so the link is not painted underneath the thing it skips.
+   ========================================================================== */
+
+.skip-link {
+  position: absolute;
+  left: 0.5rem;
+  top: 0.5rem;
+  /* Moved out of view by transform, not by a percentage offset: `top: -100%`
+     resolves against the containing block's height, which is auto here, so it
+     computed to 0px and left the link sitting over the header. */
+  transform: translateY(-250%);
+  z-index: 100;
+  padding: 0.6rem 1rem;
+  border: 3px solid #000000;
+  background: #ffffff;
+  color: #000000;
+  font-family: var(--font-pixel);
+  font-size: 0.6rem;
+  text-decoration: none;
+  box-shadow: 4px 4px 0 rgb(0 0 0 / 0.35);
+}
+
+/* `:focus`, not `:focus-visible`. The only way to reach this link is the
+   keyboard, so there is no pointer case to suppress — and `:focus-visible`
+   does not reliably match programmatic focus, which left the link invisible
+   for anyone landing on it via a focus-management call. */
+.skip-link:focus {
+  transform: translateY(0);
+  outline: 3px solid var(--color-brand-lo, #7cc36a);
+  outline-offset: 2px;
+}
+
+/* The content boxes are focus targets only — the jump moves focus there, and a
+   ring around the entire page is noise rather than information. */
+#main-content:focus {
+  outline: none;
+}
+
+/* ============================================================================
    Ground
    ========================================================================== */
 

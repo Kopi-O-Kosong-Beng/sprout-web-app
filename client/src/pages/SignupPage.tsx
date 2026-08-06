@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import axios from 'axios';
 import { signupUser, type SignupResponse } from '../services/sproutApi';
 import { extractApiError } from '../services/apiClient';
@@ -7,7 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { getPasswordCriteria, isStrongPassword } from '../utils/validation';
 
 export default function SignupPage() {
-  const { loginWithGoogle } = useAuth();
+  const { loginWithGoogle, status } = useAuth();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -81,6 +81,22 @@ export default function SignupPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  /*
+    Already signed in — do not offer account creation to someone who has an
+    account. LoginPage has guarded this since it was written; this page did
+    not, so /signup rendered a full account-creation form to a signed-in
+    player.
+
+    `&& !signupResult` is what makes it safe: a successful signup can sign the
+    new account straight in, so `status` flips to authenticated while this
+    page is still showing the "check your email" receipt. Without that clause
+    the guard would redirect over the receipt and take the verification
+    instructions with it. `unverified` is left alone for the same reason.
+  */
+  if (status === 'authenticated' && !signupResult) {
+    return <Navigate to="/" replace />;
   }
 
   if (signupResult) {

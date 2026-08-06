@@ -90,6 +90,22 @@ jobs:
       - name: 'Group 9: sprite-asset pact (vitest, no emulator)'
         run: npm exec -- vitest run pipeline/__tests__/spriteAssets.test.ts --coverage.enabled=false
 
+      # The image ingest gate and the fuzzer aimed at it. Free and offline: the
+      # sink is validateUploadedImage, the same function /api/pipeline/run-stream
+      # calls on every scan, so no external API is touched and no secret is
+      # needed. Deterministic by construction — the rng seed is fixed in the
+      # spec, so a red run here is reproducible from this log alone by running
+      # the same command locally.
+      #
+      # The LIVE fuzzer is deliberately not here: it spends API credits and is
+      # reachable only from the fuzz-live workflow_dispatch job.
+      - name: 'Group 10: image ingest + fuzz (vitest, no emulator)'
+        run: |
+          npm exec -- vitest run \
+            pipeline/__tests__/imageIngest.test.ts \
+            pipeline/__tests__/imageIngest.fuzz.test.ts \
+            --coverage.enabled=false
+
   client-focused:
     name: Client focused suites (Vitest + Testing Library)
     runs-on: ubuntu-latest

@@ -18,6 +18,7 @@ import { Router, json } from 'express';
 import type { Request, Response } from 'express';
 import authMiddleware from '../middleware/auth.middleware';
 import { identifyPlant, isMockIdentification } from '../pipeline/stages/identify';
+import { validateUploadedImage } from '../pipeline/ingest/imageIngest';
 import { craftPromptTiered } from '../pipeline/stages/promptCraft';
 import { generateSprite } from '../pipeline/stages/generate';
 import { removeBackgroundSafe } from '../pipeline/stages/removeBg';
@@ -75,8 +76,25 @@ router.post('/run-stream', async (req: Request, res: Response) => {
 
   try {
     const { imageBase64, customName } = req.body;
-    if (!imageBase64) {
-      sendEvent({ event: 'error', error: 'No image provided' });
+
+    /*
+      The first point on the server that looks at the photo's bytes at all.
+      Before this, the only check was `if (!imageBase64)` and the string went
+      straight to Plant.id — so a truncated upload, a mislabelled format or a
+      decompression bomb was forwarded and paid for.
+
+      Deliberately ahead of createDeadline(): rejecting is not a pipeline run,
+      and starting the total budget for work that is about to be refused would
+      charge malformed input against the timing of the next real scan.
+    */
+    const ingest = await validateUploadedImage(imageBase64);
+    if (!ingest.ok) {
+      sendEvent({
+        event: 'error',
+        step: '1',
+        error: ingest.message,
+        reason: ingest.reason,
+      });
       res.end();
       return;
     }

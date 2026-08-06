@@ -56,11 +56,19 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
+    /*
+     * A fresh tab mounts this page before Firebase has restored the session,
+     * so an immediate fetch goes out with no token, the server matches the
+     * caller against an empty uid, and a ranked player is told they are not
+     * ranked. Wait for auth to settle, and refetch on any later transition
+     * (sign-in, sign-out) so the caller row tracks who is actually looking.
+     */
+    if (status === "loading") return;
     void load();
     return () => {
       requestVersion.current += 1;
     };
-  }, [load]);
+  }, [load, status]);
 
   return (
     <main className="screen screen-scrollable flex flex-col">

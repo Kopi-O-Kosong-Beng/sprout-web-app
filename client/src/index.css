@@ -620,6 +620,13 @@ span.pixel-button {
     rgb(12 8 42 / 0.82);
   height: 100%;
   min-width: 0;
+  /* The panel paints itself near-black but set no colour, so anything inside
+     that did not name one fell back to the page's dark default — which is how
+     the HP label and the "121 / 147" readout ended up dark-on-dark while the
+     name beside them (which does set #fff) stayed legible. Owning the colour
+     here covers the whole panel; .combatant-role and .combatant-name still
+     override for their own cases. */
+  color: #ffffff;
 }
 
 /* Team colour on the inner edge of the frame only, so the two sides are

@@ -4,6 +4,14 @@ import { serverStartTime, adminLogBuffer, logAdminEvent, adminDexStore } from ".
 import { AUDITED_KEYS, serverEnv } from "./env";
 import { isTestRunInFlight, runTests } from "./testRunner";
 import {
+  clampRuns,
+  isFuzzRunInFlight,
+  runIngestFuzz,
+  DEFAULT_FUZZ_RUNS,
+  MAX_FUZZ_RUNS,
+  MIN_FUZZ_RUNS,
+} from "./fuzzRunner";
+import {
   FLUX_TIMEOUT_MS,
   GEMINI_TIMEOUT_MS,
   IDENTIFY_TIMEOUT_MS,
@@ -285,4 +293,64 @@ adminRouter.post("/run-tests", async (req, res) => {
     logAdminEvent("error", "Tests", `Vitest runner failed: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * Fuzzes the image ingest gate and returns the structured report.
+ *
+ * FREE AND OFFLINE. The sink is validateUploadedImage — the same function
+ * /api/pipeline/run-stream calls on every scan — so this touches no external
+ * API and bills nothing. The paid live fuzzer is deliberately unreachable from
+ * here; see platform/fuzzRunner.ts.
+ *
+ * POST for the same reasons as /run-tests: not idempotent, and serialised
+ * because the work is CPU-bound image decoding.
+ *
+ * `rngSeed` is optional. Omitted, the run explores fresh mutations and reports
+ * the seed it chose; supplied, it replays an earlier run exactly — which is how
+ * an operator reproduces a finding someone else hit.
+ */
+adminRouter.post("/run-fuzz", async (req, res) => {
+  if (isFuzzRunInFlight()) {
+    return res.status(409).json({ error: "A fuzz run is already in progress." });
+  }
+
+  const rawRuns = req.body?.runs;
+  const runs = rawRuns === undefined ? DEFAULT_FUZZ_RUNS : clampRuns(Number(rawRuns));
+
+  // Distinguish "explore" from "replay seed 0", which is a legitimate seed.
+  const rawSeed = req.body?.rngSeed;
+  const rngSeed =
+    rawSeed === undefined || rawSeed === null || rawSeed === ""
+      ? undefined
+      : Number(rawSeed);
+  if (rngSeed !== undefined && !Number.isFinite(rngSeed)) {
+    return res.status(400).json({ error: "rngSeed must be a number." });
+  }
+
+  logAdminEvent("info", "Fuzz", `Ingest fuzz run started (${runs} runs)`);
+
+  try {
+    const result = await runIngestFuzz({ runs, rngSeed });
+    logAdminEvent(
+      result.ok ? "info" : "error",
+      "Fuzz",
+      `Ingest fuzz finished in ${result.durationMs}ms: ` +
+        `${result.findings.length} finding(s), seed ${result.rngSeed}`,
+    );
+    res.json(result);
+  } catch (err: any) {
+    logAdminEvent("error", "Fuzz", `Fuzz runner failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Bounds the page renders next to its runs field, so the UI never has to
+ *  restate numbers the server owns. */
+adminRouter.get("/fuzz-config", (_req, res) => {
+  res.json({
+    minRuns: MIN_FUZZ_RUNS,
+    maxRuns: MAX_FUZZ_RUNS,
+    defaultRuns: DEFAULT_FUZZ_RUNS,
+  });
 });

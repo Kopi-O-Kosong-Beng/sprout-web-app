@@ -1,5 +1,6 @@
 import {
   Activity,
+  Bug,
   Code,
   Key,
   FlaskConical,
@@ -19,6 +20,7 @@ import {
 export type RouteId =
   | 'scanner'
   | 'unittests'
+  | 'fuzz'
   | 'health'
   | 'keys'
   | 'topology'
@@ -66,6 +68,14 @@ export const NAV: NavGroup[] = [
         kicker: 'Studio',
         title: 'Unit Tests',
         sub: 'Runs the real Vitest suite. Each case shows what it asserts, the terminal output it produced, and its result.',
+      },
+      {
+        id: 'fuzz',
+        label: 'Fuzz Testing',
+        icon: Bug,
+        kicker: 'Studio',
+        title: 'Image Ingest Fuzzing',
+        sub: 'Mutates real plant photos and feeds them to the same gate every scan passes through. Free and offline — no provider is called and nothing is billed.',
       },
     ],
   },
@@ -131,4 +141,5 @@ export const ROUTES: Record<RouteId, RouteDef> = Object.fromEntries(
 /** Routes owned by each feature component. */
 export const STUDIO_ROUTES: RouteId[] = ['scanner'];
 export const TEST_ROUTE: RouteId = 'unittests';
+export const FUZZ_ROUTE: RouteId = 'fuzz';
 export const ADMIN_ROUTES: RouteId[] = ['health', 'keys', 'topology', 'logs', 'gate', 'bench'];

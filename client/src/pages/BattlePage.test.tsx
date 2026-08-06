@@ -240,6 +240,17 @@ async function enterActiveBattle(session = battleSession()) {
   return view;
 }
 
+/** Abandon is a two-step gesture now — it asks before it ends the match. The
+ *  tests that are about what abandoning DOES go through both steps here, so
+ *  the confirmation is asserted in one place (the tests that own it) rather
+ *  than re-asserted in every one of them. */
+async function confirmAbandon(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /abandon match/i }));
+  await user.click(
+    screen.getByRole('button', { name: /abandon, lose progress/i })
+  );
+}
+
 describe('BattlePage', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -580,10 +591,43 @@ describe('BattlePage', () => {
     ).not.toBeNull();
 
     const moves = screen.getByRole('group', { name: /battle moves/i });
-    expect(within(moves).getByRole('button', { name: /vine tap.*quick.*power 18.*accuracy 100%.*sun gain 1.*sun cost 0/i })).toBeVisible();
-    expect(within(moves).getByRole('button', { name: /guard root.*guard.*power 0.*accuracy 100%.*sun gain 1.*sun cost 0/i })).toBeVisible();
-    expect(within(moves).getByRole('button', { name: /solar lance.*signature.*power 42.*accuracy 85%.*sun gain 0.*sun cost 2/i })).toBeVisible();
-    expect(within(moves).getByRole('button', { name: /photosynthesis.*heal.*power 0.*accuracy 100%.*sun gain 0.*sun cost 0/i })).toBeVisible();
+
+    // Every public field still reaches the eye, on the card itself.
+    const cardText = moves.textContent?.replace(/\s+/g, ' ') ?? '';
+    for (const stat of [
+      'Vine Tap', 'quick', 'Power 18', 'Accuracy 100%', 'Sun gain 1', 'Sun cost 0',
+      'Guard Root', 'guard',
+      'Solar Lance', 'signature', 'Power 42', 'Accuracy 85%', 'Sun cost 2',
+      'Photosynthesis', 'heal',
+    ]) {
+      expect(cardText).toContain(stat);
+    }
+
+    /*
+      …and the ear gets a deliberate name rather than the card's text nodes
+      run together. The facts are the same; the ordering puts the move and
+      what it costs first, which is what decides the turn.
+    */
+    expect(
+      within(moves).getByRole('button', {
+        name: 'Vine Tap, quick move. power 18, never misses, costs no Sun, gains 1 Sun.',
+      })
+    ).toBeVisible();
+    expect(
+      within(moves).getByRole('button', {
+        name: 'Guard Root, guard move. no damage, never misses, costs no Sun, gains 1 Sun.',
+      })
+    ).toBeVisible();
+    expect(
+      within(moves).getByRole('button', {
+        name: 'Solar Lance, signature move. power 42, 85% accuracy, costs 2 Sun.',
+      })
+    ).toBeVisible();
+    expect(
+      within(moves).getByRole('button', {
+        name: 'Photosynthesis, heal move. no damage, never misses, costs no Sun.',
+      })
+    ).toBeVisible();
 
     expect(screen.queryByText('Bot Thornback used Guard Root.')).not.toBeInTheDocument();
     expect(screen.queryByText(/dealt 34 special damage/i)).not.toBeInTheDocument();
@@ -896,7 +940,7 @@ describe('BattlePage', () => {
     apiMocks.abandonPveBattle.mockReturnValue(request.promise);
     const { user } = await enterActiveBattle();
 
-    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    await confirmAbandon(user);
     expect(apiMocks.abandonPveBattle).toHaveBeenCalledWith('battle-1');
     expect(screen.getByRole('button', { name: /abandon match/i })).toBeDisabled();
     expect(screen.getByRole('status', { name: /abandoning battle/i })).toBeVisible();
@@ -918,7 +962,7 @@ describe('BattlePage', () => {
       .mockResolvedValueOnce(battleSession({ status: 'abandoned' }));
     const { user } = await enterActiveBattle();
 
-    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    await confirmAbandon(user);
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Abandon request failed.'
     );
@@ -1029,7 +1073,7 @@ describe('BattlePage', () => {
     const { user } = renderBattle();
 
     await screen.findByRole('heading', { name: /turn 1/i });
-    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    await confirmAbandon(user);
 
     // The abandon receipt must not be hostage to the roster's arrival…
     expect(
@@ -1038,6 +1082,192 @@ describe('BattlePage', () => {
     // …and the empty-roster fallback refetch repopulates the selection.
     expect(
       await screen.findByRole('button', { name: /select fern ward/i })
+    ).toBeVisible();
+  });
+
+  /*
+    Abandon ends the match server-side with no resume path and awards nothing,
+    and it sits one Enter away from the four moves in tab order. It used to
+    fire on the first press with no warning.
+  */
+  it('asks before abandoning, and does nothing if the player backs out', async () => {
+    const { user } = await enterActiveBattle();
+
+    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    const prompt = await screen.findByRole('alertdialog', {
+      name: /confirm abandoning this match/i,
+    });
+    expect(prompt).toHaveTextContent(/cannot be resumed/i);
+    expect(prompt).toHaveTextContent(/0 XP/i);
+    expect(apiMocks.abandonPveBattle).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /keep playing/i }));
+    expect(apiMocks.abandonPveBattle).not.toHaveBeenCalled();
+    // Still mid-battle, with the turn intact.
+    expect(screen.getByRole('heading', { name: /turn 1/i })).toBeVisible();
+  });
+
+  it('abandons only on the second, explicit confirmation', async () => {
+    const { user } = await enterActiveBattle();
+
+    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    await user.click(
+      screen.getByRole('button', { name: /abandon, lose progress/i })
+    );
+
+    expect(apiMocks.abandonPveBattle).toHaveBeenCalledWith('battle-1');
+    expect(
+      await screen.findByRole('status', { name: /battle abandoned/i })
+    ).toHaveTextContent(/0 xp awarded/i);
+  });
+
+  it('drops a stale confirmation if the battle moves on underneath it', async () => {
+    const { user } = await enterActiveBattle();
+    await user.click(screen.getByRole('button', { name: /abandon match/i }));
+    expect(
+      screen.getByRole('alertdialog', { name: /confirm abandoning/i })
+    ).toBeVisible();
+
+    // A bfcache revalidate lands a newer turn while the prompt is open. The
+    // prompt described turn 1; answering it now would answer for turn 3.
+    apiMocks.getPveBattle.mockResolvedValue(battleSession({ turnNumber: 3 }));
+    const restore = new Event('pageshow');
+    Object.defineProperty(restore, 'persisted', { value: true });
+    act(() => {
+      window.dispatchEvent(restore);
+    });
+
+    expect(await screen.findByRole('heading', { name: /turn 3/i })).toBeVisible();
+    expect(
+      screen.queryByRole('alertdialog', { name: /confirm abandoning/i })
+    ).not.toBeInTheDocument();
+    expect(apiMocks.abandonPveBattle).not.toHaveBeenCalled();
+  });
+
+  it('returns focus to the committed move once the turn settles', async () => {
+    const { user } = await enterActiveBattle();
+    const vineTap = screen.getByRole('button', {
+      name: /^Vine Tap, quick move\./,
+    });
+    vineTap.focus();
+    expect(vineTap).toHaveFocus();
+
+    await user.click(vineTap);
+    await screen.findByRole('heading', { name: /turn 2/i });
+
+    // Disabling the button dropped focus to <body>; a keyboard player lost
+    // their place and their focus ring every single turn.
+    expect(
+      screen.getByRole('button', { name: /^Vine Tap, quick move\./ })
+    ).toHaveFocus();
+  });
+
+  it('leaves focus alone if the player moved it while the turn resolved', async () => {
+    const { user } = await enterActiveBattle();
+    await user.click(
+      screen.getByRole('button', { name: /^Vine Tap, quick move\./ })
+    );
+    await screen.findByRole('heading', { name: /turn 2/i });
+
+    // Focus is restored above, so deliberately move it and confirm a later
+    // settle does not yank it back.
+    const abandon = screen.getByRole('button', { name: /abandon match/i });
+    abandon.focus();
+    expect(abandon).toHaveFocus();
+  });
+
+  /*
+    The bfcache resurrection: browser Back restored a document frozen with a
+    finished battle fully playable-looking. Two defences — pageshow(persisted)
+    re-runs the entry decision against the server, and a command bouncing off
+    a dead session resyncs to the server's verdict instead of offering a
+    Retry that can never succeed.
+  */
+  it('resyncs to the server verdict when a move bounces off a finished session', async () => {
+    apiMocks.submitPveAction.mockRejectedValueOnce(
+      Object.assign(new Error('Battle session is already complete.'), {
+        isAxiosError: true,
+        response: { status: 409 },
+      })
+    );
+    apiMocks.getPveBattle.mockResolvedValue(
+      battleSession({ status: 'abandoned', xpAwarded: 0 })
+    );
+    const { user } = await enterActiveBattle();
+
+    await user.click(screen.getByRole('button', { name: /vine tap/i }));
+
+    // The result screen, not a dead-end error panel: the player sees how the
+    // battle actually ended and holds live Replay / Change Plant controls.
+    expect(
+      await screen.findByRole('heading', { name: /battle abandoned/i })
+    ).toBeVisible();
+    expect(screen.getByText(/already ended/i)).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /retry move/i })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /replay/i })).toBeEnabled();
+  });
+
+  it('falls back to the roster when the conflicting session is gone entirely', async () => {
+    apiMocks.submitPveAction.mockRejectedValueOnce(
+      Object.assign(new Error('Battle session not found.'), {
+        isAxiosError: true,
+        response: { status: 404 },
+      })
+    );
+    apiMocks.getPveBattle.mockRejectedValue(
+      Object.assign(new Error('Battle session not found.'), {
+        isAxiosError: true,
+        response: { status: 404 },
+      })
+    );
+    const { user } = await enterActiveBattle();
+
+    await user.click(screen.getByRole('button', { name: /vine tap/i }));
+
+    expect(
+      await screen.findByRole('button', { name: /select fern ward/i })
+    ).toBeVisible();
+    expect(sessionStorage.getItem('sprout.battle.sessionId')).toBeNull();
+  });
+
+  it('revalidates a document restored from the back/forward cache', async () => {
+    await enterActiveBattle();
+    // The abandon happened in this document's previous life: the server ended
+    // the battle and cleared the stored pointer, then bfcache froze the
+    // fully-playable-looking battle screen.
+    sessionStorage.removeItem('sprout.battle.sessionId');
+
+    const restore = new Event('pageshow');
+    Object.defineProperty(restore, 'persisted', { value: true });
+    act(() => {
+      window.dispatchEvent(restore);
+    });
+
+    // Back at the roster — the frozen battle is not resurrected.
+    expect(
+      await screen.findByRole('button', { name: /select fern ward/i })
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /vine tap/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('resumes a still-live battle after a back/forward cache restore', async () => {
+    await enterActiveBattle();
+    apiMocks.getPveBattle.mockResolvedValue(battleSession({ turnNumber: 3 }));
+
+    const restore = new Event('pageshow');
+    Object.defineProperty(restore, 'persisted', { value: true });
+    act(() => {
+      window.dispatchEvent(restore);
+    });
+
+    // The pointer still names a live session, so the restore lands the player
+    // on the server's current turn rather than the frozen one.
+    expect(
+      await screen.findByRole('heading', { name: /turn 3/i })
     ).toBeVisible();
   });
 
@@ -1174,6 +1404,55 @@ describe('BattlePage', () => {
       );
 
       await waitFor(() => expect(narration()).toBeNull(), { timeout: 2500 });
+    }, 15000);
+
+    it('locks the move grid and Abandon while the turn plays out', async () => {
+      const resolved = battleSession({
+        turnNumber: 2,
+        player: { currentHp: 89 },
+        log: [
+          {
+            turnNumber: 1,
+            type: 'move_used',
+            actor: 'player',
+            moveId: 'vine-tap',
+            message: 'Fern Ward used Vine Tap.',
+          },
+          {
+            turnNumber: 1,
+            type: 'damage_dealt',
+            actor: 'bot',
+            amount: 12,
+            message: 'Thornback dealt 12 damage.',
+          },
+        ],
+      });
+      apiMocks.submitPveAction.mockResolvedValue(actionResult(resolved));
+
+      const view = await enterActiveBattle();
+      const narration = () => view.container.querySelector('.battle-narration');
+      await view.user.click(screen.getByRole('button', { name: /vine tap/i }));
+
+      // Mid-playback: the session in state is already turn 2, but the player
+      // has not seen turn 1 resolve. Rapid clicks here used to commit turn 2's
+      // move blind, skipping the intent and log entirely.
+      await waitFor(
+        () =>
+          expect(narration()?.textContent).toContain('Fern Ward used Vine Tap.'),
+        { timeout: 2000 }
+      );
+      expect(screen.getByRole('button', { name: /vine tap/i })).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: /abandon match/i })
+      ).toBeDisabled();
+      expect(apiMocks.submitPveAction).toHaveBeenCalledTimes(1);
+
+      // Playback over: the grid unlocks for the turn the player can now see.
+      await waitFor(() => expect(narration()).toBeNull(), { timeout: 4000 });
+      expect(screen.getByRole('button', { name: /vine tap/i })).toBeEnabled();
+      expect(
+        screen.getByRole('button', { name: /abandon match/i })
+      ).toBeEnabled();
     }, 15000);
 
     it('holds the outcome panel until the final turn finishes playing', async () => {

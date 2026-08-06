@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 import authUserRepository from '../repositories/auth-users';
 import { send as sendEmail } from './email.service';
+import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from './password-policy';
 import type { AuthProviderTag, AuthUserProfile } from '../models/auth';
 import { backgroundDispatcher } from '../utils/background-dispatch';
 
@@ -70,17 +71,10 @@ function normalizeEmail(email: string): string {
 }
 
 function assertStrongPassword(password: string): void {
-  if (
-    password.length < 8 ||
-    !/[a-z]/.test(password) ||
-    !/[A-Z]/.test(password) ||
-    !/\d/.test(password) ||
-    !/[^A-Za-z0-9]/.test(password)
-  ) {
-    throw httpError(
-      400,
-      'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol.'
-    );
+  // Rule and copy both live in password-policy, so this check, the seed-admin
+  // script and the client's mirror cannot drift apart.
+  if (!isStrongPassword(password)) {
+    throw httpError(400, PASSWORD_POLICY_MESSAGE);
   }
 }
 

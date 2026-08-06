@@ -73,6 +73,7 @@ jest.mock('../services/sprite-storage', () => ({
 import app from '../app';
 import dexRepository from '../repositories/dex';
 import { clearFirestore, seedFirestoreUser } from './firestore-test-utils';
+import { TINY_JPEG_DATA_URL } from './fixtures/tiny-image';
 
 const SCANNER = 'user-scanner';
 const FINDER = 'user-finder';
@@ -93,7 +94,12 @@ async function runScan(
   const response = await request(app)
     .post('/api/pipeline/run-stream')
     .set('Authorization', `Bearer verified:${uid}`)
-    .send({ imageBase64: 'data:image/jpeg;base64,AAAA', pauseAt2b: false, ...body });
+    /* A real 32x32 JPEG, not a placeholder. The route validates the upload
+       before the pipeline starts (pipeline/ingest/imageIngest), so the old
+       `data:image/jpeg;base64,AAAA` is now correctly refused and no `complete`
+       frame is ever emitted. The upstream hops stay mocked; only the bytes had
+       to become genuine. */
+    .send({ imageBase64: TINY_JPEG_DATA_URL, pauseAt2b: false, ...body });
 
   expect(response.status).toBe(200);
   const frames = response.text
