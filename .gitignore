@@ -38,3 +38,10 @@ deploy/*.env
 # Knowledge-graph tool output: a derived cache, rebuilt on demand. Committing it
 # put 201 files and 136k lines into one review.
 .graphify/
+
+# Playwright: browsers, traces, videos and HTML reports are all regenerated
+# by a run. The traces alone are megabytes per failure.
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

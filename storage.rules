@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// Deny-all, and that is not a placeholder: it is the production posture.
+// Sprites are written exclusively by the server through the Admin SDK, which
+// bypasses these rules by design; no browser ever reads or writes the bucket
+// directly (the client receives token-bearing download URLs instead). The same
+// applies in the Storage *emulator*, which requires this file to start — the
+// E2E stack works because the API uses the Admin SDK there too, so a rule set
+// that admits nobody still admits the server.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

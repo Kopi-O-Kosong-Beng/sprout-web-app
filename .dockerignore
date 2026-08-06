@@ -56,7 +56,7 @@ firestore-debug.log
 # is a large share of the repository by file count.
 md/
 docs/
-Sprout_Vault/
+obsidian-vault/
 Raw dump/
 transcripts/
 **/*.md

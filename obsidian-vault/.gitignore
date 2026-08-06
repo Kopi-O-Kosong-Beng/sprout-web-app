@@ -1,0 +1,12 @@
+.obsidian/workspace*
+.obsidian/cache
+.trash/
+.DS_Store
+
+# graphify internal working files — only the shareable outputs
+# (graph.html, graph.json, GRAPH_REPORT.md) are meant to be committed here.
+graphify-out/.graphify_*
+graphify-out/cache/
+graphify-out/converted/
+graphify-out/cost.json
+graphify-out/manifest.json
