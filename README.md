@@ -81,12 +81,16 @@ npm test -w server            # Jest (Firestore emulator) + Vitest (pipeline)
 npm test -w client            # Vitest + React Testing Library
 ```
 
-| Suite | Files | Tooling |
-|---|---|---|
-| Server integration & API | 40 | Jest + Supertest against the Firestore Emulator |
-| Pipeline & fuzzing | 13 | Vitest |
-| Client components & routing | 26 | Vitest + React Testing Library |
-| End-to-end journeys | 3 | Playwright (Chromium) against the real stack, every PR |
+| Suite | Files | Tests | Tooling |
+|---|---:|---:|---|
+| Server integration & API | 40 | 565 | Jest + Supertest against the Firestore Emulator |
+| Client components & routing | 26 | 265 | Vitest + React Testing Library |
+| Pipeline & fuzzing | 13 | 113 | Vitest |
+| End-to-end journeys | 2 | 6 | Playwright (Chromium) against the real stack |
+| **Total** | **81** | **949** | |
+
+Measured 2026-08-06 by running each suite, not by counting `it(` declarations —
+parameterised cases expand at runtime, so a static count understates it.
 
 Test design is documented in [`md/FUZZ_TESTING.md`](md/FUZZ_TESTING.md) (the
 image ingest gate and its mutation fuzzer) and in the evidence records under
@@ -123,6 +127,11 @@ docker pull ghcr.io/kopi-o-kosong-beng/sprout-web-app-server:latest
 | [`md/requirements.md`](md/requirements.md) | Endpoint-level specification |
 | [`md/checkoff.md`](md/checkoff.md) | Flow-by-flow walkthrough with file references |
 | [`docs/`](docs/) | Verification evidence records and design specs |
+| [`Sprout_Vault/`](Sprout_Vault/README.md) | **The decision record** — an Obsidian vault holding why each choice was made, with dated evidence labels |
+
+The split is deliberate: the documents above explain *how* the system works,
+[`Sprout_Vault/`](Sprout_Vault/README.md) explains *why* it is the way it is —
+the arguments, the rejected alternatives, and the open questions.
 
 ## Repository layout
 
@@ -137,7 +146,9 @@ sprout-app/
 ├── docker/          Firestore emulator image
 ├── docs/            Development guides, specs, evidence records
 ├── md/              Feature and subsystem documentation
-├── scripts/         One-off tooling
+├── scripts/         One-off tooling and the E2E stack orchestrator
+├── e2e/             Playwright end-to-end journeys
+├── Sprout_Vault/    Obsidian decision record (the "why")
 ├── render.yaml      Backend infrastructure (declarative)
 ├── vercel.json      Frontend hosting
 └── docker-compose.yml
