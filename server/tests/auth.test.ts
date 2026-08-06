@@ -20,6 +20,9 @@ interface MockFirebaseUser {
   displayName?: string;
   emailVerified: boolean;
   password?: string;
+  /** What Firebase reports as linked to the account. The service reads this to
+   *  decide whether an account is Google-only; absent means password. */
+  providerData?: { providerId: string }[];
   metadata?: {
     lastSignInTime?: string;
   };
@@ -643,14 +646,19 @@ describe('GET /api/auth/me', () => {
     expect(row.lastLoginAtReadable).toBeUndefined();
   });
 
-  // The frontend routes admins to /admin and shows the nav link off this flag,
-  // so it has to follow the same allowlist the API gate uses — not the user
-  // document, which has no admin field at all.
-  it('reports admin membership from the ADMIN_EMAILS allowlist', async () => {
-    const previous = process.env.ADMIN_EMAILS;
+  // The frontend routes operators to /admin and shows the operator nav links
+  // off these flags, so they have to follow the same allowlists the API gates
+  // use — not the user document, which has no admin field at all.
+  it('reports admin membership from the ADMIN_EMAILS / SUPER_ADMIN_EMAILS allowlists', async () => {
+    const previousAdmins = process.env.ADMIN_EMAILS;
+    const previousSupers = process.env.SUPER_ADMIN_EMAILS;
     const admin = await createLocalUser({
       email: 'allowlisted@example.com',
       displayName: 'Allowlisted Admin',
+    });
+    const operator = await createLocalUser({
+      email: 'operator@example.com',
+      displayName: 'Operator',
     });
     const player = await createLocalUser({
       email: 'player@example.com',
@@ -659,6 +667,7 @@ describe('GET /api/auth/me', () => {
 
     // Case and padding are the allowlist's problem, not the caller's.
     process.env.ADMIN_EMAILS = ' ALLOWLISTED@example.com , someone@else.com ';
+    process.env.SUPER_ADMIN_EMAILS = ' OPERATOR@example.com ';
     try {
       mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
         uid: admin.id,
@@ -670,6 +679,20 @@ describe('GET /api/auth/me', () => {
         .set('Authorization', 'Bearer admin-token');
       expect(adminRes.status).toBe(200);
       expect(adminRes.body.isAdmin).toBe(true);
+      expect(adminRes.body.isSuperAdmin).toBe(false);
+
+      // A super admin is an admin everywhere without appearing in both lists.
+      mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
+        uid: operator.id,
+        email: operator.email,
+        email_verified: true,
+      });
+      const operatorRes = await request(app)
+        .get('/api/auth/me')
+        .set('Authorization', 'Bearer operator-token');
+      expect(operatorRes.status).toBe(200);
+      expect(operatorRes.body.isAdmin).toBe(true);
+      expect(operatorRes.body.isSuperAdmin).toBe(true);
 
       mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
         uid: player.id,
@@ -681,9 +704,11 @@ describe('GET /api/auth/me', () => {
         .set('Authorization', 'Bearer player-token');
       expect(playerRes.status).toBe(200);
       expect(playerRes.body.isAdmin).toBe(false);
+      expect(playerRes.body.isSuperAdmin).toBe(false);
 
-      // Fail closed: an unset allowlist makes nobody an admin.
+      // Fail closed: unset allowlists make nobody an admin of either tier.
       delete process.env.ADMIN_EMAILS;
+      delete process.env.SUPER_ADMIN_EMAILS;
       mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
         uid: admin.id,
         email: admin.email,
@@ -694,9 +719,12 @@ describe('GET /api/auth/me', () => {
         .set('Authorization', 'Bearer admin-token');
       expect(denied.status).toBe(200);
       expect(denied.body.isAdmin).toBe(false);
+      expect(denied.body.isSuperAdmin).toBe(false);
     } finally {
-      if (previous === undefined) delete process.env.ADMIN_EMAILS;
-      else process.env.ADMIN_EMAILS = previous;
+      if (previousAdmins === undefined) delete process.env.ADMIN_EMAILS;
+      else process.env.ADMIN_EMAILS = previousAdmins;
+      if (previousSupers === undefined) delete process.env.SUPER_ADMIN_EMAILS;
+      else process.env.SUPER_ADMIN_EMAILS = previousSupers;
     }
   });
 
@@ -1234,5 +1262,198 @@ describe('password reset OTP flow', () => {
     expect(row.resetOtpHash).toBeNull();
     expect(row.resetOtpExpiresAt).toBeNull();
     expect(row.resetOtpFailedAttempts).toBe(0);
+  });
+});
+
+/**
+ * Google taking over an address that already has a password account.
+ *
+ * Firebase runs one account per email and treats Google as a trusted provider,
+ * so signing in with Google on an *unverified* password account keeps the uid
+ * and swaps the credential: the password is unlinked, and the password the user
+ * chose at signup stops working. Nothing about the Firestore profile changes,
+ * which is why the login screen used to answer "Invalid email or password" and
+ * leave them with no way forward.
+ */
+describe('auth provider takeover', () => {
+  function linkGoogle(uid: string): void {
+    const user = mockUsersByUid.get(uid)!;
+    const updated: MockFirebaseUser = {
+      ...user,
+      emailVerified: true,
+      providerData: [{ providerId: 'google.com' }],
+    };
+    mockUsersByUid.set(uid, updated);
+    if (updated.email) mockUsersByEmail.set(updated.email, updated);
+  }
+
+  it('tags a password signup as a password account', async () => {
+    const res = await request(app).post('/api/auth/signup').send({
+      email: 'tagged@example.com',
+      password: 'Password123!',
+      displayName: 'Tagged User',
+    });
+
+    expect(res.status).toBe(201);
+    const row = (await readUserByEmail('tagged@example.com'))!;
+    expect(row.authProvider).toBe('password');
+  });
+
+  it('retags the profile to google after a takeover, without deleting it', async () => {
+    const user = await createLocalUser({
+      email: 'taken-over@example.com',
+      isVerified: false,
+    });
+    // Progression hanging off this uid is exactly what deleting the document
+    // would destroy, so assert it survives.
+    await updateUser(user.id, { pveXp: 250, pveWins: 7 });
+    linkGoogle(user.id);
+    mockAuthAdmin.verifyIdToken.mockResolvedValueOnce({
+      uid: user.id,
+      email: user.email,
+      email_verified: true,
+    });
+
+    const res = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer google-token');
+
+    expect(res.status).toBe(200);
+    expect(res.body.authProvider).toBe('google');
+    const row = (await readUserById(user.id))!;
+    expect(row.authProvider).toBe('google');
+    expect(row.pveXp).toBe(250);
+    expect(row.pveWins).toBe(7);
+  });
+
+  it('tells the login screen that a taken-over address now uses Google', async () => {
+    const user = await createLocalUser({
+      email: 'now-google@example.com',
+      isVerified: false,
+    });
+    linkGoogle(user.id);
+
+    const res = await request(app)
+      .post('/api/auth/sign-in-method')
+      .send({ email: 'now-google@example.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.method).toBe('google');
+  });
+
+  /* Password accounts and addresses with no account must be indistinguishable,
+     or the endpoint becomes an account-enumeration oracle. */
+  it('answers unknown for a password account and for no account at all', async () => {
+    await createLocalUser({ email: 'still-password@example.com' });
+
+    const password = await request(app)
+      .post('/api/auth/sign-in-method')
+      .send({ email: 'still-password@example.com' });
+    const absent = await request(app)
+      .post('/api/auth/sign-in-method')
+      .send({ email: 'nobody@example.com' });
+
+    expect(password.status).toBe(absent.status);
+    expect(password.body).toEqual(absent.body);
+    expect(password.body.method).toBe('unknown');
+  });
+
+  it('points a manual signup at Google when the address is already Google-linked', async () => {
+    const user = await createLocalUser({
+      email: 'google-owned@example.com',
+      isVerified: false,
+    });
+    linkGoogle(user.id);
+
+    const res = await request(app).post('/api/auth/signup').send({
+      email: 'google-owned@example.com',
+      password: 'Password123!',
+      displayName: 'Someone Else',
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/continue with google/i);
+  });
+});
+
+/**
+ * Signup rejects a display name someone already holds. Auto-provisioning —
+ * Google sign-in, mainly — took the email's local part and wrote it unchecked,
+ * so two people at different domains called `nat@` both became "nat":
+ * indistinguishable on the leaderboard, and an almanac crediting a discovery to
+ * a name shared by two. Same rule both ways now, except that nobody is here to
+ * retype anything, so a collision is resolved rather than refused.
+ */
+describe('auto-provisioned display names', () => {
+  /** Signs the next request in as this identity, provisioning on first use. */
+  async function meAs(uid: string, email: string) {
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid,
+      email,
+      email_verified: true,
+    });
+    return request(app).get('/api/auth/me').set('Authorization', `Bearer ${uid}-token`);
+  }
+
+  async function ackAs(uid: string, email: string) {
+    mockAuthAdmin.verifyIdToken.mockResolvedValue({
+      uid,
+      email,
+      email_verified: true,
+    });
+    return request(app)
+      .post('/api/auth/display-name-notice/ack')
+      .set('Authorization', `Bearer ${uid}-token`);
+  }
+
+  it('keeps the name when nobody has it', async () => {
+    const response = await meAs('fresh-uid', 'solo@example.com');
+
+    expect(response.status).toBe(200);
+    expect(response.body.displayName).toBe('solo');
+    expect(response.body.displayNameAdjustedFrom).toBeUndefined();
+  });
+
+  it('assigns a free variant when the name is taken, and says which', async () => {
+    await meAs('first-uid', 'nat@gmail.com');
+    const second = await meAs('second-uid', 'nat@outlook.com');
+
+    expect(second.status).toBe(200);
+    expect(second.body.displayName).toBe('nat2');
+    // The client needs the wanted name to explain what happened.
+    expect(second.body.displayNameAdjustedFrom).toBe('nat');
+  });
+
+  it('keeps walking until it finds a free one', async () => {
+    await meAs('walk-0', 'sam@a.com');
+    await meAs('walk-1', 'sam@b.com');
+    await meAs('walk-2', 'sam@c.com');
+
+    const fourth = await meAs('walk-3', 'sam@d.com');
+
+    expect(fourth.body.displayName).toBe('sam4');
+  });
+
+  it('drops the notice once acknowledged, and stays dropped', async () => {
+    await meAs('ack-first', 'kim@gmail.com');
+    const renamed = await meAs('ack-second', 'kim@outlook.com');
+    expect(renamed.body.displayNameAdjustedFrom).toBe('kim');
+
+    const ack = await ackAs('ack-second', 'kim@outlook.com');
+    expect(ack.status).toBe(204);
+
+    const after = await meAs('ack-second', 'kim@outlook.com');
+    expect(after.body.displayNameAdjustedFrom).toBeUndefined();
+    expect(after.body.displayName).toBe('kim2');
+  });
+
+  it('treats a second acknowledgement as a no-op, since two tabs will both send it', async () => {
+    await meAs('twice-uid', 'lee@example.com');
+
+    const first = await ackAs('twice-uid', 'lee@example.com');
+    const second = await ackAs('twice-uid', 'lee@example.com');
+
+    expect(first.status).toBe(204);
+    expect(second.status).toBe(204);
   });
 });

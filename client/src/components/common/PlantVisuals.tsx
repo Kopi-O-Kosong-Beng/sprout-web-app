@@ -5,8 +5,9 @@
  * The pixel-art system ships the real painted assets the Android game used, so
  * each avatar is now the genuine composite the garden screens draw: the empty
  * pot from `/img/ic_pot_empty.png` with the plant's 192×192 sprite standing in
- * it. When a record has no sprite yet the pot renders on its own, which is what
- * an empty slot on the shelf looks like anyway.
+ * it. When a record has no usable sprite — no URL, or the URL 404s — a
+ * deterministic drawn plant stands in instead (PixelPlantFallback below), so a
+ * populated shelf can never silently degrade to a row of bare pots.
  *
  * The exported surface is unchanged — `PlantAvatarData`, the role="img"
  * wrappers and their aria-labels are what the archive, battle and presentation
@@ -105,13 +106,163 @@ export const plantAvatars: PlantAvatarData[] = [
   },
 ];
 
-/** The pot, and the sprite standing in it when there is one. */
+/** FNV-1a, the same shape the server uses for species stats — cheap, stable,
+ *  and good enough to pick a silhouette that never changes between renders. */
+function hashSeed(seed: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/** Ink colors for the drawn fallback, keyed by the record's palette class so
+ *  each record keeps a stable colour identity across renders. */
+const FALLBACK_TONES: Record<string, { leaf: string; dark: string; glow: string }> = {
+  emerald: { leaf: '#57a15e', dark: '#33693f', glow: '#a9d98b' },
+  violet: { leaf: '#8a63b5', dark: '#5d3f85', glow: '#c7a6ea' },
+  sage: { leaf: '#7ba179', dark: '#4f6f52', glow: '#b9d3ae' },
+  lime: { leaf: '#8fbf3f', dark: '#5d8527', glow: '#cfe98a' },
+  clay: { leaf: '#b07850', dark: '#7d4e33', glow: '#e0b48a' },
+};
+
+const BRAMBLE_TONE = { leaf: '#8f4a41', dark: '#5c2b26', glow: '#d98b6f' };
+const THORN_TIP = '#f2e6c9';
+
+/** 12×14 silhouettes. '.'=empty, L=leaf, D=dark, G=glow, T=thorn tip. */
+const PLANT_SILHOUETTES: string[][] = [
+  [
+    '............',
+    '....GLLG....',
+    '...GLLLLG...',
+    '...DLLLLD...',
+    '....DLLD....',
+    '.....DD.....',
+    '.GG..DD..GG.',
+    'GLLG.DD.GLLG',
+    'GLLLGDDGLLLG',
+    '.DLLLDDLLLD.',
+    '..DDLDDLDD..',
+    '.....DD.....',
+    '.....DD.....',
+    '....DDDD....',
+  ],
+  [
+    '............',
+    '....GGGG....',
+    '..GGLLLLGG..',
+    '.GLLLLLLLLG.',
+    '.GLLGGLLLLG.',
+    'DLLLLLLLLLLD',
+    'DLLGLLLLGLLD',
+    'DLLLLLLLLLLD',
+    '.DLLLLLLLLD.',
+    '..DLLLLLLD..',
+    '...DDLLDD...',
+    '.....DD.....',
+    '.....DD.....',
+    '....DDDD....',
+  ],
+  [
+    '..G......G..',
+    '.GLG....GLG.',
+    '.GLLG..GLLG.',
+    '..DLLGGLLD..',
+    '..GLLDDLLG..',
+    '.GLLD..DLLG.',
+    '.DLD.GG.DLD.',
+    '..D.GLLG.D..',
+    '....GLLG....',
+    '....DLLD....',
+    '.....DD.....',
+    '.....DD.....',
+    '.....DD.....',
+    '....DDDD....',
+  ],
+];
+
+const BRAMBLE_SILHOUETTE: string[] = [
+  '..T......T..',
+  '..DT....TD..',
+  '.TDLDDDDLDT.',
+  '.DLLLLLLLLD.',
+  'TDLGLLLLGLDT',
+  '.DLLLDDLLLD.',
+  'DLLLLLLLLLLD',
+  '.DLGLLLLGLD.',
+  'TDLLLDDLLLDT',
+  '.DLLLLLLLLD.',
+  '..TDLLLLDT..',
+  '...DDDDDD...',
+  '....DDDD....',
+  '...DDDDDD...',
+];
+
+/** A plant drawn in code for records whose sprite is missing or failed to
+ *  load. Inline SVG cannot 404, so the shelf never shows a bare pot again —
+ *  this symptom shipped twice (first /static/sprites/, then uncommitted art),
+ *  both times as silently-empty pots. Deterministic per record: same seed,
+ *  same silhouette, same tones. */
+function PixelPlantFallback({
+  seed,
+  tone,
+  thorny = false,
+  wiggle = false,
+}: {
+  seed: string;
+  tone?: string;
+  thorny?: boolean;
+  wiggle?: boolean;
+}) {
+  const rows = thorny
+    ? BRAMBLE_SILHOUETTE
+    : PLANT_SILHOUETTES[hashSeed(seed) % PLANT_SILHOUETTES.length];
+  const colors = thorny ? BRAMBLE_TONE : FALLBACK_TONES[tone ?? ''] ?? FALLBACK_TONES.emerald;
+  const fills: Record<string, string> = {
+    L: colors.leaf,
+    D: colors.dark,
+    G: colors.glow,
+    T: THORN_TIP,
+  };
+
+  return (
+    <svg
+      className={wiggle ? 'plant-sprite is-procedural wiggle' : 'plant-sprite is-procedural'}
+      viewBox="0 0 12 14"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {rows.flatMap((row, y) =>
+        Array.from(row).flatMap((cell, x) => {
+          const fill = fills[cell];
+          if (!fill) return [];
+          return [<rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill={fill} />];
+        })
+      )}
+    </svg>
+  );
+}
+
+/** Broken sprite URLs are logged once each — the silent onError fallback is
+ *  exactly how missing art shipped twice without anyone noticing. */
+const reportedSpriteFailures = new Set<string>();
+
+/** The pot, with the sprite standing in it — or a drawn stand-in when the
+ *  sprite is missing or its URL failed to load. */
 function PottedSprite({
   spriteUrl,
   wiggle = false,
+  fallbackSeed,
+  tone,
+  thorny = false,
 }: {
   spriteUrl?: string;
   wiggle?: boolean;
+  fallbackSeed: string;
+  tone?: string;
+  thorny?: boolean;
 }) {
   const [failedSpriteUrl, setFailedSpriteUrl] = useState<string | null>(null);
   const trimmed = spriteUrl?.trim();
@@ -120,13 +271,26 @@ function PottedSprite({
   return (
     <>
       <img className="pot-art" src="/img/ic_pot_empty.png" alt="" draggable={false} />
-      {showSprite && (
+      {showSprite ? (
         <img
           className={wiggle ? 'plant-sprite wiggle' : 'plant-sprite'}
           src={trimmed}
           alt=""
           draggable={false}
-          onError={() => setFailedSpriteUrl(trimmed ?? null)}
+          onError={() => {
+            if (trimmed && !reportedSpriteFailures.has(trimmed)) {
+              reportedSpriteFailures.add(trimmed);
+              console.warn(`[plant-visuals] sprite failed to load: ${trimmed}`);
+            }
+            setFailedSpriteUrl(trimmed ?? null);
+          }}
+        />
+      ) : (
+        <PixelPlantFallback
+          seed={fallbackSeed}
+          tone={tone}
+          thorny={thorny}
+          wiggle={wiggle}
         />
       )}
     </>
@@ -136,9 +300,12 @@ function PottedSprite({
 export function PlantAvatar({
   avatar,
   large = false,
+  wiggle = false,
 }: {
   avatar: PlantAvatarData;
   large?: boolean;
+  /** Shovel mode: the sprite squirms in its pot to say "tap me to dig". */
+  wiggle?: boolean;
 }) {
   const showSprite = Boolean(avatar.spriteUrl?.trim());
 
@@ -150,7 +317,12 @@ export function PlantAvatar({
       role="img"
       aria-label={`${avatar.name} avatar`}
     >
-      <PottedSprite spriteUrl={avatar.spriteUrl} />
+      <PottedSprite
+        spriteUrl={avatar.spriteUrl}
+        wiggle={wiggle}
+        fallbackSeed={avatar.id}
+        tone={avatar.color}
+      />
     </span>
   );
 }
@@ -170,7 +342,7 @@ export function BotAvatar({
       role="img"
       aria-label={`${name} avatar`}
     >
-      <PottedSprite spriteUrl={spriteUrl} />
+      <PottedSprite spriteUrl={spriteUrl} fallbackSeed={name} thorny />
     </span>
   );
 }
@@ -195,7 +367,7 @@ export function CaptureBadge({
 
   return (
     <span
-      className={`font-pixel inline-block border-2 border-black px-1 text-[7px] ${className}`}
+      className={`font-pixel inline-block border-2 border-black px-1 text-[9px] ${className}`}
       style={{
         background: isUpload ? 'var(--color-hp-mid)' : 'var(--color-hp-high)',
         color: isUpload ? '#1a1a1a' : '#fff',

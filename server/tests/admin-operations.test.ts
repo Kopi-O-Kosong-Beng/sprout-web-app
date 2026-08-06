@@ -71,9 +71,10 @@ async function avatarIds(): Promise<string[]> {
 }
 
 beforeEach(async () => {
-  previousAdminEmails = process.env.ADMIN_EMAILS;
+  previousAdminEmails = process.env.SUPER_ADMIN_EMAILS;
   previousAuthDevBypass = process.env.AUTH_DEV_BYPASS;
-  process.env.ADMIN_EMAILS = ADMIN_EMAIL;
+  // /api/admin answers to the operator tier.
+  process.env.SUPER_ADMIN_EMAILS = ADMIN_EMAIL;
   process.env.AUTH_DEV_BYPASS = 'false';
 
   mockAuthAdmin.verifyIdToken.mockReset();
@@ -87,8 +88,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  if (previousAdminEmails === undefined) delete process.env.ADMIN_EMAILS;
-  else process.env.ADMIN_EMAILS = previousAdminEmails;
+  if (previousAdminEmails === undefined) delete process.env.SUPER_ADMIN_EMAILS;
+  else process.env.SUPER_ADMIN_EMAILS = previousAdminEmails;
   if (previousAuthDevBypass === undefined) delete process.env.AUTH_DEV_BYPASS;
   else process.env.AUTH_DEV_BYPASS = previousAuthDevBypass;
 });

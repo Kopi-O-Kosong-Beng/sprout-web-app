@@ -1,8 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import {
+  getTicketStatus,
   submitTicket,
   TICKET_CATEGORIES,
   type TicketCategory,
+  type TicketStatus,
 } from '../services/sproutApi';
 import { extractApiError } from '../services/apiClient';
 import { MiniArchive } from '../components/common/PlantVisuals';
@@ -11,6 +13,29 @@ const MAX_MESSAGE_LENGTH = 2000;
 const MAX_NAME_LENGTH = 100;
 const MAX_SUBJECT_LENGTH = 150;
 const MAX_ORGANISATION_LENGTH = 120;
+
+/** Label text for a field the form will not submit without.
+ *
+ *  A wrapper rather than a bare asterisk because `.contact-form label` is a
+ *  flex column — a loose `<span>*</span>` would become its own row and sit
+ *  above the label instead of beside it.
+ *
+ *  The asterisk is aria-hidden and carries no visually-hidden "required"
+ *  twin: that text would land inside the label and rename the field to
+ *  "required Name" for anyone querying by accessible name. The input's own
+ *  `required` attribute is what assistive tech announces, so the glyph is left
+ *  as pure decoration for sighted users.
+ */
+function RequiredLabel({ children }: { children: ReactNode }) {
+  return (
+    <span className="field-label">
+      <span className="required-mark" aria-hidden="true">
+        *
+      </span>{' '}
+      {children}
+    </span>
+  );
+}
 
 export default function ContactPage() {
   const [name, setName] = useState('');
@@ -56,11 +81,7 @@ export default function ContactPage() {
       <section className="page-heading">
         <p className="eyebrow">Contact us</p>
         <h1>Ask the Sprout team anything</h1>
-        <p>
-          No account needed — tell us what you ran into and we will write back.
-          You get a reference number the moment it is saved, so you can quote it
-          if you need to chase us.
-        </p>
+        <p>Send your feedback or enquiries via our online form</p>
       </section>
 
       <section className="contact-layout">
@@ -71,8 +92,9 @@ export default function ContactPage() {
               Reference number: <strong>{refNumber}</strong>
             </h2>
             <p>
-              Your ticket is stored. Keep this reference for follow-ups.
-              Notification delivery to you and the Sprout team has been attempted.
+              Message received! Your support ticket has been created. Please save
+              your reference number for follow-ups. We will reply within 3 working
+              days.
             </p>
             <button
               className="primary-cta form-submit"
@@ -85,12 +107,26 @@ export default function ContactPage() {
           </div>
         ) : (
           <form className="contact-form" onSubmit={handleSubmit}>
+            {/* Advice before the fields, not beside them. Told what to include
+                while the message box is still empty, someone writes it into
+                their first message; the same words in a side column are read
+                after the fact, when they are only a reason the reply will be
+                slow. */}
+            <div className="form-intro">
+              <h2>Helping us answer faster</h2>
+              <p>
+                If it is about a plant that would not scan, tell us the species you
+                expected and roughly when you tried. If it is about your account, the
+                email address you signed up with is usually all we need.
+              </p>
+            </div>
+
             {/* Two short fields that belong together sit on one row: six
                 stacked inputs made the form a column tall enough to leave the
                 aside beside it stranded above a screen of empty ground. */}
             <div className="field-row">
               <label>
-                Name
+                <RequiredLabel>Name</RequiredLabel>
                 <input
                   type="text"
                   value={name}
@@ -101,7 +137,7 @@ export default function ContactPage() {
                 />
               </label>
               <label>
-                Email
+                <RequiredLabel>Email</RequiredLabel>
                 <input
                   type="email"
                   value={email}
@@ -121,17 +157,8 @@ export default function ContactPage() {
                 maxLength={MAX_ORGANISATION_LENGTH}
               />
             </label>
-            <label>
-              Subject
-              <input
-                type="text"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                placeholder="What is your query about?"
-                maxLength={MAX_SUBJECT_LENGTH}
-                required
-              />
-            </label>
+            {/* Inquiry type before Subject: picking the category first frames
+                what the subject line should say. */}
             <label>
               Inquiry type
               <select
@@ -146,7 +173,20 @@ export default function ContactPage() {
               </select>
             </label>
             <label>
-              Message ({message.length}/{MAX_MESSAGE_LENGTH})
+              <RequiredLabel>Subject</RequiredLabel>
+              <input
+                type="text"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="What is your query about?"
+                maxLength={MAX_SUBJECT_LENGTH}
+                required
+              />
+            </label>
+            <label>
+              <RequiredLabel>
+                Message ({message.length}/{MAX_MESSAGE_LENGTH})
+              </RequiredLabel>
               <textarea
                 rows={6}
                 value={message}
@@ -164,40 +204,125 @@ export default function ContactPage() {
         )}
 
         {/*
-          The aside used to hold one short paragraph beside a form four times
-          its height, which left most of the column as bare ground. It now
-          answers the three things someone actually wants to know before typing:
-          what happens to the message, how long it takes, and what to include so
-          the first reply is useful rather than a request for more detail.
+          The column beside the form used to narrate what the submit button was
+          about to do, which the person had no use for until after they pressed
+          it. It now does the job the LTA contact page uses the same space for:
+          letting someone who already filed a ticket look it up again.
         */}
         <aside className="support-card">
           <MiniArchive />
-          <h2>What happens next</h2>
-          <ol className="support-steps">
-            <li>
-              <strong>Your ticket is saved</strong> with a reference like{' '}
-              <code>SPR-20260712-0001</code>.
-            </li>
-            {/* "attempts", not "sends": storing the ticket is confirmed, the
-                email is not. Overstating it would promise delivery the system
-                cannot guarantee, and the ticket is safe either way. */}
-            <li>
-              <strong>Sprout then attempts a confirmation email</strong> to the
-              address you gave, with that reference in it.
-            </li>
-            <li>
-              <strong>The team is notified</strong> and picks it up from there.
-            </li>
-          </ol>
-
-          <h2 className="support-heading-alt">Helping us answer faster</h2>
-          <p>
-            If it is about a plant that would not scan, tell us the species you
-            expected and roughly when you tried. If it is about your account, the
-            email address you signed up with is usually all we need.
-          </p>
+          <h2>Check Feedback Status</h2>
+          <TicketStatusCheck />
         </aside>
       </section>
     </main>
+  );
+}
+
+const TICKET_STATUS_LABELS: Record<TicketStatus['status'], string> = {
+  open: 'Open — with the team',
+  resolved: 'Resolved',
+};
+
+/** Date and time, in the reader's own locale and timezone — the stored value is
+ *  UTC, and "replied at 23:40" is confusing to someone who saw 07:40. Falls
+ *  back to the raw value rather than rendering "Invalid Date". */
+function formatRepliedAt(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
+/**
+ * Look up a ticket you already filed, with the reference number and the email
+ * you filed it under.
+ *
+ * Both are required by the server, which answers one identical 404 for a
+ * reference that does not exist and for one belonging to someone else — the
+ * numbers are a daily sequence, so the email is what actually proves the
+ * ticket is yours.
+ */
+function TicketStatusCheck() {
+  const [refNumber, setRefNumber] = useState('');
+  const [email, setEmail] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<TicketStatus | null>(null);
+
+  async function handleCheck(e: FormEvent) {
+    e.preventDefault();
+    setChecking(true);
+    setError(null);
+    setResult(null);
+    try {
+      setResult(await getTicketStatus({ refNumber: refNumber.trim(), email: email.trim() }));
+    } catch (err) {
+      setError(extractApiError(err, 'Could not check that ticket.'));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <form className="status-check" onSubmit={handleCheck}>
+      <label>
+        <RequiredLabel>Feedback Number</RequiredLabel>
+        <input
+          type="text"
+          value={refNumber}
+          onChange={(e) => setRefNumber(e.target.value)}
+          placeholder="SPR-20260712-0001"
+          maxLength={20}
+          required
+        />
+      </label>
+      <label>
+        <RequiredLabel>Email Address</RequiredLabel>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          required
+        />
+      </label>
+      {error && <p className="form-error">{error}</p>}
+      {result && (
+        <div className="status-result" aria-live="polite">
+          <p className="eyebrow">{result.refNumber}</p>
+          <p>
+            <strong>{TICKET_STATUS_LABELS[result.status]}</strong>
+          </p>
+          <p>{result.subject}</p>
+          {/* Only when a date was actually recorded. Tickets resolved before
+              resolvedAt existed report the state without one — the alternative
+              is telling someone Sprout replied at a time nobody logged.
+
+              "check your email" is accurate even though nothing in this app
+              sends mail on resolve: the team answers manually from the support
+              inbox, and marking the ticket resolved is what they do afterwards.
+              So the reply is real and this line points at it. Do not "fix" the
+              missing send by wiring an automated resolution email — that would
+              put a second, empty message in front of the actual answer. */}
+          {result.status === 'resolved' && result.resolvedAt && (
+            <p className="status-replied">
+              Sprout replied on {formatRepliedAt(result.resolvedAt)}, please check
+              your email.
+            </p>
+          )}
+          {result.submittedAt && (
+            <p className="status-meta">
+              Submitted {new Date(result.submittedAt).toLocaleDateString()}
+            </p>
+          )}
+        </div>
+      )}
+      <button className="secondary-cta form-submit" type="submit" disabled={checking}>
+        {checking ? 'Checking…' : 'Check'}
+      </button>
+    </form>
   );
 }

@@ -118,13 +118,42 @@ router.post('/run-stream', async (req: Request, res: Response) => {
     let identifiedSpecies = !isMockIdentification(serverEnv.plantApiKey);
 
     if ('error' in identification || identification.needsName) {
+      /*
+       * Ask, rather than invent.
+       *
+       * This substituted "Unknown Plant Species" and carried on: a render, a
+       * cutout and a judge call spent on a name nobody chose, filed in the
+       * archive under a label that says nothing. The Scan screen has had a
+       * dialog for this since the Android port — "Couldn't identify it
+       * automatically. What would you like to call it?" — and nothing ever
+       * opened it, because this branch answered the question itself.
+       *
+       * The run stops here and the client opens that dialog. Whatever the
+       * player types comes back as customName on a second run, which the
+       * override below already honours, so the naming path is the one that was
+       * always intended rather than a new one.
+       *
+       * A caller that already supplied a name skips this entirely — the
+       * question is answered.
+       */
+      const supplied = typeof customName === 'string' ? customName.trim() : '';
+      if (!supplied) {
+        sendEvent({
+          event: 'needs_name',
+          step: '1',
+          error: identification.error || 'Could not identify this plant.',
+        });
+        res.end();
+        return;
+      }
+
       idSuccess = false;
       identifiedSpecies = false;
       idMsg = identification.error || 'Plant identification low confidence';
       identification = {
-        name: customName || 'Unknown Plant Species',
+        name: supplied,
         probability: 0.5,
-        common_names: [customName || 'Plant Monster'],
+        common_names: [supplied],
         taxonomy: { Kingdom: 'Plantae' },
       };
     } else {
@@ -161,6 +190,49 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       details: idMsg,
       result: identification,
     });
+
+    /*
+     * The confidence gate.
+     *
+     * MIN_CONFIDENCE_THRESHOLD has been declared in .env, .env.example and
+     * render.yaml since this pipeline was written, and nothing read it — so an
+     * identification the model was 12% sure of went straight on to generation
+     * like any other. That costs a render, a cutout and a judge call, and then
+     * files a confidently-wrong species in the player's archive and the shared
+     * dex, where it becomes the canonical sprite for that name.
+     *
+     * Stopping here rather than after generation is the point: the cheapest
+     * moment to give up is before the expensive hops, and a second photo is a
+     * far better use of the next ten seconds than a creature drawn from a
+     * guess.
+     *
+     * Two deliberate exemptions. An explicit species override is the player
+     * telling us what it is, which outranks the model. And the keyless mock
+     * path reports a hardcoded 0.92 for every photo, so gating on it would be
+     * gating on a fiction — identifiedSpecies already tracks exactly that.
+     */
+    const minConfidence = serverEnv.minConfidenceThreshold;
+    if (
+      idSuccess &&
+      !overrideName &&
+      identifiedSpecies &&
+      typeof identification.probability === 'number' &&
+      identification.probability < minConfidence
+    ) {
+      sendEvent({
+        event: 'low_confidence',
+        step: '1',
+        // The client renders its own copy; this is the fallback and the log line.
+        error:
+          `Only ${(identification.probability * 100).toFixed(0)}% sure this is ` +
+          `${identification.name}. Try again with a clearer photo.`,
+        name: identification.name,
+        probability: identification.probability,
+        threshold: minConfidence,
+      });
+      res.end();
+      return;
+    }
 
     // Step 2a: Prompt Crafting
     sendEvent({

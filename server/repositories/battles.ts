@@ -882,6 +882,41 @@ function transitionTimestamp(previous: string, clock: () => Date): string {
   return new Date(Math.max(candidateMilliseconds, Date.parse(previous) + 1)).toISOString();
 }
 
+/** A progression baseline for a player who has no row yet — all zeros, so the
+ *  delta about to be applied is their whole record. */
+function emptyProgression() {
+  return {
+    pveXp: 0,
+    pveWins: 0,
+    pveLosses: 0,
+    currentPveWinStreak: 0,
+    bestPveWinStreak: 0,
+    updatedAt: null as string | null,
+  };
+}
+
+/**
+ * The document written for a battler with no profile.
+ *
+ * Identity is a placeholder in the same shape auth.service.ts uses when it
+ * provisions for a caller whose email it does not know, so nothing downstream
+ * meets a row it has not seen before: `email` and `displayName` are required by
+ * decodeAuthUserProfile, and the leaderboard and /api/auth/me both read them.
+ * Deriving from the uid also means the display name cannot collide with a real
+ * one. `isVerified` is false because nothing here has verified anything, and
+ * /api/auth/me replaces all three the moment the user signs in properly.
+ */
+function seedProgressionProfile(userId: string, now: string) {
+  return {
+    email: `${userId}@unknown.sprout`,
+    displayName: userId,
+    isVerified: false,
+    ...emptyProgression(),
+    updatedAt: now,
+    createdAt: now,
+  };
+}
+
 function decodeRewardProfile(snapshot: FirestoreSnapshotLike) {
   try {
     return decodeAuthUserProfile(snapshot);
@@ -1007,14 +1042,37 @@ export function createBattleRepository(
 
         if (resolved.status === 'won' || resolved.status === 'lost') {
           const profileSnapshot = await transaction.get(profileReference);
+          /*
+           * A missing progression row is created, not refused.
+           *
+           * This threw a 409 from inside the transaction, which rolled back
+           * everything including the resolved battle — so the killing blow
+           * failed, and failed identically on every retry, because the row was
+           * still missing. A battle that could never be finished, reported as
+           * a conflict.
+           *
+           * Seeding it here keeps the all-or-nothing guarantee that made the
+           * original throw the safe choice: the result and the reward still
+           * commit together or not at all, and now there is a third option
+           * besides "both" and "neither" — make the missing half exist first.
+           *
+           * The placeholder identity matches what auth.service.ts already
+           * writes when it provisions a profile for a caller whose email it
+           * does not know, so this introduces no new shape. It is derived from
+           * the uid, so the display name cannot collide with a real one, and
+           * /api/auth/me overwrites both the moment that user signs in
+           * properly.
+           */
           if (!profileSnapshot.exists) {
-            throw repositoryError(
-              'battle_profile_missing',
-              409,
-              'Battle reward profile is missing.'
+            console.warn(
+              `[battle] no progression row for ${userId}; seeding one so the ` +
+                'battle can finish and the reward can land.'
             );
+            transaction.set(profileReference, seedProgressionProfile(userId, transitionAt));
           }
-          const profile = decodeRewardProfile(profileSnapshot);
+          const profile = profileSnapshot.exists
+            ? decodeRewardProfile(profileSnapshot)
+            : emptyProgression();
           const delta = calculateProgression(resolved.status);
           const currentPveWinStreak =
             delta.streak === 'increment'
@@ -1035,13 +1093,20 @@ export function createBattleRepository(
             xpAwarded: delta.xp,
             rewardApplied: true,
           };
-          transaction.update(profileReference, {
-            ...progression,
-            updatedAt:
-              profile.updatedAt && profile.updatedAt > transitionAt
-                ? profile.updatedAt
-                : transitionAt,
-          });
+          // merge rather than update: update() requires the document to
+          // already exist, which is exactly the case this branch may have just
+          // fixed. merge writes the progression over whichever row is there.
+          transaction.set(
+            profileReference,
+            {
+              ...progression,
+              updatedAt:
+                profile.updatedAt && profile.updatedAt > transitionAt
+                  ? profile.updatedAt
+                  : transitionAt,
+            },
+            { merge: true }
+          );
         }
 
         transaction.set(battleReference, resolved);

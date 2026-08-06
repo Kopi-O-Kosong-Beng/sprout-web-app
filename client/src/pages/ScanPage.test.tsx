@@ -1,12 +1,21 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+import { ToastProvider } from '../components/common/Toast';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PipelineEvent } from '../services/pipelineStream';
+import {
+  PipelineRequestError,
+  type PipelineEvent,
+} from '../services/pipelineStream';
 import ScanPage, { type ScanDiscovery } from './ScanPage';
 
 const streamPipeline = vi.hoisted(() => vi.fn());
-vi.mock('../services/pipelineStream', () => ({ streamPipeline }));
+// Partial mock: PipelineRequestError is a real class the page branches on, so
+// it must be the genuine one, not a stub.
+vi.mock('../services/pipelineStream', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../services/pipelineStream')>()),
+  streamPipeline,
+}));
 
 /** Drives the page's own onEvent callback with a scripted event sequence. */
 function scriptStream(events: PipelineEvent[]) {
@@ -87,11 +96,16 @@ async function startScan() {
   const user = userEvent.setup();
   render(
     <MemoryRouter>
-      <ScanPage />
+      <ToastProvider>
+        <ScanPage />
+      </ToastProvider>
     </MemoryRouter>
   );
   const trigger = await screen.findByRole('button', { name: /^test$/i });
   await user.click(trigger);
+  // Returned so a test can carry on interacting — the naming flow answers a
+  // dialog after the run stops.
+  return user;
 }
 
 describe('ScanPage save outcome', () => {
@@ -147,10 +161,193 @@ describe('ScanPage save outcome', () => {
   });
 
   it('asks the user to sign in when the server rejects the request', async () => {
-    streamPipeline.mockRejectedValue(new Error('Pipeline API HTTP 401'));
+    streamPipeline.mockRejectedValue(
+      new PipelineRequestError('unauthorised', 'Pipeline API HTTP 401', 401)
+    );
     await startScan();
 
-    expect(await screen.findByText(/sign in/i)).toBeInTheDocument();
+    // Surfaced as a toast — the only place a scan failure appears now.
+    expect(await screen.findByText(/sign in to scan/i)).toBeInTheDocument();
     expect(screen.queryByText(/Pipeline API HTTP 401/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The bug this replaces: the page decided by `message.includes('401')`, so an
+   * offline device — whose Firebase token refresh fails before any request is
+   * sent — was told to sign in, the one thing that could not help.
+   */
+  it('tells an offline user to reconnect, not to sign in', async () => {
+    streamPipeline.mockRejectedValue(
+      new PipelineRequestError('offline', 'No connection.')
+    );
+    await startScan();
+
+    expect(await screen.findByText(/reconnect to wifi/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
+    // Offline is the one the player can fix, so the toast carries the way out.
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it('does not mistake an unrelated error mentioning 401 for a sign-in problem', async () => {
+    streamPipeline.mockRejectedValue(
+      new PipelineRequestError('http', 'Render failed after 401 ms', 500)
+    );
+    await startScan();
+
+    expect(await screen.findByText(/Render failed after 401 ms/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
+  });
+
+  /** Too unsure to be worth a render: ask for a better photo, do not invent a
+   *  creature from a guess. */
+  it('asks for a clearer photo when identification is not confident enough', async () => {
+    scriptStream([
+      {
+        event: 'low_confidence',
+        name: 'Ficus lyrata',
+        probability: 0.31,
+        threshold: 0.7,
+      },
+    ]);
+    await startScan();
+
+    expect(await screen.findByText(/not sure about this one/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ficus lyrata/)).toBeInTheDocument();
+    expect(screen.getByText(/31%/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /scan again/i })).toBeInTheDocument();
+  });
+
+  /**
+   * The reader used to wrap the onEvent call in its malformed-frame guard, so
+   * the deliberate throw on a pipeline_error was caught and logged as a parse
+   * failure. The run then closed cleanly and the player was told the pipeline
+   * "finished without producing a sprite" — hiding the reason the server gave.
+   */
+  it('surfaces the reason the server gave for a failed run', async () => {
+    scriptStream([
+      { event: 'step_start', step: '1' },
+      { event: 'pipeline_error', error: 'The image model refused the prompt.' },
+    ]);
+    await startScan();
+
+    expect(
+      await screen.findByText(/The image model refused the prompt\./i)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/finished without producing a sprite/i)
+    ).not.toBeInTheDocument();
+  });
+
+  /** A run the player cancelled is not a failure, so it must not be reported
+   *  to them as one. */
+  it('says nothing when the player cancels the run', async () => {
+    streamPipeline.mockRejectedValue(
+      Object.assign(new DOMException('Aborted', 'AbortError'))
+    );
+    await startScan();
+
+    expect(screen.queryByText(/no connection/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+  });
+
+  /**
+   * NameDialog has existed since the Android port and nothing ever opened it:
+   * when Plant.id could not identify the photo, the server substituted
+   * "Unknown Plant Species" and carried on, spending a render on a name nobody
+   * chose. It asks now, and the answer comes back as the run's customName.
+   */
+  it('asks the player to name a plant it could not identify', async () => {
+    scriptStream([
+      { event: 'step_start', step: '1' },
+      { event: 'needs_name', step: '1', error: 'Not identified as a plant.' },
+    ]);
+    await startScan();
+
+    expect(await screen.findByText(/name this plant/i)).toBeInTheDocument();
+    expect(screen.getByText(/couldn't identify it automatically/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /generate/i })).toBeInTheDocument();
+  });
+
+  it('re-runs with the name the player typed', async () => {
+    scriptStream([
+      { event: 'step_start', step: '1' },
+      { event: 'needs_name', step: '1', error: 'Not identified as a plant.' },
+    ]);
+    const user = await startScan();
+
+    await user.type(await screen.findByPlaceholderText(/rose, sunflower/i), 'Mystery Fern');
+    await user.click(screen.getByRole('button', { name: /generate/i }));
+
+    // The name travels as customName on the second run — the path the server's
+    // override branch already honoured.
+    expect(streamPipeline).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ customName: 'Mystery Fern' }),
+      expect.any(Function),
+      expect.anything()
+    );
+  });
+
+  /**
+   * The result dialog covers the screen, and its only exits used to be "Scan
+   * another" and the page's Back button behind the scrim. Pressing outside a box
+   * is how a modal is closed everywhere else, and a plant that just saved is
+   * worth being able to go and look at.
+   */
+  describe('leaving the result dialog', () => {
+    it('closes on a press outside the panel, staying on the scan screen', async () => {
+      scriptStream([completeEvent()]);
+      const user = await startScan();
+
+      const dialog = await screen.findByRole('dialog');
+      await user.click(dialog.parentElement!);
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('stays open when the press lands on the panel itself', async () => {
+      scriptStream([completeEvent()]);
+      const user = await startScan();
+
+      const dialog = await screen.findByRole('dialog');
+      // Any element inside the panel proves the point; the heading is matched
+      // by role rather than by its wording so a copy change to the result
+      // screen doesn't fail a test about dismissal.
+      await user.click(within(dialog).getByRole('heading', { level: 2 }));
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('closes on Escape', async () => {
+      scriptStream([completeEvent()]);
+      const user = await startScan();
+
+      await screen.findByRole('dialog');
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('offers the archive once the plant is saved', async () => {
+      scriptStream([completeEvent({ saved: true })]);
+      await startScan();
+
+      expect(
+        await screen.findByRole('button', { name: /see it in your archive/i })
+      ).toBeInTheDocument();
+    });
+
+    it('does not offer the archive for a plant that failed to save', async () => {
+      scriptStream([completeEvent({ saved: false })]);
+      await startScan();
+
+      // Sending someone to admire a record that does not exist is a worse
+      // answer than the failure message beside it.
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /see it in your archive/i })
+      ).not.toBeInTheDocument();
+    });
   });
 });

@@ -50,6 +50,9 @@ export interface AvatarRepository {
   listByUser(userId: string, page: number, pageSize: number): Promise<PaginatedAvatars>;
   /** Returns a single avatar iff it belongs to the caller, else null. */
   getOwned(userId: string, avatarId: string): Promise<AvatarRecord | null>;
+  /** Deletes an avatar iff it belongs to the caller. True when a record was
+   *  removed; false when it never existed or is someone else's. */
+  deleteOwned(userId: string, avatarId: string): Promise<boolean>;
   /** Creates the caller's record for a species, or returns the existing one.
    *  De-duplicates on the sanitized species name (Req UC4 collection rules). */
   upsertFromScan(

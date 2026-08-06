@@ -1,5 +1,6 @@
 import React from 'react';
-import { LogIn, LogOut, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowLeft, LogIn, LogOut, X } from 'lucide-react';
 import { logoutUser, signInWithGoogle, type User } from '../lib/firebase';
 import markBlack from '../assets/brand/mark-black.png';
 import wordmarkLight from '../assets/brand/wordmark-light.png';
@@ -15,7 +16,6 @@ interface SidebarProps {
   /** Mobile drawer state — the rail is always visible from lg upward. */
   open: boolean;
   onClose: () => void;
-  dexCount: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -26,10 +26,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   projectId,
   open,
   onClose,
-  dexCount,
 }) => {
   const counts: Partial<Record<RouteId, number>> = {
-    dex: dexCount,
   };
 
   return (
@@ -71,6 +69,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <X className="h-4 w-4" />
           </button>
+        </div>
+
+        {/*
+          The way out.
+
+          The studio renders outside the app header — it brings its own chrome —
+          and nothing in that chrome led back. Every other route on the site has
+          the header or a Back button; this one had the browser's back arrow and
+          nothing else, so an operator who opened /studio directly had no way to
+          reach the rest of the app at all. It sits above the nav groups because
+          leaving is not one of the studio's own destinations.
+        */}
+        <div className="shrink-0 border-b border-line px-2.5 py-2">
+          <Link
+            to="/"
+            className={cx(
+              'flex items-center gap-2 rounded-card px-2.5 py-2 text-body text-txt-3',
+              'hover:bg-raised hover:text-txt'
+            )}
+          >
+            <ArrowLeft className="h-4 w-4 shrink-0" />
+            <span>Back to Sprout</span>
+          </Link>
         </div>
 
         {/* ---- Nav groups ------------------------------------------------- */}

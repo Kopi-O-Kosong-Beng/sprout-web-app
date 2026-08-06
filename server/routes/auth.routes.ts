@@ -5,8 +5,10 @@ import {
   handleMe,
   handleRequestReset,
   handleResendVerification,
+  handleAckDisplayNameNotice,
   handleSessionLogin,
   handleSessionLogout,
+  handleSignInMethod,
   handleSignup,
   handleVerifyReset,
 } from '../controllers/auth.controller';
@@ -69,7 +71,18 @@ router.post(
   verificationResendAccountLimiter,
   handleResendVerification
 );
+router.post(
+  '/sign-in-method',
+  authLimiter,
+  validate(requestResetSchema),
+  handleSignInMethod
+);
 router.get('/me', authMiddleware, handleMe);
+router.post(
+  '/display-name-notice/ack',
+  unverifiedAuthMiddleware,
+  handleAckDisplayNameNotice
+);
 router.post('/session/login', unverifiedAuthMiddleware, handleSessionLogin);
 router.post('/session/logout', unverifiedAuthMiddleware, handleSessionLogout);
 router.post(

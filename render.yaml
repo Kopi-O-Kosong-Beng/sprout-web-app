@@ -13,8 +13,6 @@ services:
         value: production
       - key: NODE_VERSION
         value: "22.13.1"
-      - key: STORAGE_MODE
-        value: local
       - key: AUTH_DEV_BYPASS
         value: "false"
       - key: DEMO_AUTH_BYPASS
@@ -25,16 +23,20 @@ services:
         value: smtp
       - key: EMAIL_FROM
         value: hello.sprout.team@gmail.com
-      # Two different jobs, not a typo for each other:
-      #   ADMIN_EMAIL  (singular) -> where UC8 contact tickets are sent
-      #                              (ticket.service.ts:10)
-      #   ADMIN_EMAILS (plural)   -> the admin-privilege allowlist
-      #                              (admin.middleware.ts:18)
-      # Only the singular was declared, so every admin route denied the very
-      # account this file named.
+      # Three different jobs, not typos for each other:
+      #   ADMIN_EMAIL        (singular) -> where UC8 contact tickets are sent
+      #                                    (ticket.service.ts:10)
+      #   ADMIN_EMAILS       (plural)   -> advisory admin badge
+      #                                    (admin.middleware.ts)
+      #   SUPER_ADMIN_EMAILS            -> the operator allowlist that actually
+      #                                    gates /api/admin and /api/platform;
+      #                                    fail-closed, so omitting it here
+      #                                    locks every operator out on deploy.
       - key: ADMIN_EMAIL
         value: hello.sprout.team@gmail.com
       - key: ADMIN_EMAILS
+        value: hello.sprout.team@gmail.com
+      - key: SUPER_ADMIN_EMAILS
         value: hello.sprout.team@gmail.com
       - key: SMTP_HOST
         value: smtp.gmail.com
@@ -46,8 +48,10 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      # Was "true" while nothing read it. Now that it does, leaving it true
+      # would serve every player a placeholder drawing instead of their plant.
       - key: USE_MOCK_APIS
-        value: "true"
+        value: "false"
       - key: MIN_CONFIDENCE_THRESHOLD
         value: "0.70"
       - key: CORS_ORIGIN

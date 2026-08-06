@@ -12,10 +12,14 @@ import authMiddleware from '../middleware/auth.middleware';
 const BATTLE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const PRODUCTION_BATTLE_START_LIMIT_MAX = 10;
 export const PRODUCTION_BATTLE_ACTION_LIMIT_MAX = 60;
+/** Leaving is once per battle, so this only has to outpace honest use — it is
+ *  a loop guard, not a budget the player can spend on playing. */
+export const PRODUCTION_BATTLE_ABANDON_LIMIT_MAX = 30;
 
 export interface BattleRouterOptions {
   startLimitMax?: number;
   actionLimitMax?: number;
+  abandonLimitMax?: number;
 }
 
 type ValidatedTarget = 'body' | 'params';
@@ -96,6 +100,23 @@ export function createBattleRouter(options: BattleRouterOptions = {}): Router {
     rateLimitMax(options.actionLimitMax, PRODUCTION_BATTLE_ACTION_LIMIT_MAX),
     'Too many battle actions. Please try again later.'
   );
+  /*
+   * Abandon gets its own budget.
+   *
+   * It used to share actionLimiter, which is keyed by uid — so a player who
+   * spent that budget on moves could no longer abandon either, and the only
+   * two controls a battle has were exhausted together. That is a player stuck
+   * in a session with no way out but waiting the window down.
+   *
+   * Leaving is also not the thing the limiter exists to bound: the concern is
+   * move spam against the engine, and a player can only abandon a battle they
+   * are in, once. A small separate budget keeps the exit open while still
+   * refusing a loop.
+   */
+  const abandonLimiter = battleLimiter(
+    rateLimitMax(options.abandonLimitMax, PRODUCTION_BATTLE_ABANDON_LIMIT_MAX),
+    'Too many attempts to leave a battle. Please try again later.'
+  );
 
   router.use(authMiddleware);
   router.post(
@@ -120,7 +141,7 @@ export function createBattleRouter(options: BattleRouterOptions = {}): Router {
     '/:sessionId/abandon',
     strictValidate('params', sessionParamsSchema),
     strictValidate('body', emptyBodySchema),
-    actionLimiter,
+    abandonLimiter,
     handleAbandonPve
   );
   return router;

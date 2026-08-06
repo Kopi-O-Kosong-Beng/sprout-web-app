@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '../components/common/BackButton';
 import { CaptureBadge, StatGrid, type PlantAvatarData } from '../components/common/PlantVisuals';
-import { streamPipeline, type PipelineEvent } from '../services/pipelineStream';
+import { useToast } from '../hooks/useToast';
+import {
+  PipelineRequestError,
+  streamPipeline,
+  type PipelineEvent,
+} from '../services/pipelineStream';
 import { getAvatar } from '../services/sproutApi';
 import { toPlantAvatarData } from '../utils/avatarPresentation';
 
@@ -72,7 +77,48 @@ type Status =
       saveError?: string;
       discovery: ScanDiscovery | null;
     }
-  | { kind: 'error'; message: string };
+  | {
+      /** Plant.id was not sure enough to be worth a render. Its own state
+       *  rather than an error: nothing went wrong, the photo was just not
+       *  good enough, and the way out is another photo. */
+      kind: 'lowConfidence';
+      name: string;
+      probability: number;
+      threshold: number;
+    };
+
+// There is no 'error' variant: every scan failure is raised as a toast, so
+// there is no per-screen error state to hold. Keeping one would mean a second
+// surface that nothing writes to.
+
+/**
+ * What to tell the player when a run could not start or finish.
+ *
+ * Branches on the failure's kind rather than its wording. The offline case is
+ * the one that matters most here: a scan is the one screen a user is likely to
+ * open away from wifi, standing in front of a plant.
+ */
+function isOfflineFailure(error: unknown): boolean {
+  if (error instanceof PipelineRequestError) return error.kind === 'offline';
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+function scanErrorMessage(error: unknown): string {
+  if (error instanceof PipelineRequestError) {
+    switch (error.kind) {
+      case 'offline':
+        return 'No connection. Reconnect to wifi or mobile data, then scan again.';
+      case 'unauthorised':
+        return 'Please sign in to scan a plant.';
+      default:
+        return error.message;
+    }
+  }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return 'No connection. Reconnect to wifi or mobile data, then scan again.';
+  }
+  return error instanceof Error ? error.message : 'Something went wrong.';
+}
 
 /** Maps a pipeline hop id onto the three stages the player is shown. */
 const STEP_FOR_HOP: Record<string, ScanStep> = {
@@ -136,6 +182,7 @@ function captureFrame(video: HTMLVideoElement): string {
 }
 
 export default function ScanPage() {
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [cameraReady, setCameraReady] = useState(false);
@@ -242,6 +289,17 @@ export default function ScanPage() {
     abortRef.current = controller;
     let finalSprite: string | null = null;
     let finalName = customName ?? '';
+    /** Set when the server gives up on a too-unsure identification.
+     *
+     *  Widened on the initializer rather than annotated: the only writer is the
+     *  stream callback below, and control flow analysis does not look inside a
+     *  nested function. A plain `: T | null = null` would leave this pinned to
+     *  `null` for the rest of the run, so the read after the stream could not
+     *  narrow back to the object. */
+    let lowConfidence = null as { name: string; probability: number; threshold: number } | null;
+    /** Set when the server could not identify the plant at all and is asking
+     *  the player to name it themselves. */
+    let needsName = false;
     let savedOutcome: {
       saved: boolean;
       saveError?: string;
@@ -305,12 +363,41 @@ export default function ScanPage() {
             };
           }
 
+          if (event.event === 'needs_name') {
+            needsName = true;
+            return;
+          }
+          if (event.event === 'low_confidence') {
+            lowConfidence = {
+              name: String(event.name ?? 'that plant'),
+              probability: Number(event.probability ?? 0),
+              threshold: Number(event.threshold ?? 0.7),
+            };
+            return;
+          }
           if (event.event === 'pipeline_error' || event.event === 'error') {
             throw new Error(String(event.error ?? 'The pipeline failed.'));
           }
         },
         controller.signal
       );
+
+      // Plant.id could not name it, so the player is asked. This is the state
+      // NameDialog has always been written for; nothing used to reach it,
+      // because the server invented "Unknown Plant Species" instead.
+      if (needsName) {
+        setStatus({ kind: 'naming', photo: jpegDataUrl, source });
+        return;
+      }
+
+      // The server stops before generating when it is not sure enough, so a
+      // missing sprite here is expected rather than a fault.
+      if (lowConfidence) {
+        // No toast here: NotSureDialog is modal and has room for the advice
+        // that actually helps. Two surfaces for one message is noise.
+        setStatus({ kind: 'lowConfidence', ...lowConfidence });
+        return;
+      }
 
       if (!finalSprite) {
         throw new Error('The pipeline finished without producing a sprite.');
@@ -327,16 +414,37 @@ export default function ScanPage() {
         discovery: savedOutcome.discovery,
       });
     } catch (error) {
-      const rawMessage = error instanceof Error ? error.message : 'Something went wrong.';
-      setStatus({
-        kind: 'error',
-        message: rawMessage.includes('401') ? 'Please sign in to scan a plant.' : rawMessage,
+      // Decided by the failure's own kind, not by searching its text. The old
+      // check was `message.includes('401')`, which reported an offline device
+      // as "please sign in" — Firebase's token refresh fails with a network
+      // error before any request is sent, so the user was told to do the one
+      // thing that could not help.
+      // A run the player cancelled is not a failure and gets no toast — they
+      // know what they did, and telling them is noise.
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setStatus({ kind: 'idle' });
+        return;
+      }
+
+      // Toast rather than an inline line: the progress overlay covers the
+      // screen while a run is going, so a message painted underneath it is one
+      // the player never sees. The toast also carries the way out.
+      const message = scanErrorMessage(error);
+      setStatus({ kind: 'idle' });
+      showToast({
+        tone: 'error',
+        message,
+        action: isOfflineFailure(error)
+          ? { label: 'Retry', onSelect: () => void runPipeline(jpegDataUrl, source, customName) }
+          : undefined,
       });
     } finally {
       processingRef.current = false;
       abortRef.current = null;
     }
-  }, []);
+    // showToast is stable (memoised in ToastProvider), but declared so the
+    // dependency is honest rather than implicitly assumed.
+  }, [showToast]);
 
   const onCapture = useCallback(() => {
     // Live preview available: grab a frame. Otherwise open the native camera.
@@ -353,13 +461,16 @@ export default function ScanPage() {
       try {
         void runPipeline(await fileToJpegDataUrl(file), source);
       } catch (error) {
-        setStatus({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Could not read that image.',
+        // The thrown text here is a DOM/FileReader message — not something to
+        // put in front of a player.
+        if (import.meta.env.DEV) console.warn('Could not read the picked file:', error);
+        showToast({
+          tone: 'error',
+          message: 'That image could not be opened. Try another photo.',
         });
       }
     },
-    [runPipeline]
+    [runPipeline, showToast]
   );
 
   const onTestImage = useCallback(async () => {
@@ -369,12 +480,13 @@ export default function ScanPage() {
       // The bundled photo is a file like any other, so it saves as a web upload.
       void runPipeline(await fileToJpegDataUrl(await response.blob()), 'web');
     } catch (error) {
-      setStatus({
-        kind: 'error',
-        message: error instanceof Error ? error.message : 'Could not load the test image.',
-      });
+      // Raised as a toast, not a status: there is no 'error' variant on this
+      // screen any more (see the Status union). The thrown text is a fetch/DOM
+      // message, so it stays in the log and the player gets fixed copy.
+      if (import.meta.env.DEV) console.warn('Could not load the test image:', error);
+      showToast({ tone: 'error', message: 'Could not load the test image.' });
     }
-  }, [runPipeline]);
+  }, [runPipeline, showToast]);
 
   const busy = status.kind === 'busy';
 
@@ -426,11 +538,6 @@ export default function ScanPage() {
 
       {/* Error / camera-hint line (the busy state uses the full overlay below) */}
       <div className="px-6 text-center">
-        {status.kind === 'error' && (
-          <p className="pixel-panel inline-block px-3 py-2 text-[9px] leading-relaxed text-red-700">
-            {status.message}
-          </p>
-        )}
         {status.kind === 'idle' && cameraError && (
           <p className="pixel-panel inline-block px-3 py-2 text-[9px]">{cameraError}</p>
         )}
@@ -438,7 +545,22 @@ export default function ScanPage() {
 
       {/* Full-screen progress while the pipeline runs — the long, opaque wait. */}
       {busy && (
-        <ScanProgress step={status.step} plantName={status.plantName} detail={status.detail} />
+        <ScanProgress
+          step={status.step}
+          plantName={status.plantName}
+          detail={status.detail}
+          onCancel={() => abortRef.current?.abort()}
+        />
+      )}
+
+      {/* Not sure enough to be worth drawing. Asks for a better photo rather
+          than handing over a creature built on a guess. */}
+      {status.kind === 'lowConfidence' && (
+        <NotSureDialog
+          name={status.name}
+          probability={status.probability}
+          onRetry={() => setStatus({ kind: 'idle' })}
+        />
       )}
 
       {/* Action row: upload | capture | test */}
@@ -523,6 +645,12 @@ export default function ScanPage() {
             });
           }}
           onGenerateAnother={() => setStatus({ kind: 'idle' })}
+          onLeave={() => {
+            // Same rule as BackButton: pop history when there is any, else the
+            // landing page — a scan opened as a deep link has nothing to pop.
+            if (window.history.length > 1) navigate(-1);
+            else navigate('/');
+          }}
         />
       )}
     </main>
@@ -532,7 +660,7 @@ export default function ScanPage() {
 /** The scan stages, in order, for the progress stepper. */
 const SCAN_STEPS: { key: ScanStep; label: string }[] = [
   { key: 'identify', label: 'Identifying plant' },
-  { key: 'sprite', label: 'Creating sprite' },
+  { key: 'sprite', label: 'Creating Plantemon' },
   { key: 'finish', label: 'Finishing the art' },
 ];
 
@@ -545,10 +673,15 @@ function ScanProgress({
   step,
   plantName,
   detail,
+  onCancel,
 }: {
   step: ScanStep;
   plantName?: string;
   detail?: string;
+  /** Aborts the run. The overlay is `inset-0 z-30`, so it covers the Back
+   *  button — without this the player is pinned to the screen for the length
+   *  of a run that can take most of a minute, with no way to leave. */
+  onCancel: () => void;
 }) {
   const currentIndex = SCAN_STEPS.findIndex((s) => s.key === step);
 
@@ -588,6 +721,14 @@ function ScanProgress({
         <p className="mt-5 text-center text-[9px] leading-relaxed opacity-60">
           This can take up to a minute. Keep the app open.
         </p>
+
+        <button
+          type="button"
+          onClick={onCancel}
+          className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
+        >
+          Cancel
+        </button>
       </div>
     </div>
   );
@@ -736,6 +877,47 @@ function UploadDialog({
   );
 }
 
+/**
+ * "I'm not sure what this is."
+ *
+ * Shown when Plant.id's confidence falls under MIN_CONFIDENCE_THRESHOLD. The
+ * percentage is included because a bare "try again" gives the player nothing to
+ * act on, and the advice is specific — flowers and leaves are what the
+ * identifier keys on, so "get closer to the flower" is genuinely the fix rather
+ * than encouragement.
+ */
+function NotSureDialog({
+  name,
+  probability,
+  onRetry,
+}: {
+  name: string;
+  probability: number;
+  onRetry: () => void;
+}) {
+  return (
+    <Overlay>
+      <h2 className="text-center text-xs">Not sure about this one</h2>
+      <p className="mt-3 text-[10px] leading-relaxed">
+        The closest match was <em>{name}</em>, but only {Math.round(probability * 100)}%
+        confident — not enough to grow a plant from.
+      </p>
+      <p className="mt-2 text-[9px] leading-relaxed opacity-80">
+        Try again with a clearer photo: fill the frame with one plant, get close to a
+        flower or leaf, and keep it in focus and well lit.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        style={{ background: 'var(--color-hp-high)', color: '#fff' }}
+        className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
+      >
+        Scan again
+      </button>
+    </Overlay>
+  );
+}
+
 /** Port of ScanActivity.showNameDialog. */
 function NameDialog({
   onSubmit,
@@ -786,6 +968,7 @@ function ResultDialog({
   discovery,
   onBattleNow,
   onGenerateAnother,
+  onLeave,
 }: {
   sprite: string;
   name: string;
@@ -804,20 +987,49 @@ function ResultDialog({
   saveError?: string;
   discovery: ScanDiscovery | null;
   onBattleNow: () => void;
+  /** Returns to the viewfinder for another run — the dialog's dismiss action. */
   onGenerateAnother: () => void;
+  /** Leaves the scan screen, the way the page's own Back button does. */
+  onLeave: () => void;
 }) {
-  return (
-    <Overlay>
-      <button
-        type="button"
-        onClick={onGenerateAnother}
-        aria-label="Close"
-        className="press pixel-button pixel-button-icon absolute top-2 right-2 z-10 flex h-6 w-6 items-center justify-center text-sm leading-none"
-      >
-        ×
-      </button>
+  const navigate = useNavigate();
 
-      <h2 className="text-center text-xs">New Discovery!</h2>
+  return (
+    /*
+     * Dismissing returns to the viewfinder rather than leaving the screen. The
+     * scan is already persisted by the time this shows — `saved` reports
+     * whether that worked — so closing costs nothing, and a backdrop press that
+     * navigated away would be a surprising way to lose a sprite in the one case
+     * where it is only in the browser.
+     */
+    <Overlay onDismiss={onGenerateAnother} labelledBy="scan-result-title">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={onLeave}
+          className="press pixel-button px-2 py-1 text-[9px]"
+        >
+          ← Back
+        </button>
+        <h2 id="scan-result-title" className="flex-1 text-center text-xs">
+          New Discovery!
+        </h2>
+        {/*
+          Two different exits, so both are offered: ← Back leaves the scan
+          screen, × returns to the viewfinder for another run. The × sits in
+          the slot that used to hold a balancing spacer rather than being
+          absolutely positioned, so it cannot land on top of the heading.
+        */}
+        <button
+          type="button"
+          onClick={onGenerateAnother}
+          aria-label="Close"
+          className="press pixel-button pixel-button-icon flex h-6 w-6 shrink-0 items-center justify-center text-sm leading-none"
+        >
+          ×
+        </button>
+      </div>
+
       <div className="scan-result-glow relative mx-auto mt-3 h-40 w-40">
         <img src={sprite} alt="" className="pixelated relative z-10 h-40 w-40 object-contain" />
       </div>
@@ -869,15 +1081,28 @@ function ResultDialog({
         ))}
 
       {/* Battling needs a real, saved avatarId — nothing to load in a battle
-          if the save itself failed. */}
+          if the save itself failed. Takes the primary slot because it is the
+          thing a player most likely wants next from a fresh discovery. */}
       {saved && avatarId && (
         <button
           type="button"
           onClick={onBattleNow}
-          style={{ background: 'var(--color-hp-high)', color: '#fff' }}
-          className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
+          className="press pixel-button is-primary mt-4 w-full px-2 py-2 text-[9px]"
         >
           Battle Now
+        </button>
+      )}
+
+      {/* Only when the record exists: sending someone to the archive to admire
+          a plant that failed to save would be a worse answer than the error
+          above it. */}
+      {saved && (
+        <button
+          type="button"
+          onClick={() => navigate('/archive')}
+          className="press pixel-button mt-2 w-full px-2 py-2 text-[9px]"
+        >
+          See it in your archive
         </button>
       )}
 
@@ -889,10 +1114,14 @@ function ResultDialog({
         Generate Another
       </button>
 
+      {/* Promoted to primary when the save failed: the download is then the
+          only way the player keeps this sprite at all. */}
       <a
         href={sprite}
         download={`${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`}
-        className="press pixel-button mt-2 block w-full px-2 py-2 text-center text-[9px]"
+        className={`press pixel-button mt-2 block w-full px-2 py-2 text-center text-[9px]${
+          saved ? '' : ' is-primary'
+        }`}
       >
         Download Sprite
       </a>
@@ -900,10 +1129,50 @@ function ResultDialog({
   );
 }
 
-function Overlay({ children }: { children: React.ReactNode }) {
+/**
+ * The scan screen's modal shell.
+ *
+ * `onDismiss` makes the backdrop and Escape close it, which is what pressing
+ * outside a box is expected to do everywhere else. Dialogs that have no safe
+ * way to be dismissed — one that must be answered — simply do not pass it, and
+ * then neither affordance is offered rather than being offered and ignored.
+ *
+ * The click is checked against the backdrop itself, so a press that starts on
+ * the panel and drifts onto the scrim does not count as clicking outside.
+ */
+function Overlay({
+  children,
+  onDismiss,
+  labelledBy,
+}: {
+  children: React.ReactNode;
+  onDismiss?: () => void;
+  labelledBy?: string;
+}) {
+  useEffect(() => {
+    if (!onDismiss) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onDismiss();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onDismiss]);
+
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-6">
-      <div className="pixel-panel relative w-full max-w-xs p-4">{children}</div>
+    <div
+      className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-6"
+      onClick={onDismiss ? (event) => {
+        if (event.target === event.currentTarget) onDismiss();
+      } : undefined}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        className="pixel-panel w-full max-w-xs p-4"
+      >
+        {children}
+      </div>
     </div>
   );
 }

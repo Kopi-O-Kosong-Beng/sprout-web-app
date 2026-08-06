@@ -6,10 +6,13 @@ import { NavigationLockProvider } from '../../context/NavigationLockProvider';
 import type { AuthProfile } from '../../services/sproutApi';
 import AppHeader from './AppHeader';
 
-/** The Admin entry is the only nav item that is hidden rather than disabled for
- *  someone who cannot use it. A disabled item reads "Log in to access", which
- *  would be false for a signed-in player: nothing they can do gets them past
- *  the server's ADMIN_EMAILS allowlist. */
+/** The operator entries — Admin, Studio, API Test — are the only nav items that
+ *  are hidden rather than disabled for someone who cannot use them. A disabled
+ *  item reads "Log in to access", which would be false for a signed-in player:
+ *  nothing they can do gets them past the server's SUPER_ADMIN_EMAILS
+ *  allowlist. */
+
+const OPERATOR_LINKS = ['Admin', 'Studio', 'API Test'] as const;
 
 function authValue(profile: AuthProfile | null): AuthContextValue {
   return {
@@ -23,13 +26,20 @@ function authValue(profile: AuthProfile | null): AuthContextValue {
   };
 }
 
-function profileFor(isAdmin: boolean): AuthProfile {
+function profileFor({
+  isAdmin = false,
+  isSuperAdmin = false,
+}: {
+  isAdmin?: boolean;
+  isSuperAdmin?: boolean;
+}): AuthProfile {
   return {
     uid: 'user-1',
-    email: isAdmin ? 'sprout@gmail.com' : 'player@example.com',
-    displayName: isAdmin ? 'Sprout Admin' : 'Player',
+    email: isSuperAdmin ? 'sprout@gmail.com' : 'player@example.com',
+    displayName: isSuperAdmin ? 'Sprout Admin' : 'Player',
     emailVerified: true,
-    isAdmin,
+    isAdmin: isAdmin || isSuperAdmin,
+    isSuperAdmin,
   };
 }
 
@@ -45,30 +55,51 @@ function renderHeader(profile: AuthProfile | null) {
   );
 }
 
-describe('AppHeader admin link', () => {
-  it('offers the dashboard to an admin', () => {
-    renderHeader(profileFor(true));
+describe('AppHeader operator links', () => {
+  it('offers the operator tools to a super admin', () => {
+    renderHeader(profileFor({ isSuperAdmin: true }));
 
     const nav = screen.getByRole('navigation', { name: /primary/i });
     expect(within(nav).getByRole('link', { name: 'Admin' })).toHaveAttribute(
       'href',
       '/admin'
     );
+    expect(within(nav).getByRole('link', { name: 'Studio' })).toHaveAttribute(
+      'href',
+      '/studio'
+    );
+    expect(within(nav).getByRole('link', { name: 'API Test' })).toHaveAttribute(
+      'href',
+      '/test'
+    );
   });
 
-  it('hides it from a signed-in player entirely', () => {
-    renderHeader(profileFor(false));
+  it('hides them from a signed-in player entirely', () => {
+    renderHeader(profileFor({}));
 
     const nav = screen.getByRole('navigation', { name: /primary/i });
-    expect(within(nav).queryByText('Admin')).not.toBeInTheDocument();
+    for (const label of OPERATOR_LINKS) {
+      expect(within(nav).queryByText(label)).not.toBeInTheDocument();
+    }
     // The player's own nav is untouched.
-    expect(within(nav).getByRole('link', { name: 'Play' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Scan' })).toBeInTheDocument();
   });
 
-  it('hides it from a signed-out visitor', () => {
+  it('hides them from a plain admin — the tools answer to the operator tier', () => {
+    renderHeader(profileFor({ isAdmin: true }));
+
+    const nav = screen.getByRole('navigation', { name: /primary/i });
+    for (const label of OPERATOR_LINKS) {
+      expect(within(nav).queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it('hides them from a signed-out visitor', () => {
     renderHeader(null);
 
     const nav = screen.getByRole('navigation', { name: /primary/i });
-    expect(within(nav).queryByText('Admin')).not.toBeInTheDocument();
+    for (const label of OPERATOR_LINKS) {
+      expect(within(nav).queryByText(label)).not.toBeInTheDocument();
+    }
   });
 });

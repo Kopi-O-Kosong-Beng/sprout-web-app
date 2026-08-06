@@ -10,6 +10,7 @@ import BattlePage from './BattlePage';
 const apiMocks = vi.hoisted(() => ({
   listOwnedAvatars: vi.fn(),
   setDemoAvatars: vi.fn(),
+  deleteAvatar: vi.fn(),
 }));
 
 vi.mock('../services/sproutApi', () => apiMocks);
@@ -27,7 +28,7 @@ function avatar(overrides: Partial<AvatarRecord> = {}): AvatarRecord {
     userId: 'user-1',
     speciesName: 'Nephrolepis exaltata',
     speciesFamily: 'Nephrolepidaceae',
-    spriteUrl: '/static/sprites/fern.png',
+    spriteUrl: '/plants/SPRITE_Fern.png',
     discoveredAt: '2026-07-22T00:00:00.000Z',
     source: 'mobile',
     isTemporary: false,
@@ -252,6 +253,33 @@ describe('ArchivePage', () => {
     expect(screen.queryByText('Monstera Scout')).not.toBeInTheDocument();
   });
 
+  /**
+   * The specimen card keyed PlantAvatar and SpecimenPhoto on the bare avatar
+   * id. They are siblings, so both carried the same key: React warned about
+   * duplicate keys and then duplicated rather than replaced them, so every
+   * selection left the previous plant's sprite and pot behind and the card
+   * grew a stack. Deleting did it too, since removing a plant reselects.
+   */
+  it('shows only the selected plant on the card after switching', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue(collectedPage);
+    const { user } = renderArchive();
+
+    expect(await screen.findByRole('heading', { name: 'Fern Ward' })).toBeVisible();
+
+    const card = () => screen.getByRole('heading', { name: /Ward|Flare|Scout/ }).closest('.pixel-panel')!;
+    const spritesOn = (element: Element) =>
+      Array.from(element.querySelectorAll('img.plant-sprite'));
+
+    await user.click(screen.getByRole('button', { name: /select orchid flare/i }));
+    await user.click(screen.getByRole('button', { name: /select fern ward/i }));
+    await user.click(screen.getByRole('button', { name: /select orchid flare/i }));
+    await user.click(screen.getByRole('button', { name: /select fern ward/i }));
+
+    // One creature on the card, and it is the one just chosen.
+    expect(spritesOn(card())).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Fern Ward' })).toBeVisible();
+  });
+
   it('adds and removes only demo plants through the switch', async () => {
     apiMocks.listOwnedAvatars
       .mockResolvedValueOnce(emptyPage)
@@ -360,6 +388,71 @@ describe('ArchivePage', () => {
     expect(apiMocks.listOwnedAvatars).toHaveBeenCalledTimes(1);
   });
 
+  it('digs up one plant through the shovel after confirming', async () => {
+    const orchidOnlyPage: PaginatedAvatars = {
+      ...collectedPage,
+      items: collectedPage.items.slice(1),
+      total: 1,
+    };
+    apiMocks.listOwnedAvatars
+      .mockResolvedValueOnce(collectedPage)
+      .mockResolvedValueOnce(orchidOnlyPage);
+    apiMocks.deleteAvatar.mockResolvedValue(undefined);
+    const { user } = renderArchive();
+
+    await user.click(await screen.findByRole('button', { name: /^remove plants$/i }));
+    expect(screen.getByText(/tap a plant to dig it up/i)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: /dig up fern ward/i }));
+    await user.click(
+      screen.getByRole('button', { name: /^dig up$/i })
+    );
+
+    expect(apiMocks.deleteAvatar).toHaveBeenCalledWith('fern-1');
+    expect(await screen.findByRole('heading', { name: 'Orchid Flare' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /dig up fern ward/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the plant when the dig is cancelled', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue(collectedPage);
+    const { user } = renderArchive();
+
+    await user.click(await screen.findByRole('button', { name: /^remove plants$/i }));
+    await user.click(screen.getByRole('button', { name: /dig up fern ward/i }));
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+
+    expect(apiMocks.deleteAvatar).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /dig up fern ward/i })).toBeVisible();
+  });
+
+  it('says why a dig failed and leaves the dialog open', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue(collectedPage);
+    apiMocks.deleteAvatar.mockRejectedValue(new Error('dig rejected'));
+    const { user } = renderArchive();
+
+    await user.click(await screen.findByRole('button', { name: /^remove plants$/i }));
+    await user.click(screen.getByRole('button', { name: /dig up fern ward/i }));
+    await user.click(screen.getByRole('button', { name: /^dig up$/i }));
+
+    expect(await screen.findByText('dig rejected')).toBeVisible();
+    expect(screen.getByRole('alertdialog')).toBeVisible();
+    // Only the first load — a failed dig must not silently reshuffle shelves.
+    expect(apiMocks.listOwnedAvatars).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no shovel over an empty archive', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue(emptyPage);
+    renderArchive();
+
+    expect(await screen.findByText(/no plants collected yet/i)).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /^remove plants$/i })
+    ).not.toBeInTheDocument();
+  });
+
   it('shows retry after an archive request fails', async () => {
     apiMocks.listOwnedAvatars
       .mockRejectedValueOnce(new Error('offline'))
@@ -375,7 +468,7 @@ describe('ArchivePage', () => {
     expect(await screen.findByRole('heading', { name: 'Fern Ward' })).toBeVisible();
   });
 
-  it('falls back to the empty pot when a sprite image fails', async () => {
+  it('stands a drawn plant in the pot when a sprite image fails', async () => {
     apiMocks.listOwnedAvatars.mockResolvedValue({
       ...collectedPage,
       items: [collectedPage.items[0]],
@@ -385,15 +478,16 @@ describe('ArchivePage', () => {
     const visual = (await screen.findAllByRole('img', {
       name: /fern ward avatar/i,
     }))[0];
-    const sprite = visual.querySelector('.plant-sprite');
+    const sprite = visual.querySelector('img.plant-sprite');
 
     expect(sprite).not.toBeNull();
     fireEvent.error(sprite!);
 
-    // The pixel-art redesign draws the pot as a real painted asset and stands
-    // the sprite in it, so a broken sprite leaves the pot rather than the
-    // CSS-art leaf/face/pot spans this used to assert on.
-    expect(visual.querySelector('.plant-sprite')).toBeNull();
+    // A broken sprite URL used to leave a silently bare pot — which is how
+    // missing art shipped twice without anyone noticing. Now the procedural
+    // stand-in takes the sprite's place while the pot stays painted.
+    expect(visual.querySelector('img.plant-sprite')).toBeNull();
+    expect(visual.querySelector('svg.plant-sprite.is-procedural')).not.toBeNull();
     expect(visual.querySelector('.pot-art')).not.toBeNull();
   });
 });

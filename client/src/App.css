@@ -38,6 +38,73 @@
   color: #ffffff;
 }
 
+/*
+ * Ground for the game boards, which now sit under the same permanent nav as
+ * the document pages.
+ *
+ * The board keeps `min-height: 100dvh` of its own, so without this it would
+ * claim a full viewport *below* the header and push its action row off the
+ * bottom. Letting the body flex and zeroing the board's floor makes it fill
+ * exactly what the header leaves.
+ */
+.game-shell {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  background-color: var(--color-sprout);
+  /*
+   * `isolation` is load-bearing, not tidiness. Every game screen paints its own
+   * backdrop on a negative layer — the camera preview on /scan is `-z-10` over a
+   * `-z-20` black sheet, and /archive and /battle each put a `fixed -z-10` image
+   * behind the board. Without a stacking context here those layers resolve
+   * against the root, where a plain in-flow block's background paints *after*
+   * them, and this colour covers the camera with a flat green rectangle.
+   * ScanPage's own comment warns about exactly this shape of bug.
+   *
+   * Making the shell a stacking context scopes those layers to it, so they
+   * paint above its background and below the board. `isolation` rather than
+   * `transform`, which would also make this the containing block for the
+   * `fixed` backdrops and change how they size.
+   */
+  isolation: isolate;
+}
+
+.game-shell-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.game-shell-body > .screen {
+  min-height: 0;
+  flex: 1;
+}
+
+/*
+ * Studio shell: the site nav above the pipeline console.
+ *
+ * Nothing here restyles the studio — every rule is on the wrapper the layout
+ * adds. Two properties do the work:
+ *
+ *   transform  makes this element the containing block for `position: fixed`
+ *              descendants, so the studio's own fixed sidebar (inset-y-0,
+ *              z-50) resolves against the wrapper and begins under the nav
+ *              rather than covering it.
+ *   static nav the site header gives up `position: sticky` here only. The
+ *              studio's sticky top bar pins to `top: 0`, and a sticky site nav
+ *              would sit in that exact space and swallow it. The console keeps
+ *              its own persistent bar; the site nav scrolls away with the page.
+ */
+.studio-shell > .site-header {
+  position: static;
+}
+
+.studio-shell-body {
+  position: relative;
+  transform: translateZ(0);
+}
+
 /* ============================================================================
    Header
    ========================================================================== */
@@ -71,7 +138,7 @@
 }
 
 .brand-link:active:not(.is-disabled) {
-  transform: scale(0.9);
+  transform: translate(1px, 1px);
 }
 
 .sprout-mark {
@@ -89,16 +156,29 @@
   margin-right: auto;
 }
 
+/* Separates the player tabs from the operator tools. Decorative only —
+   aria-hidden, since the grouping is visual and screen readers already get the
+   nav landmark. */
+.nav-divider {
+  width: 2px;
+  align-self: stretch;
+  min-height: 1rem;
+  margin: 0 0.35rem;
+  background: rgb(255 255 255 / 0.25);
+}
+
 .nav-link {
   display: inline-block;
-  padding: 0.5rem 0.55rem;
+  /* 9px pixel type and enough padding to clear the 44px touch floor — the bar
+     was 8px type in a ~30px target, under both of the system's own rules. */
+  padding: 0.75rem 0.6rem;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
   color: rgb(255 255 255 / 0.72);
   text-decoration: none;
   border: 3px solid transparent;
-  transition: transform 80ms ease-out;
+  transition: transform 100ms cubic-bezier(0.16, 1, 0.3, 1);
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -107,7 +187,7 @@
 }
 
 .nav-link:active:not(.is-disabled) {
-  transform: scale(0.9);
+  transform: translate(1px, 1px);
 }
 
 /* The active tab is the one lit panel in the bar. */
@@ -118,11 +198,25 @@
   box-shadow: 3px 3px 0 rgb(0 0 0 / 0.4);
 }
 
+/* Pulled 20px in from the right edge. Flush against the corner these are a
+   Fitts's-law worst case: the pointer has to be driven all the way out to the
+   screen edge to reach Sign up / Log in, and on a maximised window an overshoot
+   lands on the browser chrome instead. The header's own 1rem padding is not
+   enough on its own. */
 .header-actions {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+  margin-right: 20px;
+}
+
+/* On a narrow viewport the header wraps and this row is no longer in the
+   corner, so the inset stops paying for itself and just eats width. */
+@media (max-width: 640px) {
+  .header-actions {
+    margin-right: 0;
+  }
 }
 
 .header-user {
@@ -194,12 +288,28 @@
   color: rgb(255 255 255 / 0.75);
 }
 
-/* Pixel eyebrow above a page or panel title. */
+/* A section header on the green ground (the admin Accounts intro). Without
+   this an h2 in a .page-heading rendered as a bare browser serif-scale
+   default — the one heading in the app no rule dressed. */
+.page-heading h2 {
+  margin: 0.75rem 0 0;
+  font-family: var(--font-pixel);
+  letter-spacing: -0.04em;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  color: #ffffff;
+  text-shadow:
+    0 1px 2px rgb(0 0 0 / 0.55),
+    0 2px 10px rgb(32 55 39 / 0.75);
+}
+
+/* Pixel eyebrow above a page or panel title. 9px is this face's legibility
+   floor — the display-only rule the system sets for itself. */
 .eyebrow {
   margin: 0;
   font-family: var(--font-pixel);
   letter-spacing: 0.02em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
   text-transform: uppercase;
   color: var(--color-f24-lime);
 }
@@ -316,6 +426,166 @@
   margin-top: 1.25rem;
 }
 
+/* Guidance at the head of the form. Set apart by a rule rather than a panel:
+   it is prose to read once, not another field to fill in. */
+.form-intro {
+  padding-bottom: 0.9rem;
+  border-bottom: 2px solid rgb(26 26 26 / 0.15);
+}
+
+.form-intro h2 {
+  margin: 0 0 0.4rem;
+}
+
+.form-intro p {
+  margin: 0;
+}
+
+/* The label row, so the asterisk sits beside the text rather than becoming
+   another row of the label's flex column. */
+.field-label {
+  display: block;
+}
+
+.required-mark {
+  color: #b3261e;
+  font-weight: 700;
+}
+
+/* The status lookup in the support column: same controls as the contact form,
+   tightened up, since it sits inside a card rather than owning the page. */
+.status-check {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin: 0.85rem 0 0.25rem;
+}
+
+.status-check label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #1a1a1a;
+}
+
+.status-check input {
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  letter-spacing: normal;
+  width: 100%;
+  padding: 0.6rem 0.65rem;
+  border: 3px solid #1a1a1a;
+  border-radius: 0;
+  background: #ffffff;
+  color: #1a1a1a;
+}
+
+.status-result {
+  border: 3px solid #1a1a1a;
+  background: rgb(26 26 26 / 0.05);
+  padding: 0.75rem;
+}
+
+.status-result p {
+  margin: 0 0 0.25rem;
+}
+
+.status-meta {
+  font-size: 0.8125rem;
+  opacity: 0.7;
+}
+
+/* The reply line is the answer someone came to this form for, so it reads at
+   full strength rather than as muted metadata like the submitted date. */
+.status-replied {
+  font-weight: 600;
+  color: color-mix(in srgb, var(--color-hp-high) 75%, #1a1a1a);
+}
+
+/* ============================================================================
+   Ticket Manager
+   ========================================================================== */
+
+.ticket-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.ticket-filters .secondary-cta {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.ticket-filters .secondary-cta.is-active {
+  background: var(--color-hp-high);
+  color: #ffffff;
+}
+
+.ticket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ticket-card {
+  border: 3px solid #1a1a1a;
+  background: #ffffff;
+  padding: 0.9rem;
+}
+
+/* Resolved tickets stay legible but recede, so a queue filtered to "all"
+   still reads open-first at a glance. */
+.ticket-card.is-resolved {
+  opacity: 0.72;
+}
+
+.ticket-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ticket-card h2 {
+  margin: 0.35rem 0;
+}
+
+.ticket-badge {
+  font-family: var(--font-pixel);
+  font-size: 0.5625rem;
+  padding: 0.25rem 0.5rem;
+  border: 2px solid #1a1a1a;
+}
+
+.ticket-badge.is-open {
+  background: var(--color-hp-high);
+  color: #ffffff;
+}
+
+.ticket-badge.is-resolved {
+  background: rgb(26 26 26 / 0.1);
+  color: #1a1a1a;
+}
+
+/* The reported message is arbitrary user input: preserve the line breaks they
+   typed, but keep long unbroken strings from widening the card. */
+.ticket-message {
+  margin: 0.6rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .form-stack label,
 .contact-form label,
 .test-page label {
@@ -403,14 +673,16 @@
   line-height: 1.5;
 }
 
+/* Status INK comes from the two shared tokens (index.css) — this file had
+   grown four competing greens and reds for the same two meanings. */
 .form-error {
   background: rgb(244 67 54 / 0.14);
-  color: #7f1d1d;
+  color: var(--color-danger-ink);
 }
 
 .form-notice {
   background: rgb(76 175 80 / 0.16);
-  color: #14532d;
+  color: var(--color-ok-ink);
 }
 
 .password-checklist {
@@ -423,11 +695,11 @@
 }
 
 .password-checklist .met {
-  color: #15803d;
+  color: var(--color-ok-ink);
 }
 
 .password-checklist .unmet {
-  color: #b91c1c;
+  color: var(--color-danger-ink);
 }
 
 /* ============================================================================
@@ -442,16 +714,19 @@
   justify-content: center;
   gap: 0.5rem;
   padding: 0.85rem 1rem;
+  min-height: 2.75rem;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
   font-size: 0.5625rem;
   line-height: 1.6;
   text-decoration: none;
   cursor: pointer;
-  border: 3px solid #1a1a1a;
+  border: 3px solid var(--color-ink);
   border-radius: 0;
   box-shadow: 4px 4px 0 rgb(0 0 0 / 0.45);
-  transition: transform 80ms ease-out;
+  transition:
+    transform 100ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 100ms cubic-bezier(0.16, 1, 0.3, 1);
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
@@ -475,10 +750,27 @@
   color: #ffffff;
 }
 
+/* Same press physics as the move cards and pixel buttons: into the shadow,
+   not a squash. One interaction model for the whole app. */
+.primary-cta:hover:not(:disabled),
+.secondary-cta:hover:not(:disabled),
+.danger-action:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 rgb(0 0 0 / 0.5);
+}
+
 .primary-cta:active:not(:disabled),
 .secondary-cta:active:not(:disabled),
 .danger-action:active:not(:disabled) {
-  transform: scale(0.9);
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 rgb(0 0 0 / 0.45);
+}
+
+.primary-cta:focus-visible,
+.secondary-cta:focus-visible,
+.danger-action:focus-visible {
+  outline: 3px solid var(--color-f24-teal-deep);
+  outline-offset: 2px;
 }
 
 .primary-cta:disabled,
@@ -508,12 +800,13 @@
 }
 
 /* Quiet text actions. On the green ground they are white; inside a white plate
-   they take the brand green. */
+   they take the brand green. Block padding lifts the hit area toward the 44px
+   floor — these serve as row actions in the admin table. */
 .text-link,
 .details-link {
   background: none;
   border: none;
-  padding: 0.25rem 0;
+  padding: 0.5rem 0.125rem;
   font-family: inherit;
   font-size: 0.8125rem;
   color: #ffffff;
@@ -566,7 +859,7 @@
   text-align: center;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
   text-transform: uppercase;
   opacity: 0.55;
 }
@@ -584,6 +877,14 @@
 
 .auth-footer .text-link {
   color: var(--color-sprout);
+}
+
+/* On the white auth plate the game chrome's white focus ring vanishes; these
+   links take the same teal ring the panel's form controls use. */
+.auth-footer .text-link:focus-visible,
+.panel .details-link:focus-visible,
+.auth-panel .details-link:focus-visible {
+  outline-color: var(--color-f24-teal-deep);
 }
 
 .auth-side {
@@ -699,58 +1000,25 @@
   image-rendering: pixelated;
 }
 
-/* The sprite stands in the pot, painted above it with its feet inside the rim. */
+/* The sprite stands in the pot, painted above it with its feet inside the rim.
+   Centred with the standalone translate property, not transform, so the shovel
+   wiggle (which animates transform: rotate) composes with the centring instead
+   of overwriting it and lurching the sprite half its width to the right. */
 .plant-avatar .plant-sprite,
 .bot-avatar .plant-sprite {
   position: absolute;
   bottom: 28%;
   left: 50%;
-  transform: translateX(-50%);
+  translate: -50%;
   width: 78%;
   height: auto;
   object-fit: contain;
   image-rendering: pixelated;
 }
 
-/*
- * Palette tints. The species keeps a stable colour across the app (assigned in
- * avatarPresentation), which is the only way to tell two sprite-less records
- * apart — so it lights the ground behind the pot rather than the pot itself.
- */
-.plant-avatar::before {
-  content: "";
-  position: absolute;
-  inset: 12% 6% 6%;
-  border-radius: 999px;
-  opacity: 0.4;
-  filter: blur(6px);
-}
-
-.plant-avatar.emerald::before {
-  background: var(--color-f24-teal);
-}
-.plant-avatar.violet::before {
-  background: var(--color-f24-magenta);
-}
-.plant-avatar.sage::before {
-  background: var(--color-f24-teal-deep);
-}
-.plant-avatar.lime::before {
-  background: var(--color-f24-lime);
-}
-.plant-avatar.clay::before {
-  background: var(--color-f24-tan);
-}
-
-.bot-avatar::before {
-  content: "";
-  position: absolute;
-  inset: 12% 6% 6%;
-  border-radius: 999px;
-  background: var(--color-f24-brick);
-  opacity: 0.4;
-  filter: blur(6px);
-}
+/* No ground tint or backdrop behind the pots: the shelf art itself carries
+   the contrast (drawn dark on purpose), so the sprites sit directly on the
+   painted scene. */
 
 /* Three pots resting on a shelf plank. */
 .mini-archive {
@@ -932,7 +1200,7 @@
 .stat-grid dt {
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.4375rem;
+  font-size: 0.5625rem;
   opacity: 0.7;
 }
 
@@ -960,7 +1228,7 @@
   gap: 0.5rem;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
 }
 
 .health-meter > div {
@@ -1001,7 +1269,7 @@
   align-self: flex-start;
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.4375rem;
+  font-size: 0.5625rem;
   padding: 0.15rem 0.3rem;
   border: 2px solid #1a1a1a;
   background: var(--color-hp-mid);
@@ -1037,7 +1305,7 @@
 .admin-table th {
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.5rem;
+  font-size: 0.5625rem;
   text-transform: uppercase;
   background: rgb(32 55 39 / 0.1);
 }
@@ -1054,7 +1322,7 @@
   background: var(--color-f24-lime);
   font-family: var(--font-pixel);
   letter-spacing: -0.04em;
-  font-size: 0.4375rem;
+  font-size: 0.5625rem;
   text-transform: uppercase;
 }
 
@@ -1065,9 +1333,29 @@
   flex-wrap: wrap;
 }
 
+/* The almanac search box. Same control style as every form input — it sits
+   outside a .form-stack, so it names itself instead of inheriting nothing. */
+.admin-search {
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  letter-spacing: normal;
+  padding: 0.6rem 0.65rem;
+  min-height: 2.75rem;
+  border: 3px solid var(--color-ink);
+  border-radius: 0;
+  background: #ffffff;
+  color: var(--color-ink);
+  min-width: 14rem;
+}
+
+.admin-search:focus-visible {
+  outline: 3px solid var(--color-f24-teal-deep);
+  outline-offset: 2px;
+}
+
 .confirm-row .danger-action {
   padding: 0.45rem 0.6rem;
-  font-size: 0.4375rem;
+  font-size: 0.5625rem;
   box-shadow: 3px 3px 0 rgb(0 0 0 / 0.45);
 }
 

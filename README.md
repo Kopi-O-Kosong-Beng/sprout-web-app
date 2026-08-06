@@ -125,18 +125,41 @@ with its email already verified, so no verification link has to be collected
 from a shared inbox. Re-running it is safe and is also how you reset a forgotten
 admin password: the uid, PVE stats and history survive.
 
-Creating the account is not what grants access — the address must also be in
-`ADMIN_EMAILS` in `server/.env`. That allowlist is the only authority (it fails
-closed when empty), and the seed warns if the address is missing from it.
+Creating the account is not what grants access. Add `--superadmin` to set the
+Firestore flag, or put the address in `SUPER_ADMIN_EMAILS` in `server/.env` (`ADMIN_EMAILS` is
+an advisory badge only and opens nothing) — either
+grant alone is enough, and both fail closed. The seed warns when the account
+ends up with neither.
+
+```bash
+npm run seed:admin -w server -- sprout@gmail.com 'the-password' --superadmin
+```
+
+To promote someone who already has an account, use **Admin → Accounts → Make
+superadmin** rather than the seed: re-running the seed resets that account's
+password. See [CMD.md](CMD.md) for the full command reference.
 Restart the backend after editing it.
 
-**Where login lands.** Everyone enters at `/`, the public landing page. After a
-successful login an admin goes to `/admin` and everyone else goes to `/home`,
-the in-game hub — unless a protected route bounced them, in which case they
-return to the page they originally asked for. The frontend reads this from the
-`isAdmin` field on `GET /api/auth/me`, which the server computes from
-`ADMIN_EMAILS`; it decides navigation only, and `/api/admin` re-checks the
-allowlist on every request.
+**Where login lands.** Everyone enters at `/`, the public landing page, and
+that is also where a signed-in player returns — the separate `/home` hub is
+archived (`HomePage.tsx` is still in the tree, nothing routes to it). After a
+successful login a superadmin goes to `/admin` and everyone else goes to `/`,
+unless a protected route bounced them, in which case they return to the page
+they originally asked for.
+
+**Who sees what.** One nav, three audiences:
+
+| | visitor (signed out or unverified) | player | superadmin |
+|---|---|---|---|
+| Home, Ranking, Contact | open | open | open |
+| Scan, Archive, PVE Battle | greyed out | open | open |
+| Admin, Studio, API Test, Ticket Manager | hidden | hidden | open |
+
+Greyed vs hidden is deliberate: greyed means "verify your account and you are
+in", hidden means no amount of logging in helps, so showing it disabled would
+be a lie. The frontend reads `isAdmin` / `isSuperAdmin` from
+`GET /api/auth/me`; it decides navigation only, and every `/api/admin` and
+`/api/platform` request re-resolves the grant server-side.
 
 ### Step 3: Create frontend env file
 
@@ -235,6 +258,59 @@ See the database anytime:
 npm run inspect:firestore -w server
 ```
 
+### Signing in locally without a password
+
+You do not need a real Firebase account to click through the app. On the login
+page, enter:
+
+```
+email:     test@sprout.com
+password:  anything at all — it is not read
+```
+
+That takes a local-only shortcut: no Firebase call, no ID token. The client
+stores a "dev session" and sends `x-dev-uid` / `x-dev-email` headers, which the
+backend's `AUTH_DEV_BYPASS` already understands. You land as an **operator**,
+so `/admin`, `/studio` and `/test` are reachable too.
+
+Two things have to be true for it to work, and both are already set by
+[Step 2](#step-2-create-backend-env-file):
+
+```
+AUTH_DEV_BYPASS=true
+SUPER_ADMIN_EMAILS=...,test@sprout.com    # the address must be on the operator allowlist
+```
+
+The operator part is not special-cased — the server derives `isSuperAdmin`
+from that email through the normal allowlist, so if you take `test@sprout.com`
+out of `SUPER_ADMIN_EMAILS` you still sign in, just as an ordinary player.
+Handy for checking what a non-operator sees. "Log out" clears the session as
+usual.
+
+> **This cannot activate on a deployment.** The client half goes through
+> `import.meta.env.DEV`, which compiles to a literal `false` in `vite build`
+> (it minifies to `function(){return!1}`), so the dev session is always `null`
+> and the headers are never sent. The server half independently requires
+> `AUTH_DEV_BYPASS=true` **and** `NODE_ENV !== 'production'`, and `render.yaml`
+> pins `AUTH_DEV_BYPASS=false`. Neither half alone opens anything: a deployed
+> API refuses these headers even from a locally-run client, and a deployed
+> client never sends them even against a local API.
+>
+> Note the shortcut is inert in the production bundle, not stripped from it —
+> `test@sprout.com` and `sprout-dev-session` are readable in the shipped JS.
+> Nothing relies on them being secret. Still, do not add `test@sprout.com` to
+> `SUPER_ADMIN_EMAILS` (or `ADMIN_EMAILS`) on a deployed environment: that
+> would make it a live operator address the moment anyone creates that
+> Firebase account for real.
+
+To act as a specific user instead — a different archive, say — set the dev
+session yourself in the browser console:
+
+```js
+localStorage.setItem('sprout-dev-session',
+  JSON.stringify({ uid: 'demo-user-0001', email: 'test@sprout.com' }))
+```
+
 ### The almanac taxonomy
 
 The landing page and the admin dashboard share a fixed list of 200 Singapore
@@ -302,6 +378,16 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 **Run the tests:** `npm test`. Backend integration tests run against the local
 `sprout-test` Firestore Emulator and never your live Firebase project.
 
+Two environment gotchas worth knowing before you blame the code:
+
+- **The emulator suite needs Java 11+.** On an older JDK the emulator exits
+  immediately and no test runs. `java -version` to check. This is the suite that
+  covers the auth, admin and ticket APIs, so it is the one to get working.
+- **On Windows, vitest's default fork pool times out.** Run the client suite as
+  `npx vitest run --pool=threads --no-file-parallelism` from `client/`.
+
+Every command in the repo, with these caveats spelled out: [`CMD.md`](CMD.md).
+
 ## 4. Current API (more coming — check back)
 
 | Method | Endpoint | Auth | What it does |
@@ -311,7 +397,10 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 | GET | `/api/auth/me` | Bearer token | current authenticated profile |
 | POST | `/api/auth/request-reset` | — | send 6-digit OTP via email log/SMTP |
 | POST | `/api/auth/verify-reset` | — | verify OTP and update password |
+| POST | `/api/auth/sign-in-method` | — | after a failed login: is this address Google-only? |
 | POST | `/api/query/submit` | — | create query ticket → `{refNumber}` |
+| POST | `/api/query/status` | — | check one ticket with its refNumber + filing email |
+| GET | `/api/leaderboard` | optional | XP and discovery boards; a login adds your own standing |
 | GET | `/api/avatar` | Bearer token | list caller's avatars (paginated) |
 | GET | `/api/avatar/:id` | Bearer token | one avatar (ownership-checked) |
 | POST | `/api/avatar` | Bearer token | save a scanned plant into the archive |
@@ -320,9 +409,12 @@ curl http://localhost:3001/api/avatar -H "x-dev-uid: demo-user-0001"
 | POST | `/api/battle/pve/start` | Bearer token | start a PVE battle with one of your avatars |
 | GET/POST | `/api/battle/pve/:sessionId`(`/action`, `/abandon`) | Bearer token | read a session, take a turn, concede |
 | POST | `/api/pipeline/run-stream` | Bearer token | the 4-hop sprite pipeline, streamed as SSE |
-| GET | `/api/admin/users`, `/api/admin/almanac` | Bearer + `ADMIN_EMAILS` | accounts; taxonomy with finders |
-| POST | `/api/admin/cleanup` | Bearer + `ADMIN_EMAILS` | dry-run / delete expired web uploads |
-| GET | `/api/platform/*` | Bearer + `ADMIN_EMAILS` | pipeline portal: config, live provider health, tests |
+| GET | `/api/admin/users`, `/api/admin/almanac` | Bearer + superadmin | accounts; taxonomy with finders |
+| PATCH | `/api/admin/users/:uid/superadmin` | Bearer + superadmin | grant / revoke the operator grant |
+| GET | `/api/admin/tickets` | Bearer + superadmin | the Ticket Manager queue |
+| PATCH | `/api/admin/tickets/:id/status` | Bearer + superadmin | resolve / reopen, stamps the reply time |
+| POST | `/api/admin/cleanup` | Bearer + superadmin | dry-run / delete expired web uploads |
+| GET | `/api/platform/*` | Bearer + superadmin | pipeline portal: config, live provider health, tests |
 
 Two of these are deliberately unlike the rest. `GET /api/almanac` takes no auth
 at all — it is the landing page's centrepiece and is shown to visitors who have
@@ -351,7 +443,9 @@ Render declares SMTP delivery but does not store credentials in `render.yaml`. F
 
 Before deployment, add the Vercel domain in Firebase Console -> Authentication -> Settings -> Authorized domains and set Render `FRONTEND_URL` to that HTTPS origin. Verification links must point to `https://<vercel-domain>/verify-email?...`, and the page must successfully apply the Firebase action code. Firebase remains the authority for identity: the client sends Firebase ID tokens and the backend verifies them.
 
-Firebase Storage is active at `sprout-dev-66f08.firebasestorage.app`. The live Node 22 Admin preflight passed write, exact read-back, and deletion on 2026-07-21. This proves backend credential/bucket access only; Admin SDK requests bypass client Security Rules. Direct client rules and the application Storage adapter remain untested, so Render stays pinned to `STORAGE_MODE=local`. The detailed status and procedure are in [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
+Firebase Storage is active at `sprout-dev-66f08.firebasestorage.app`, and it is the only place sprites go — every scan writes there through `server/services/sprite-storage.ts`. `FIREBASE_STORAGE_BUCKET` is therefore required, not optional: without it the whole scan-to-archive path throws and the player is told their plant could not be saved.
+
+`STORAGE_MODE` used to appear here as a pin holding that back. No code ever read it, so it has been removed from `render.yaml` and `.env` rather than left looking load-bearing. The live Node 22 Admin preflight passed write, exact read-back and deletion on 2026-07-21 (`npm run check:storage -w server` re-runs it). That proves backend credential and bucket access only — Admin SDK requests bypass client Security Rules, and the direct client rules remain untested. Details in [`server/FIREBASE_SETUP.md`](server/FIREBASE_SETUP.md).
 
 ## 6. Backend layout (where to put things)
 
@@ -377,7 +471,7 @@ Rule of thumb: routes stay thin → controllers translate HTTP → services do t
 
 1. Claim your task in `md/tasks.md` (suggested owners are at the top) — put your name
 2. Branch: `git checkout -b feat/task-<n>-<slug>` (e.g. `feat/task-14-avatar-archive-ui`)
-3. Code against `md/requirements.md`; mock external APIs (`USE_MOCK_APIS=true` — never call real plant.id/Gemma/FLUX in dev)
+3. Code against `md/requirements.md`. Keep `USE_MOCK_APIS=true` in `server/.env` unless you are deliberately exercising the real pipeline — it withholds every upstream credential, so Plant.id, Gemini, NVIDIA and withoutBG are never called and a scan costs nothing. A mocked run finishes in well under a second against ~13s live, and ends with `renderSource: "placeholder"`. Set it to `false` when you need real art, and remember each run spends quota on five services.
 4. Done = happy path + error paths work, your module's tests pass, `npm run dev` still boots
 5. Push your branch → open a Pull Request on GitHub → someone else eyeballs it → merge
 6. `git pull` main regularly so integration stays boring
@@ -400,5 +494,5 @@ Still stuck? Share only the minimal relevant, sanitized error lines. Redact toke
 
 ## Related repos
 
-- 🎨 **[Sprout_Dev_Platform](https://github.com/Neonat/Sprout_Dev_Platform)** — where the GenAI sprite pipeline and its operations portal come from. Both were migrated into this repo (`server/pipeline/`, `server/platform/`, `client/src/studio/`) rather than kept as a third app, and changes made there since are ported across periodically. The two copies are intentionally not identical: this one keeps its verified-login + `ADMIN_EMAILS` gate on the portal, accepts either spelling of each provider key, and adapts a handful of lines to this repo's stricter tsconfig. Commit messages on the ports record every deliberate divergence.
+- 🎨 **[Sprout_Dev_Platform](https://github.com/Neonat/Sprout_Dev_Platform)** — where the GenAI sprite pipeline and its operations portal come from. Both were migrated into this repo (`server/pipeline/`, `server/platform/`, `client/src/studio/`) rather than kept as a third app, and changes made there since are ported across periodically. The two copies are intentionally not identical: this one keeps its verified-login + superadmin gate on the portal, accepts either spelling of each provider key, and adapts a handful of lines to this repo's stricter tsconfig. Commit messages on the ports record every deliberate divergence.
 - 📚 **[sprout-knowledge-base](https://github.com/Kopi-O-Kosong-Beng/sprout-knowledge-base)** — the team's Obsidian vault: rubrics, use cases, design decisions, prof feedback, Q&As. When you wonder "why is it built this way?", the answer is there.

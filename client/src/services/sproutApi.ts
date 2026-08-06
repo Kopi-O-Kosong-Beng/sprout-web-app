@@ -162,6 +162,28 @@ export interface TicketResponse {
   refNumber: string;
 }
 
+export interface TicketStatus {
+  refNumber: string;
+  subject: string;
+  category: TicketCategory;
+  status: 'open' | 'resolved';
+  submittedAt: string | null;
+  /** When an operator marked it resolved. Null while open, and also null for
+   *  tickets resolved before this was tracked — so the UI must treat "resolved
+   *  with no date" as a real case rather than assuming one exists. */
+  resolvedAt: string | null;
+}
+
+/** Checks a ticket from the Contact page. The email is the proof of ownership —
+ *  reference numbers are a daily sequence and guessable on their own. */
+export async function getTicketStatus(input: {
+  refNumber: string;
+  email: string;
+}): Promise<TicketStatus> {
+  const { data } = await apiClient.post<TicketStatus>('/api/query/status', input);
+  return data;
+}
+
 export interface SignupInput {
   email: string;
   password: string;
@@ -182,15 +204,29 @@ export interface VerificationEmailResponse {
   message: string;
 }
 
+/** Which credential Firebase Auth actually accepts for this account. 'google'
+ *  means the password path is closed, whether or not one was ever set. */
+export type AuthProviderTag = 'password' | 'google';
+
 export interface AuthProfile {
+  /** Present only on the sign-in where auto-provisioning found the name it
+   *  derived from the email already taken and assigned a variant. Holds what
+   *  was asked for; cleared once the player has been told. */
+  displayNameAdjustedFrom?: string;
   uid: string;
   email: string;
   displayName: string;
   emailVerified: boolean;
-  /** Server-computed from its ADMIN_EMAILS allowlist. Decides where login lands
-   *  and whether the Admin nav link appears — it is not a permission. /api/admin
-   *  re-checks the allowlist on every request and answers 403 regardless. */
+  authProvider?: AuthProviderTag;
+  /** Server-computed: the Firestore `isSuperAdmin` flag OR the ADMIN_EMAILS
+   *  break-glass allowlist. Decides where login lands and whether the operator
+   *  nav appears — it is not a permission. /api/admin and /api/platform
+   *  re-resolve the grant on every request and answer 403 regardless. */
   isAdmin: boolean;
+  /** Alias of isAdmin — one privilege level, not two, since the merge folded
+   *  the operator tier into the superadmin grant. Advisory only: /api/admin and
+   *  /api/platform re-resolve the grant on every request. */
+  isSuperAdmin?: boolean;
   lastLogin?: string | null;
   lastLogout?: string | null;
 }
@@ -238,9 +274,20 @@ export async function listOwnedAvatars(
   return data;
 }
 
+/** One owned avatar (GET /api/avatar/:id). The scan result screen reads the
+ *  persisted record for its full stat block — the pipeline's `complete` event
+ *  only carries maxHealth/speed. */
 export async function getAvatar(avatarId: string): Promise<AvatarRecord> {
-  const { data } = await apiClient.get<AvatarRecord>(`/api/avatar/${avatarId}`);
+  const { data } = await apiClient.get<AvatarRecord>(
+    `/api/avatar/${encodeURIComponent(avatarId)}`
+  );
   return data;
+}
+
+/** Removes one owned avatar for good (DELETE /api/avatar/:id → 204).
+ *  The archive's shovel; the server answers 404 for anyone else's record. */
+export async function deleteAvatar(avatarId: string): Promise<void> {
+  await apiClient.delete(`/api/avatar/${encodeURIComponent(avatarId)}`);
 }
 
 export async function setDemoAvatars(
@@ -424,6 +471,12 @@ export async function resendVerification(): Promise<VerificationEmailResponse> {
   return data;
 }
 
+/** Confirms the player has seen the "your name was taken" notice, so it is not
+ *  shown again (POST /api/auth/display-name-notice/ack -> 204). */
+export async function acknowledgeDisplayNameNotice(): Promise<void> {
+  await apiClient.post('/api/auth/display-name-notice/ack');
+}
+
 export async function getCurrentUser(idToken?: string): Promise<AuthProfile> {
   // Without an explicit token the apiClient request interceptor attaches the
   // signed-in Firebase user's token automatically.
@@ -456,7 +509,13 @@ export interface AdminAccount {
   email: string;
   displayName: string;
   isVerified: boolean;
+  /** Holds the grant by either route. */
   isAdmin: boolean;
+  /** The persisted flag specifically — what promote/revoke writes. */
+  isSuperAdmin: boolean;
+  /** Granted by ADMIN_EMAILS. Revoke is refused for these: clearing the flag
+   *  would leave the allowlist still granting. */
+  isAllowlisted: boolean;
   pveXp: number;
   pveWins: number;
   pveLosses: number;
@@ -475,15 +534,79 @@ export interface DeleteAccountResult {
   profileDeleted: boolean;
 }
 
-/** Admin-only: 403 for anyone outside the server's ADMIN_EMAILS allowlist. */
+/** Superadmin-only: 403 for anyone without the flag or the allowlist. */
 export async function listAdminAccounts(): Promise<AdminAccountList> {
   const { data } = await apiClient.get<AdminAccountList>('/api/admin/users');
+  return data;
+}
+
+/** Grant or revoke the Firestore superadmin flag on another account. The
+ *  server refuses your own row, and refuses to revoke an allowlisted address
+ *  (clearing the flag would not remove the grant). */
+export async function setAccountSuperAdmin(
+  uid: string,
+  isSuperAdmin: boolean
+): Promise<AdminAccount> {
+  const { data } = await apiClient.patch<AdminAccount>(
+    `/api/admin/users/${encodeURIComponent(uid)}/superadmin`,
+    { isSuperAdmin }
+  );
+  return data;
+}
+
+export interface ManagedTicket {
+  id: string;
+  refNumber: string;
+  name: string;
+  email: string;
+  organisation?: string;
+  subject: string;
+  category: TicketCategory;
+  message: string;
+  status: 'open' | 'resolved';
+  submitterEmailStatus: 'pending' | 'sent' | 'failed';
+  adminEmailStatus: 'pending' | 'sent' | 'failed';
+  createdAt?: string;
+  resolvedAt?: string | null;
+}
+
+export async function listManagedTickets(): Promise<{
+  items: ManagedTicket[];
+  total: number;
+}> {
+  const { data } = await apiClient.get<{ items: ManagedTicket[]; total: number }>(
+    '/api/admin/tickets'
+  );
+  return data;
+}
+
+export async function setManagedTicketStatus(
+  id: string,
+  status: ManagedTicket['status']
+): Promise<ManagedTicket> {
+  const { data } = await apiClient.patch<ManagedTicket>(
+    `/api/admin/tickets/${encodeURIComponent(id)}/status`,
+    { status }
+  );
   return data;
 }
 
 export async function deleteAdminAccount(uid: string): Promise<DeleteAccountResult> {
   const { data } = await apiClient.delete<DeleteAccountResult>(
     `/api/admin/users/${encodeURIComponent(uid)}`
+  );
+  return data;
+}
+
+/** Asked only after a password login has already failed, to tell "wrong
+ *  password" apart from "this address is Google-only". Answers 'unknown' for
+ *  everything that is not Google-linked, including addresses with no account. */
+export async function getSignInMethod(
+  email: string
+): Promise<{ method: 'google' | 'unknown' }> {
+  const { data } = await apiClient.post<{ method: 'google' | 'unknown' }>(
+    '/api/auth/sign-in-method',
+    { email }
   );
   return data;
 }

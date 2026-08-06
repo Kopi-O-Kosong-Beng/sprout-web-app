@@ -1,5 +1,6 @@
 /** Firebase Admin is the only runtime database adapter for auth profiles. */
 import { randomUUID } from 'crypto';
+import { FieldValue } from 'firebase-admin/firestore';
 import { getDb } from '../firebase';
 import { buildAuditTimestamp } from '../utils/audit-timestamp';
 import {
@@ -16,11 +17,27 @@ import {
   type FirestoreSnapshotLike,
 } from './firestore-normalization';
 import type {
+  AuthProviderTag,
   AuthUserProfile,
   AuthUserRepository,
   CreateAuthUserProfile,
   PasswordHistoryEntry,
 } from '../models/auth';
+
+/** Older documents predate the field, so an absent value is not a defect — it
+ *  simply means "never observed", and the next /api/auth/me call fills it in. */
+function authProviderValue(
+  value: unknown,
+  documentId: string
+): AuthProviderTag | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (value === 'password' || value === 'google') return value;
+  throw invalidFirestoreDocument(
+    'users',
+    documentId,
+    'authProvider must be "password" or "google"'
+  );
+}
 
 function progressionValue(
   value: unknown,
@@ -47,6 +64,9 @@ export function decodeAuthUserProfile(
     id: snapshot.id,
     email: requireString(data.email, 'email', 'users', snapshot.id),
     displayName: requireString(data.displayName, 'displayName', 'users', snapshot.id),
+    ...(typeof data.displayNameAdjustedFrom === 'string' && data.displayNameAdjustedFrom
+      ? { displayNameAdjustedFrom: data.displayNameAdjustedFrom }
+      : {}),
     isVerified: requireBoolean(data.isVerified, 'isVerified', 'users', snapshot.id),
     pveXp: progressionValue(data.pveXp, 'pveXp', snapshot.id),
     pveWins: progressionValue(data.pveWins, 'pveWins', snapshot.id),
@@ -89,6 +109,14 @@ export function decodeAuthUserProfile(
     createdAt: normalizeOptionalTimestamp(data.createdAt, 'createdAt', 'users', snapshot.id),
     updatedAt: normalizeOptionalTimestamp(data.updatedAt, 'updatedAt', 'users', snapshot.id),
   };
+  const authProvider = authProviderValue(data.authProvider, snapshot.id);
+  if (authProvider !== undefined) {
+    profile.authProvider = authProvider;
+  }
+  // Strictly `=== true`. Anything else — absent, null, the string "true" — is
+  // not a grant: this field is the whole authority behind account deletion and
+  // Firestore cleanup, so it fails closed on any value it does not recognise.
+  profile.isSuperAdmin = data.isSuperAdmin === true;
   if (data.resetOtpFailedAttempts !== undefined) {
     profile.resetOtpFailedAttempts = requireFiniteNumber(
       data.resetOtpFailedAttempts,
@@ -186,6 +214,16 @@ const firestoreAuthUserRepository: AuthUserRepository = {
     return decodeAuthUserProfile(await reference.get());
   },
 
+  /** Clears the one-time "we renamed you" notice, once the client has shown
+   *  it. Deleting the field rather than flagging it false keeps the absent
+   *  case — which is every other account — the cheap one. */
+  async clearDisplayNameNotice(id: string): Promise<void> {
+    await getDb()
+      .collection('users')
+      .doc(id)
+      .update({ displayNameAdjustedFrom: FieldValue.delete() });
+  },
+
   async getById(id: string): Promise<AuthUserProfile | null> {
     const doc = await getDb().collection('users').doc(id).get();
     return doc.exists ? decodeAuthUserProfile(doc) : null;
@@ -217,6 +255,20 @@ const firestoreAuthUserRepository: AuthUserRepository = {
       .collection('users')
       .doc(id)
       .set({ isVerified: true, updatedAt: new Date().toISOString() }, { merge: true });
+  },
+
+  async setAuthProvider(id: string, authProvider: AuthProviderTag): Promise<void> {
+    await getDb()
+      .collection('users')
+      .doc(id)
+      .set({ authProvider, updatedAt: new Date().toISOString() }, { merge: true });
+  },
+
+  async setSuperAdmin(id: string, isSuperAdmin: boolean): Promise<void> {
+    await getDb()
+      .collection('users')
+      .doc(id)
+      .set({ isSuperAdmin, updatedAt: new Date().toISOString() }, { merge: true });
   },
 
   async setResetOtp(

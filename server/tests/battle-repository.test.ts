@@ -486,8 +486,13 @@ describe('Firestore battle repository', () => {
     );
 
     expect(result.session.status).toBe('won');
-    expect(discarded?.sets).toHaveLength(1);
-    expect(discarded?.updates).toHaveLength(1);
+    // Two writes, both discarded with the retried attempt: the battle session
+    // and the progression. The progression is a merge-set rather than an
+    // update so it is correct whether the row pre-existed or was seeded in
+    // this same transaction — what matters here is that the abandoned attempt
+    // contributed neither.
+    expect(discarded?.sets).toHaveLength(2);
+    expect(discarded?.updates).toHaveLength(0);
     await expect(storedSession()).resolves.toMatchObject({
       status: 'won',
       rewardApplied: true,
@@ -540,19 +545,45 @@ describe('Firestore battle repository', () => {
     });
   });
 
-  it('leaves the battle active when a terminal reward profile is missing', async () => {
+  /**
+   * This used to throw 409 from inside the transaction, rolling back the
+   * resolved battle with it — so the killing blow failed, and failed the same
+   * way on every retry, because the row was still missing. The all-or-nothing
+   * guarantee is kept: result and reward still commit together. There is
+   * simply a third answer now besides "both" and "neither" — create the
+   * missing half first.
+   */
+  it('seeds a missing progression row and finishes the battle', async () => {
     const { repository } = repositoryAt(ACTION_AT);
     const before = makeWinningSession();
     await seedSession(before);
 
-    await expect(
-      repository.applyAction(USER_ID, SESSION_ID, 'quick', before.turnNumber)
-    ).rejects.toMatchObject({
-      name: 'BattleRepositoryError',
-      code: 'battle_profile_missing',
-      status: 409,
+    const result = await repository.applyAction(
+      USER_ID,
+      SESSION_ID,
+      'quick',
+      before.turnNumber
+    );
+
+    // The battle finished, and the win paid out.
+    expect(result.session.status).toBe('won');
+    expect(result.session.rewardApplied).toBe(true);
+    expect(result.session.xpAwarded).toBe(20);
+
+    // The row it had to invent is a valid one, with the win as its whole record.
+    const profile = await storedProfile();
+    expect(profile).toMatchObject({
+      pveXp: 20,
+      pveWins: 1,
+      pveLosses: 0,
+      currentPveWinStreak: 1,
+      bestPveWinStreak: 1,
+      isVerified: false,
     });
-    await expect(storedSession()).resolves.toEqual(before);
+    // Identity is a placeholder derived from the uid, so it cannot collide
+    // with a real display name and /api/auth/me can overwrite it later.
+    expect(profile?.email).toBe(`${USER_ID}@unknown.sprout`);
+    expect(profile?.displayName).toBe(USER_ID);
   });
 
   it('abandons without progression and returns an already abandoned session unchanged', async () => {

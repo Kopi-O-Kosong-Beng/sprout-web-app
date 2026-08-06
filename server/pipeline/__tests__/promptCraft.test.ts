@@ -5,6 +5,7 @@ import {
   buildInstruction,
   nameOnlyPrompt,
 } from "../stages/promptCraft";
+import { descriptionBudgetFor } from "../promptStyle";
 import { GEMINI_TIMEOUT_MS } from "../deadline";
 
 /**
@@ -47,6 +48,16 @@ describe("prompt anatomy is selected, not prescribed", () => {
       expect(text).not.toMatch(/pok[eé]mon|nintendo|digimon|game freak/i);
     });
   }
+
+  /**
+   * The render budget is character-shaped (Flux's 800 minus the style suffix),
+   * so the instruction must state an explicit word bound. "2-3 sentences"
+   * alone routinely produced 600+ characters, which the render step then
+   * trimmed from the tail — where the isolation clause lives.
+   */
+  it("[black-box: spec] buildInstruction bounds the description length in words", () => {
+    expect(buildInstruction("Melastoma")).toMatch(/at most 65 words/i);
+  });
 });
 
 describe("cleanVlmPromptText", () => {
@@ -170,5 +181,90 @@ describe("promptCraft tier routing", () => {
 
     expect(result.tier).toBe("nameOnly");
     expect(result.prompt).toContain("original pixel-art creature");
+  });
+});
+
+/**
+ * When the crafted description overruns what Flux leaves for it, the model
+ * rewrites it (feature-aware) before the render step's positional trim ever
+ * runs. Compression must never fail the craft — a broken compressor costs
+ * nothing but the tail the trim would have taken anyway.
+ */
+describe("promptCraft render-budget compression", () => {
+  const budget = descriptionBudgetFor("flux")!;
+  const overlong = "A leafy creature. ".repeat(Math.ceil((budget + 100) / 18)).trim();
+  const short = "A leafy creature with a mossy round body.";
+
+  const mocks = (over: Partial<Record<"gemini" | "gemma" | "nameOnly" | "compress", any>> = {}) => ({
+    gemini: over.gemini ?? vi.fn().mockResolvedValue(overlong),
+    gemma: over.gemma ?? vi.fn().mockResolvedValue(overlong),
+    nameOnly: over.nameOnly ?? vi.fn().mockReturnValue("NameOnly prompt output"),
+    compress: over.compress ?? vi.fn().mockResolvedValue(short),
+  });
+
+  it("[black-box: spec] compresses an over-budget description via the model", async () => {
+    const callers = mocks();
+
+    const result = await craftPromptTiered("fake_photo", "Melastoma", "nvidia_key", "gemini_key", callers);
+
+    expect(callers.compress).toHaveBeenCalledWith(
+      overlong,
+      budget,
+      "gemini_key",
+      "nvidia_key",
+      undefined,
+    );
+    expect(result.prompt).toBe(short);
+    expect(result.tier).toBe("gemini");
+  });
+
+  it("[white-box: boundary] a description exactly at budget is not compressed", async () => {
+    const atBudget = "x".repeat(budget);
+    const callers = mocks({ gemini: vi.fn().mockResolvedValue(atBudget) });
+
+    const result = await craftPromptTiered("fake_photo", "Melastoma", "nvidia_key", "gemini_key", callers);
+
+    expect(callers.compress).not.toHaveBeenCalled();
+    expect(result.prompt).toBe(atBudget);
+  });
+
+  it("[fault-injection] a failed compression keeps the original prompt and the tier", async () => {
+    const callers = mocks({ compress: vi.fn().mockRejectedValue(new Error("out of credit")) });
+
+    const result = await craftPromptTiered("fake_photo", "Melastoma", "nvidia_key", "gemini_key", callers);
+
+    expect(result.prompt).toBe(overlong);
+    expect(result.tier).toBe("gemini");
+  });
+
+  it("[white-box: branch] a compression that fails to shorten is discarded", async () => {
+    const callers = mocks({ compress: vi.fn().mockResolvedValue(overlong + " and more") });
+
+    const result = await craftPromptTiered("fake_photo", "Melastoma", "nvidia_key", "gemini_key", callers);
+
+    expect(result.prompt).toBe(overlong);
+  });
+
+  it("[white-box: branch] injected callers without a compressor skip compression", async () => {
+    const { compress: _omitted, ...withoutCompress } = mocks();
+
+    const result = await craftPromptTiered(
+      "fake_photo",
+      "Melastoma",
+      "nvidia_key",
+      "gemini_key",
+      withoutCompress,
+    );
+
+    expect(result.prompt).toBe(overlong);
+  });
+
+  it("[black-box: spec] compression also guards the NVIDIA tier", async () => {
+    const callers = mocks({ gemini: vi.fn().mockRejectedValue(new Error("Google down")) });
+
+    const result = await craftPromptTiered("fake_photo", "Melastoma", "nvidia_key", "gemini_key", callers);
+
+    expect(result.tier).toBe("gemma");
+    expect(result.prompt).toBe(short);
   });
 });

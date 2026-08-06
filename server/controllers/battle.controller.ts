@@ -17,7 +17,11 @@ import {
   submitPveAction,
 } from '../services/battle.service';
 
-const PUBLIC_BOT_SPRITE_URL = '';
+/** The opponent's rendered art is presentation, not a gameplay secret — the
+ *  redaction that matters is the move list and the sanitized log below. The
+ *  URL is pinned here rather than passed through from the stored session so a
+ *  session recorded before the sprite existed still shows it. */
+const PUBLIC_BOT_SPRITE_URL = '/sprites/thornback.png';
 
 export interface PublicBattlePlayer {
   id: string;

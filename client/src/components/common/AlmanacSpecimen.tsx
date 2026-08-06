@@ -59,7 +59,7 @@ export function AlmanacSpecimen({
           {entry.spriteUrl ? (
             <img
               src={entry.spriteUrl}
-              alt={`Pixel-art sprite of ${entry.speciesName}`}
+              alt={`Pixel-art Plantemon of ${entry.speciesName}`}
               className="pixelated h-48 w-48 object-contain sm:h-64 sm:w-64"
             />
           ) : (
@@ -101,7 +101,7 @@ export function AlmanacSpecimen({
                 ] as const
               ).map(([label, value]) => (
                 <div key={label} className="border-2 border-white/15 px-2 py-2 text-center">
-                  <dt className="font-pixel text-[8px] text-white/40">{label}</dt>
+                  <dt className="font-pixel text-[9px] text-white/40">{label}</dt>
                   <dd className="font-pixel mt-1 text-sm">{value}</dd>
                 </div>
             ))}

@@ -2,8 +2,13 @@ import bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 import authUserRepository from '../repositories/auth-users';
 import { send as sendEmail } from './email.service';
-import type { AuthUserProfile } from '../models/auth';
+import type { AuthProviderTag, AuthUserProfile } from '../models/auth';
 import { backgroundDispatcher } from '../utils/background-dispatch';
+
+export const GOOGLE_ONLY_LOGIN_MESSAGE =
+  'This email signs in with Google. Use "Continue with Google" below.';
+export const GOOGLE_ONLY_SIGNUP_MESSAGE =
+  'This email is already registered through Google. Continue with Google instead.';
 
 const RESET_OTP_TTL_MS = 15 * 60 * 1000;
 const PASSWORD_HISTORY_KEEP = 3;
@@ -46,6 +51,10 @@ export interface PublicProfile {
   email: string;
   displayName: string;
   emailVerified: boolean;
+  /** Present once, on the sign-in where the name was taken and a variant was
+   *  assigned. The client tells the player and clears it. */
+  displayNameAdjustedFrom?: string;
+  authProvider?: AuthProviderTag;
   lastLogin?: string | null;
   lastLogout?: string | null;
 }
@@ -90,6 +99,10 @@ function toPublicProfile(profile: AuthUserProfile): PublicProfile {
     email: profile.email,
     displayName: profile.displayName,
     emailVerified: profile.isVerified,
+    ...(profile.displayNameAdjustedFrom
+      ? { displayNameAdjustedFrom: profile.displayNameAdjustedFrom }
+      : {}),
+    ...(profile.authProvider ? { authProvider: profile.authProvider } : {}),
     lastLogin: profile.lastLogin ?? null,
     lastLogout: profile.lastLogout ?? null,
   };
@@ -132,8 +145,21 @@ async function deliverVerificationEmail(
       verificationEmailSent: true,
       message: 'Check your email for the verification link.',
     };
-  } catch {
-    console.error('[auth] verification email delivery failed');
+  } catch (err) {
+    // The error class and machine code name the failing stage (Firebase link
+    // generation vs the email transport) — without them nothing distinguishes
+    // "SMTP blocked" from "continue-URL not whitelisted", and this exact
+    // symptom shipped twice with an unexplained generic message. Codes only,
+    // never raw messages: Firebase embeds the recipient address in some of
+    // its message strings, and an email address does not belong in the log.
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : '';
+    const name = err instanceof Error ? err.name : typeof err;
+    console.error(
+      `[auth] verification email delivery failed — ${name}${code ? ` (${code})` : ''}`
+    );
     return {
       verificationEmailSent: false,
       message: failureMessage,
@@ -141,14 +167,67 @@ async function deliverVerificationEmail(
   }
 }
 
-async function getFirebaseLastSignInTime(uid: string): Promise<string | null> {
+/** Firebase Auth is the authority on how an account signs in; the Firestore
+ *  document only mirrors it. Google wins when both are linked, because that is
+ *  exactly the case where Firebase has dropped the password. */
+function providerFromRecord(providerIds: string[]): AuthProviderTag {
+  return providerIds.includes('google.com') ? 'google' : 'password';
+}
+
+interface FirebaseSignInFacts {
+  lastSignInTime: string | null;
+  authProvider: AuthProviderTag | null;
+}
+
+/** One Admin SDK read for both the login audit stamp and the provider tag —
+ *  /api/auth/me runs on every page load, so a second round trip would be paid
+ *  on each one. */
+async function getFirebaseSignInFacts(uid: string): Promise<FirebaseSignInFacts> {
   try {
     const authAdmin = await getFirebaseAuthAdmin();
     const firebaseUser = await authAdmin.getUser(uid);
-    return firebaseUser.metadata?.lastSignInTime ?? null;
+    return {
+      lastSignInTime: firebaseUser.metadata?.lastSignInTime ?? null,
+      authProvider: providerFromRecord(
+        (firebaseUser.providerData ?? []).map((entry) => entry.providerId)
+      ),
+    };
+  } catch {
+    return { lastSignInTime: null, authProvider: null };
+  }
+}
+
+async function getFirebaseLastSignInTime(uid: string): Promise<string | null> {
+  return (await getFirebaseSignInFacts(uid)).lastSignInTime;
+}
+
+/** Whether Firebase Auth already holds this address, and under which provider.
+ *  Returns null when no account exists. */
+async function lookupFirebaseProvider(email: string): Promise<AuthProviderTag | null> {
+  try {
+    const authAdmin = await getFirebaseAuthAdmin();
+    const firebaseUser = await authAdmin.getUserByEmail(email);
+    return providerFromRecord(
+      (firebaseUser.providerData ?? []).map((entry) => entry.providerId)
+    );
   } catch {
     return null;
   }
+}
+
+/** Login-screen hint, called only after a password attempt has already failed.
+ *
+ *  Deliberately narrow: it answers 'google' for Google-linked accounts and
+ *  'unknown' for everything else, so a password account and an address with no
+ *  account are indistinguishable. That keeps the existing anti-enumeration
+ *  stance for ordinary accounts while still letting the UI recover the one case
+ *  where "Invalid email or password" is a dead end.
+ */
+export async function lookupSignInMethod(
+  emailInput: string
+): Promise<{ method: 'google' | 'unknown' }> {
+  const provider = await lookupFirebaseProvider(normalizeEmail(emailInput));
+  return { method: provider === 'google' ? 'google' : 'unknown' };
 }
 
 export async function signup(input: SignupInput): Promise<SignupResult> {
@@ -157,6 +236,13 @@ export async function signup(input: SignupInput): Promise<SignupResult> {
   assertStrongPassword(input.password);
 
   try {
+    // Checked before the Firestore lookup: a Google account created by signing
+    // in (rather than by this endpoint) may have no profile document yet, so
+    // the generic "already exists" would be the only thing the user ever saw.
+    if ((await lookupFirebaseProvider(email)) === 'google') {
+      throw httpError(409, GOOGLE_ONLY_SIGNUP_MESSAGE);
+    }
+
     const existingEmail = await authUserRepository.getByEmail(email);
     if (existingEmail) {
       throw httpError(409, 'An account with this email already exists.');
@@ -181,6 +267,7 @@ export async function signup(input: SignupInput): Promise<SignupResult> {
       displayName,
       isVerified: false,
       passwordHash,
+      authProvider: 'password',
     });
     const verification = await deliverVerificationEmail(
       email,
@@ -220,29 +307,76 @@ export async function resendVerificationEmail(
   );
 }
 
+/**
+ * The requested display name, or the first free variant of it.
+ *
+ * Suffixes rather than rejects because this runs where no human is waiting to
+ * retype: an auto-provisioned account is mid-sign-in. Bounded so a popular
+ * prefix cannot turn one sign-in into an unbounded scan; past the bound the
+ * uid is appended, which is unique by construction and ends the search.
+ */
+const MAX_DISPLAY_NAME_ATTEMPTS = 25;
+
+export async function findFreeDisplayName(
+  requested: string,
+  uid?: string
+): Promise<string> {
+  const base = requested.trim() || 'player';
+  if (!(await authUserRepository.getByDisplayName(base))) return base;
+
+  for (let suffix = 2; suffix <= MAX_DISPLAY_NAME_ATTEMPTS; suffix += 1) {
+    const candidate = `${base}${suffix}`;
+    if (!(await authUserRepository.getByDisplayName(candidate))) return candidate;
+  }
+  return uid ? `${base}-${uid.slice(0, 6)}` : `${base}-${Date.now().toString(36)}`;
+}
+
 export async function getCurrentUserProfile(
   uid: string,
   email: string | undefined,
   emailVerified: boolean | undefined
 ): Promise<PublicProfile> {
+  const facts = await getFirebaseSignInFacts(uid);
   let profile = await authUserRepository.getById(uid);
   if (!profile) {
     const fallbackEmail = email ?? `${uid}@unknown.sprout`;
+    // Signup rejects a display name someone already has; this path took the
+    // email's local part and wrote it unchecked, so nat@gmail.com and
+    // nat@outlook.com both became "nat" — two identical rows on the
+    // leaderboard, and an almanac crediting a discovery to a name shared by
+    // two people. Same rule both ways in now, except that nobody is here to
+    // retype anything: a collision is resolved rather than refused.
+    const requested = fallbackEmail.split('@')[0];
+    const displayName = await findFreeDisplayName(requested);
     profile = await authUserRepository.createProfile({
       id: uid,
       email: normalizeEmail(fallbackEmail),
-      displayName: fallbackEmail.split('@')[0],
+      displayName,
       isVerified: emailVerified === true,
       passwordHash: '',
+      // Recorded only when it had to be changed, so the client can say so once
+      // and then clear it. Nobody chose this name, so being told is the least
+      // it is owed.
+      ...(displayName === requested ? {} : { displayNameAdjustedFrom: requested }),
+      ...(facts.authProvider ? { authProvider: facts.authProvider } : {}),
     });
   }
   if (emailVerified === true && !profile.isVerified) {
     await authUserRepository.markVerified(uid);
     profile = { ...profile, isVerified: true };
   }
-  const lastSignInTime = await getFirebaseLastSignInTime(uid);
-  if (lastSignInTime) {
-    profile = (await authUserRepository.recordLogin(uid, lastSignInTime)) ?? profile;
+  // This is where a Google takeover of a password account gets noticed: the
+  // profile still says 'password', Firebase now reports google.com, and the
+  // document is corrected rather than deleted. Deleting it would throw away the
+  // archive, battle history and progression that hang off this uid — the
+  // account is the same account, only the credential changed.
+  if (facts.authProvider && profile.authProvider !== facts.authProvider) {
+    await authUserRepository.setAuthProvider(uid, facts.authProvider);
+    profile = { ...profile, authProvider: facts.authProvider };
+  }
+  if (facts.lastSignInTime) {
+    profile =
+      (await authUserRepository.recordLogin(uid, facts.lastSignInTime)) ?? profile;
   }
   return toPublicProfile(profile);
 }

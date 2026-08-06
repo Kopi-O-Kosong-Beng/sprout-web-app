@@ -7,6 +7,7 @@ import {
   handleEnableDemoAvatars,
   handleListAvatars,
   handleGetAvatar,
+  handleDeleteAvatar,
 } from '../controllers/avatar.controller';
 
 const router = Router();
@@ -24,5 +25,6 @@ router.delete('/demo', requireDemoTools, authMiddleware, handleDisableDemoAvatar
 router.use(authMiddleware);
 router.get('/', handleListAvatars);
 router.get('/:avatarId', handleGetAvatar);
+router.delete('/:avatarId', handleDeleteAvatar);
 
 export default router;

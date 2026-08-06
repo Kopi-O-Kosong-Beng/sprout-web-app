@@ -43,13 +43,26 @@ function createAuthMiddleware(options: AuthMiddlewareOptions = {}): RequestHandl
     const devUid = req.header('x-dev-uid');
 
     // Local-only bypass so the frontend can exercise protected routes pre-auth.
+    //
+    // `x-dev-email` is optional and travels with it. Without an email the
+    // caller can never be an admin, since isAdminEmail() has nothing to match
+    // — which is why the bypass could not reach /admin before. Supplying one
+    // lets a local sign-in stand in for an allowlisted account, and the email
+    // still has to BE on ADMIN_EMAILS to count, so this hands out no authority
+    // the allowlist has not already granted.
+    //
+    // Both conditions above keep it local: a deployed server sets
+    // NODE_ENV=production, and render.yaml pins AUTH_DEV_BYPASS=false.
     if (
       allowBypass &&
       process.env.AUTH_DEV_BYPASS === 'true' &&
       process.env.NODE_ENV !== 'production' &&
       devUid
     ) {
-      req.user = { uid: devUid };
+      const devEmail = req.header('x-dev-email')?.trim();
+      req.user = devEmail
+        ? { uid: devUid, email: devEmail, emailVerified: true }
+        : { uid: devUid };
       next();
       return;
     }

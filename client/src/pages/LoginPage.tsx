@@ -19,17 +19,16 @@ export default function LoginPage() {
    *  A bounce always wins — being sent back to the page you were trying to
    *  reach beats any default, admin or not.
    *
-   *  Otherwise the two audiences split: admins run the account dashboard, and
-   *  players go to the in-game hub rather than back to `/`, the public landing
-   *  page they just came through. Signed-out visitors still enter at `/`; this
-   *  only decides where the door leads once you are through it.
+   *  Otherwise players land on `/`, which is the home page signed in as much as
+   *  it is the landing page signed out; the separate in-game hub it used to
+   *  point at is archived. Admins still get the account dashboard.
    *
    *  profile is null for the moment after a transient /api/auth/me failure, in
-   *  which case this falls to /home and the Admin nav link (same isAdmin flag)
+   *  which case this falls to `/` and the Admin nav link (same isSuperAdmin flag)
    *  is how an admin gets across. It is not a security boundary either way —
    *  the server re-checks ADMIN_EMAILS on every /api/admin call.
    */
-  const from = bouncedFrom ?? (profile?.isAdmin ? '/admin' : '/home');
+  const from = bouncedFrom ?? (profile?.isSuperAdmin ? '/admin' : '/');
 
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('demo@sprout.app');

@@ -21,15 +21,18 @@
  *  history — only the password and the verified flag are reasserted, so this
  *  doubles as "the admin locked themselves out" recovery.
  *
- *  This grants NO privilege by itself. Authority lives in the ADMIN_EMAILS
- *  allowlist (middleware/admin.middleware.ts), which the script checks and
- *  reports on but deliberately does not edit: a script that silently widened
- *  who can delete accounts would be a poor thing to have in a repo.
+ *  Privilege is opt-in, via `--superadmin`:
+ *    npm run seed:admin -w server -- sprout@gmail.com 'the-password' --superadmin
+ *
+ *  Without that flag the script grants nothing and only reports on the grants
+ *  the account already has. It still never edits ADMIN_EMAILS — the break-glass
+ *  allowlist is deployment config, and a script that silently widened who can
+ *  delete accounts would be a poor thing to have in a repo.
  */
 import '../env';
 import bcrypt from 'bcrypt';
 import authUserRepository from '../repositories/auth-users';
-import { isAdminEmail } from '../middleware/admin.middleware';
+import { isAdminEmail, isSuperAdminEmail } from '../middleware/admin.middleware';
 import { getAuthAdmin } from '../firebase';
 
 const DEFAULT_EMAIL = 'sprout@gmail.com';
@@ -41,13 +44,20 @@ interface SeedInput {
   email: string;
   password: string;
   displayName: string;
+  /** `--superadmin` sets isSuperAdmin on the profile. Opt-in rather than the
+   *  default: this script doubles as password recovery for an ordinary
+   *  account, and re-running it should never quietly hand out the console. */
+  superAdmin: boolean;
 }
 
 export function resolveSeedInput(
   argv: string[],
   env: NodeJS.ProcessEnv
 ): SeedInput {
-  const [emailArg, passwordArg, displayNameArg] = argv;
+  const superAdmin =
+    argv.includes('--superadmin') || env.SEED_ADMIN_SUPERADMIN === 'true';
+  const positional = argv.filter((arg) => !arg.startsWith('--'));
+  const [emailArg, passwordArg, displayNameArg] = positional;
   const email = (emailArg ?? env.SEED_ADMIN_EMAIL ?? DEFAULT_EMAIL)
     .trim()
     .toLowerCase();
@@ -84,7 +94,7 @@ export function resolveSeedInput(
     );
   }
 
-  return { email, password, displayName };
+  return { email, password, displayName, superAdmin };
 }
 
 function isUserNotFound(err: unknown): boolean {
@@ -163,15 +173,35 @@ async function run(): Promise<void> {
     `Admin account ${outcome}: ${input.email} (uid ${uid}), email verified, display name "${input.displayName}".`
   );
 
-  if (isAdminEmail(input.email)) {
-    console.log('ADMIN_EMAILS already lists this address — /admin will open.');
+  if (input.superAdmin) {
+    await authUserRepository.setSuperAdmin(uid, true);
+    console.log(
+      'Superadmin flag set — Studio, API Test, Ticket Manager and Admin will open.'
+    );
     return;
   }
+
+  if (isSuperAdminEmail(input.email)) {
+    console.log(
+      'SUPER_ADMIN_EMAILS lists this address, so the operator tools open via\n' +
+        'the break-glass allowlist even without the flag.'
+    );
+    return;
+  }
+
+  if (isAdminEmail(input.email)) {
+    console.warn(
+      '\nNOTE: this address is in ADMIN_EMAILS, which is advisory only and opens\n' +
+        'no operator surface on its own.'
+    );
+  }
+
   console.warn(
-    '\nWARNING: this address is NOT in ADMIN_EMAILS, so /api/admin will answer 403\n' +
-      'and the dashboard will stay empty. The allowlist fails closed by design.\n' +
-      `Add it to server/.env (and the deploy's env vars), then restart the server:\n\n` +
-      `  ADMIN_EMAILS=${input.email}\n`
+    '\nWARNING: this account has NO superadmin grant, so /api/admin will answer 403\n' +
+      'and the dashboard will stay empty. Both grants fail closed by design.\n' +
+      'Give it one of:\n\n' +
+      `  npm run seed:admin -w server -- ${input.email} '<password>' --superadmin\n` +
+      `  SUPER_ADMIN_EMAILS=${input.email}   (server/.env + deploy env, then restart)\n`
   );
 }
 

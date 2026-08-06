@@ -13,5 +13,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     clearMocks: true,
+    // The form suites type character-by-character through userEvent; on a dev
+    // machine that is also running both dev servers they brush the 5s default
+    // and flake, while passing in isolation and in CI. Timing headroom, not a
+    // license for slow tests.
+    testTimeout: 15_000,
   },
 });

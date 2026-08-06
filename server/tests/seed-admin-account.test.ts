@@ -16,6 +16,7 @@ describe('resolveSeedInput', () => {
       email: 'sprout@gmail.com',
       password: STRONG,
       displayName: 'Sprout Admin',
+      superAdmin: false,
     });
   });
 
@@ -30,6 +31,7 @@ describe('resolveSeedInput', () => {
       email: 'other@example.com',
       password: STRONG,
       displayName: 'Other Admin',
+      superAdmin: false,
     });
   });
 
@@ -69,4 +71,55 @@ describe('resolveSeedInput', () => {
       resolveSeedInput(['a@b.com', STRONG, 'x'.repeat(51)], {})
     ).toThrow(/Display name/);
   });
+});
+
+/**
+ * Privilege is opt-in. The script doubles as password recovery for an ordinary
+ * account, so re-running it must never quietly hand out the operator console.
+ */
+describe('resolveSeedInput superadmin flag', () => {
+  it('grants nothing by default', () => {
+    expect(resolveSeedInput(['a@b.com', STRONG], {}).superAdmin).toBe(false);
+  });
+
+  it('sets the flag when --superadmin is passed', () => {
+    expect(resolveSeedInput(['a@b.com', STRONG, '--superadmin'], {}).superAdmin).toBe(
+      true
+    );
+  });
+
+  /* The flag is filtered out before positionals are read, so it can sit
+   * anywhere on the line without being mistaken for the display name. */
+  it('accepts the flag in any position without consuming a positional', () => {
+    const resolved = resolveSeedInput(
+      ['--superadmin', 'a@b.com', STRONG, 'Real Name'],
+      {}
+    );
+
+    expect(resolved).toEqual({
+      email: 'a@b.com',
+      password: STRONG,
+      displayName: 'Real Name',
+      superAdmin: true,
+    });
+  });
+
+  it('also reads the flag from the environment', () => {
+    expect(
+      resolveSeedInput(['a@b.com', STRONG], { SEED_ADMIN_SUPERADMIN: 'true' })
+        .superAdmin
+    ).toBe(true);
+  });
+
+  /* Only the exact string 'true'. A stray SEED_ADMIN_SUPERADMIN=1 in a deploy
+   * env must not silently grant the console. */
+  it.each([['1'], ['yes'], ['TRUE'], ['']])(
+    'ignores SEED_ADMIN_SUPERADMIN=%p',
+    (value) => {
+      expect(
+        resolveSeedInput(['a@b.com', STRONG], { SEED_ADMIN_SUPERADMIN: value })
+          .superAdmin
+      ).toBe(false);
+    }
+  );
 });

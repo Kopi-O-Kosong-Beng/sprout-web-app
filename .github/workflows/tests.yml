@@ -83,6 +83,13 @@ jobs:
       - name: 'Group 7: admin account management + auth/query/email'
         run: npm exec -- firebase emulators:exec --project sprout-test --only firestore "node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/admin-api.test.ts tests/auth.test.ts tests/query.test.ts tests/email.test.ts"
 
+      # The sprite-asset pact lives in the pipeline's vitest half (it guards
+      # files the pipeline renders). No emulator, no Java, a few ms — but
+      # without this step the guard never ran in CI and seeded URLs could
+      # drift from disk again unnoticed.
+      - name: 'Group 9: sprite-asset pact (vitest, no emulator)'
+        run: npm exec -- vitest run pipeline/__tests__/spriteAssets.test.ts --coverage.enabled=false
+
   client-focused:
     name: Client focused suites (Vitest + Testing Library)
     runs-on: ubuntu-latest
@@ -102,6 +109,13 @@ jobs:
       - name: Install workspaces
         run: npm ci
         working-directory: .
+
+      # Vite strips types without checking them, so before this step `tsc` only
+      # ever ran inside `npm run build` — that is, on Vercel, after merge. A
+      # client type error passed every check here and failed the deploy instead
+      # (PR #14, TS2698 in ScanPage). Same command the build front-ends.
+      - name: Typecheck client
+        run: npm run typecheck
 
       - name: 'Group 5: BattlePage + AppHeader navigation lock'
         run: npm exec -- vitest run src/pages/BattlePage.test.tsx src/components/common/AppHeader.navigation-lock.test.tsx

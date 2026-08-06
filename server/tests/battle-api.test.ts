@@ -103,7 +103,7 @@ function expectPublicSession(session: Record<string, unknown>): void {
     expect.objectContaining({
       energy: expect.any(Number),
       maxEnergy: MAX_BATTLE_ENERGY,
-      spriteUrl: '',
+      spriteUrl: '/sprites/thornback.png',
     })
   );
 
@@ -269,7 +269,7 @@ describe('verified PVE battle API', () => {
     expect(response.body.bot).toMatchObject({
       name: 'Thornback',
       maxEnergy: MAX_BATTLE_ENERGY,
-      spriteUrl: '',
+      spriteUrl: '/sprites/thornback.png',
     });
     expect(response.body.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -433,7 +433,7 @@ describe('verified PVE battle API', () => {
       abandoned.body,
     ]) {
       expectPublicSession(session);
-      expect(session.bot.spriteUrl).toBe('');
+      expect(session.bot.spriteUrl).toBe('/sprites/thornback.png');
     }
   });
 
@@ -631,37 +631,39 @@ describe('verified PVE battle API', () => {
     expect(profileAfterRetry).toEqual(profile);
   });
 
-  it('maps a missing terminal reward profile to a stable error without partial state', async () => {
+  /**
+   * Deleting the progression row mid-battle used to make the killing blow 409
+   * forever: the throw rolled back the resolved battle with it, so every retry
+   * met the same missing row. The battle now finishes and the reward lands on
+   * a row seeded in the same transaction.
+   */
+  it('finishes a battle whose progression row vanished mid-session', async () => {
     const started = await startBattle();
     await getDb().collection('users').doc(userId).delete();
-    let lastPersistedSession = started.body;
-    let failed: Response | undefined;
+    let session = started.body;
 
-    for (let attempt = 0; attempt < 5 && failed === undefined; attempt += 1) {
+    // Play to a terminal state; no attempt may fail.
+    for (let attempt = 0; attempt < 40 && session.status === 'active'; attempt += 1) {
       const response = await request(app)
         .post(`/api/battle/pve/${started.body.id}/action`)
         .set('Authorization', authorization(userId))
-        .send({
-          moveId: 'quick',
-          expectedTurn: lastPersistedSession.turnNumber,
-        });
-      if (response.status === 409) failed = response;
-      else {
-        expect(response.status).toBe(200);
-        lastPersistedSession = response.body.session;
-      }
+        .send({ moveId: 'quick', expectedTurn: session.turnNumber });
+
+      expect(response.status).toBe(200);
+      session = response.body.session;
     }
 
-    expect(failed).toBeDefined();
-    expect(failed!.status).toBe(409);
-    expect(failed!.body).toEqual({ error: 'Battle profile is unavailable.' });
-    expect(JSON.stringify(failed!.body)).not.toMatch(
-      /firestore|transaction|profile_missing/i
-    );
-    const persisted = await request(app)
-      .get(`/api/battle/pve/${started.body.id}`)
-      .set('Authorization', authorization(userId));
-    expect(persisted.body).toEqual(lastPersistedSession);
+    // rewardApplied is internal bookkeeping and is not serialised to the
+    // client; xpAwarded is what the player is told, and the stored row below
+    // is the proof it was actually banked.
+    expect(['won', 'lost']).toContain(session.status);
+    expect(session.xpAwarded).toBeGreaterThan(0);
+
+    // The reward landed on a row the transaction had to create.
+    const profile = (await getDb().collection('users').doc(userId).get()).data();
+    expect(profile).toBeDefined();
+    expect(profile!.pveXp).toBe(session.xpAwarded);
+    expect(profile!.email).toBe(`${userId}@unknown.sprout`);
   });
 
   it('does not expose raw avatar repository failures', async () => {
@@ -805,5 +807,45 @@ describe('verified PVE battle API', () => {
       200,
       429,
     ]);
+  });
+});
+
+/**
+ * Leaving a battle used to share the move budget, so a player who spent it on
+ * moves could not abandon either — the only two controls a session has,
+ * exhausted together, with no way out but waiting the window down.
+ */
+describe('leaving a battle has its own budget', () => {
+  it('still abandons after the move limiter is exhausted', async () => {
+    const limitedApp = createRateLimitedBattleApp(1);
+    const avatarId = await seedAvatar({ ownerId: userId });
+
+    const started = await request(limitedApp)
+      .post('/api/battle/pve/start')
+      .set('Authorization', authorization(userId))
+      .send({ avatarId });
+    expect(started.status).toBe(201);
+    const { id, turnNumber } = started.body;
+
+    // Spend the single move allowed, then confirm the budget is gone.
+    await request(limitedApp)
+      .post(`/api/battle/pve/${id}/action`)
+      .set('Authorization', authorization(userId))
+      .send({ moveId: started.body.player.moves[0].id, expectedTurn: turnNumber });
+
+    const throttled = await request(limitedApp)
+      .post(`/api/battle/pve/${id}/action`)
+      .set('Authorization', authorization(userId))
+      .send({ moveId: started.body.player.moves[0].id, expectedTurn: turnNumber + 1 });
+    expect(throttled.status).toBe(429);
+
+    // The way out must still be open.
+    const abandoned = await request(limitedApp)
+      .post(`/api/battle/pve/${id}/abandon`)
+      .set('Authorization', authorization(userId))
+      .send({});
+
+    expect(abandoned.status).toBe(200);
+    expect(abandoned.body.status).toBe('abandoned');
   });
 });
