@@ -19,6 +19,7 @@
     "sprites:generate": "tsx scripts/generate-sprites.ts",
     "fuzz:live": "tsx scripts/fuzz-pipeline-live.ts",
     "check:email": "tsx scripts/check-email.ts",
+    "check:image": "tsx scripts/check-image.ts",
     "check:storage": "tsx scripts/check-storage.ts",
     "inspect:firestore": "tsx scripts/inspect-firestore.ts",
     "test": "npm run test:jest:emulator && npm run test:pipeline",
