@@ -2,7 +2,7 @@
   "name": "sprout-webapp",
   "version": "0.1.0",
   "private": true,
-  "description": "Sprout — Web Platform & B2B Showcase for Nature-Based Gamification (50.003 ESC C3T2)",
+  "description": "Sprout \u2014 Web Platform & B2B Showcase for Nature-Based Gamification (50.003 ESC C3T2)",
   "engines": {
     "node": "22.x"
   },
@@ -17,6 +17,12 @@
     "seed": "npm run seed:firestore -w server",
     "test": "npm run test:server && npm run test:client",
     "test:server": "npm test -w server",
-    "test:client": "npm test -w client"
+    "test:client": "npm test -w client",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
   }
 }
