@@ -96,7 +96,12 @@ function StudioLayout() {
     <div className="studio-shell">
       <SkipLink />
       <AppHeader />
-      <div className="studio-shell-body" id={MAIN_CONTENT_ID} tabIndex={-1}>
+      {/* No id here, unlike the other two shells: StudioPage renders its own
+          <main id="main-content">, and putting the id on this wrapper too made
+          it a duplicate — invalid, and the skip link resolved to whichever
+          came first, landing above the studio's own topbar rather than at the
+          content. The page owns the target here. */}
+      <div className="studio-shell-body">
         <Outlet />
       </div>
     </div>

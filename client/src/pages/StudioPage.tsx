@@ -5,10 +5,12 @@ import { AuthCard } from '../studio/components/AuthCard';
 import { PipelineStudio } from '../studio/components/PipelineStudio';
 import { AdminDashboard } from '../studio/components/AdminDashboard';
 import { UnitTests } from '../studio/components/UnitTests';
+import { FuzzTests } from '../studio/components/FuzzTests';
 import { PageHead, Spinner } from '../studio/components/ui';
 import { usePlatformStatus } from '../studio/hooks/usePlatformStatus';
 import {
   ADMIN_ROUTES,
+  FUZZ_ROUTE,
   ROUTES,
   STUDIO_ROUTES,
   TEST_ROUTE,
@@ -87,6 +89,8 @@ export default function StudioPage() {
 
     if (route === TEST_ROUTE) return <UnitTests />;
 
+    if (route === FUZZ_ROUTE) return <FuzzTests />;
+
     if (STUDIO_ROUTES.includes(route)) {
       return <PipelineStudio route={route} />;
     }
@@ -124,7 +128,13 @@ export default function StudioPage() {
           onRefresh={platform.refreshAll}
         />
 
-        <main id="main-content" className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+        {/* tabIndex={-1} so the shell's skip link can actually move focus
+            here; without it the browser scrolls but focus stays in the nav. */}
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="flex-1 px-4 py-6 sm:px-6 lg:px-8"
+        >
           <div className="mx-auto w-full max-w-[1400px]">
             {!loadingAuth && (
               <PageHead
