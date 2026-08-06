@@ -1,4 +1,10 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import {
   getTicketStatus,
   submitTicket,
@@ -9,10 +15,31 @@ import {
 import { extractApiError } from '../services/apiClient';
 import { MiniArchive } from '../components/common/PlantVisuals';
 
+/* These mirror the server's Joi rules in server/routes/query.routes.ts, which
+   are `.max(n)` on a JS string — so the unit is UTF-16 code units on both
+   sides, and an emoji costs two. That is a real limit (1000 emoji fills a
+   2000 "character" message), but it is the limit the server enforces, so
+   counting differently here would only invite a 400. What must NOT happen is
+   cutting a surrogate pair in half — see truncate() below. */
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_NAME_LENGTH = 100;
 const MAX_SUBJECT_LENGTH = 150;
 const MAX_ORGANISATION_LENGTH = 120;
+
+/** Cut to `max` UTF-16 units without splitting a surrogate pair.
+ *
+ *  A plain `.slice(0, 2000)` landing mid-emoji left a lone high surrogate,
+ *  which renders as the replacement character — the player watched a `�`
+ *  appear at the end of their own message. Dropping the orphan costs one unit
+ *  and keeps the text well-formed. */
+function truncate(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max);
+  const last = cut.charCodeAt(cut.length - 1);
+  // A high surrogate in final position has lost its partner to the cut.
+  const strandedHighSurrogate = last >= 0xd800 && last <= 0xdbff;
+  return strandedHighSurrogate ? cut.slice(0, -1) : cut;
+}
 
 /** Label text for a field the form will not submit without.
  *
@@ -47,6 +74,45 @@ export default function ContactPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refNumber, setRefNumber] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  /*
+    Back/Forward left the form and its own labels disagreeing: the browser
+    restores the typed values into the DOM, but this component remounts with
+    empty state, so the textarea showed 41 characters of text above a counter
+    reading 0/2000 — and typing one more character jumped it to 41/2000 as
+    React finally caught up with the DOM it had been ignoring.
+
+    Reading the restored values back into state settles that. It runs on mount
+    (the browser restores during load, before this fires) and again on a
+    persisted pageshow, which is the case where no remount happens at all.
+  */
+  useEffect(() => {
+    const syncFromRestoredDom = () => {
+      const form = formRef.current;
+      if (!form) return;
+      const read = (field: string) =>
+        (form.elements.namedItem(field) as HTMLInputElement | null)?.value ??
+        '';
+      // Only adopt a restored value; never clobber what the player has typed.
+      const adopt =
+        (setter: (v: string) => void, max: number) => (value: string) => {
+          if (value) setter(truncate(value, max));
+        };
+      adopt(setName, MAX_NAME_LENGTH)(read('name'));
+      adopt(setEmail, Number.MAX_SAFE_INTEGER)(read('email'));
+      adopt(setOrganisation, MAX_ORGANISATION_LENGTH)(read('organisation'));
+      adopt(setSubject, MAX_SUBJECT_LENGTH)(read('subject'));
+      adopt(setMessage, MAX_MESSAGE_LENGTH)(read('message'));
+    };
+
+    syncFromRestoredDom();
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) syncFromRestoredDom();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -106,7 +172,7 @@ export default function ContactPage() {
             </button>
           </div>
         ) : (
-          <form className="contact-form" onSubmit={handleSubmit}>
+          <form className="contact-form" ref={formRef} onSubmit={handleSubmit}>
             {/* Advice before the fields, not beside them. Told what to include
                 while the message box is still empty, someone writes it into
                 their first message; the same words in a side column are read
@@ -126,11 +192,22 @@ export default function ContactPage() {
                 aside beside it stranded above a screen of empty ground. */}
             <div className="field-row">
               <label>
-                <RequiredLabel>Name</RequiredLabel>
+                {/* Every capped field states its cap. Name, Subject and
+                    Organisation previously truncated in silence at the DOM
+                    level, so a pasted value simply lost its tail with nothing
+                    said. The count only appears once it is worth watching. */}
+                <RequiredLabel>
+                  Name{' '}
+                  {name.length > MAX_NAME_LENGTH / 2 &&
+                    `(${name.length}/${MAX_NAME_LENGTH})`}
+                </RequiredLabel>
                 <input
                   type="text"
+                  name="name"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) =>
+                    setName(truncate(e.target.value, MAX_NAME_LENGTH))
+                  }
                   placeholder="Your name"
                   maxLength={MAX_NAME_LENGTH}
                   required
@@ -140,6 +217,7 @@ export default function ContactPage() {
                 <RequiredLabel>Email</RequiredLabel>
                 <input
                   type="email"
+                  name="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
@@ -148,11 +226,18 @@ export default function ContactPage() {
               </label>
             </div>
             <label>
-              Organisation (optional)
+              Organisation (optional){' '}
+              {organisation.length > MAX_ORGANISATION_LENGTH / 2 &&
+                `(${organisation.length}/${MAX_ORGANISATION_LENGTH})`}
               <input
                 type="text"
+                name="organisation"
                 value={organisation}
-                onChange={(e) => setOrganisation(e.target.value)}
+                onChange={(e) =>
+                  setOrganisation(
+                    truncate(e.target.value, MAX_ORGANISATION_LENGTH)
+                  )
+                }
                 placeholder="Company, school, or team"
                 maxLength={MAX_ORGANISATION_LENGTH}
               />
@@ -173,11 +258,18 @@ export default function ContactPage() {
               </select>
             </label>
             <label>
-              <RequiredLabel>Subject</RequiredLabel>
+              <RequiredLabel>
+                Subject{' '}
+                {subject.length > MAX_SUBJECT_LENGTH / 2 &&
+                  `(${subject.length}/${MAX_SUBJECT_LENGTH})`}
+              </RequiredLabel>
               <input
                 type="text"
+                name="subject"
                 value={subject}
-                onChange={(e) => setSubject(e.target.value)}
+                onChange={(e) =>
+                  setSubject(truncate(e.target.value, MAX_SUBJECT_LENGTH))
+                }
                 placeholder="What is your query about?"
                 maxLength={MAX_SUBJECT_LENGTH}
                 required
@@ -189,8 +281,11 @@ export default function ContactPage() {
               </RequiredLabel>
               <textarea
                 rows={6}
+                name="message"
                 value={message}
-                onChange={(e) => setMessage(e.target.value.slice(0, MAX_MESSAGE_LENGTH))}
+                onChange={(e) =>
+                  setMessage(truncate(e.target.value, MAX_MESSAGE_LENGTH))
+                }
                 placeholder="Tell us what happened..."
                 required
               />

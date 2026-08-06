@@ -212,3 +212,49 @@ describe('ContactPage UC8 field set', () => {
     );
   });
 });
+
+/**
+ * The message cap is 2000 UTF-16 code units because that is exactly what the
+ * server's Joi rule counts (server/routes/query.routes.ts). Counting anything
+ * else here would only earn a 400. What must not happen is cutting an emoji
+ * in half on the way to that cap.
+ */
+describe('length caps', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    submitTicket.mockResolvedValue({ refNumber: 'SPR-1' });
+  });
+
+  it('does not strand half an emoji when trimming to the cap', async () => {
+    render(<ContactPage />);
+    const message = field(/^message/i) as HTMLTextAreaElement;
+
+    // 1999 plain characters plus a 2-unit emoji: the cap falls between the
+    // emoji's surrogates. Slicing there left a lone high surrogate, which the
+    // player saw as a "replacement character" at the end of their own text.
+    const overflowing = 'a'.repeat(1999) + '🌱';
+    await userEvent.setup().clear(message);
+    // Paste rather than type: 2000 keystrokes is far too slow, and paste is
+    // how a message this long actually arrives.
+    await userEvent.setup().click(message);
+    await userEvent.setup().paste(overflowing);
+
+    expect(message.value).not.toMatch(/[\uD800-\uDBFF]$/);
+    expect(message.value).toBe('a'.repeat(1999));
+    expect(screen.getByText(/1999\/2000/)).toBeInTheDocument();
+  });
+
+  it('shows a counter on Subject once it is worth watching', async () => {
+    const user = userEvent.setup();
+    render(<ContactPage />);
+
+    // Quiet while there is plenty of room…
+    expect(screen.queryByText(/\/150/)).not.toBeInTheDocument();
+
+    await user.click(field(/^subject/i));
+    await user.paste('s'.repeat(120));
+
+    // …and present once the cap is close enough to matter.
+    expect(screen.getByText(/120\/150/)).toBeInTheDocument();
+  });
+});

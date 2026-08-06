@@ -327,8 +327,16 @@ function Shelf({
 }) {
   return (
     <section className="relative">
-      {/* Slots sit directly on the plank, which is drawn behind their feet. */}
-      <div className="relative z-10 flex items-end justify-around">
+      {/*
+        Slots sit directly on the plank, which is drawn behind their feet.
+
+        `pb-2` matches the plank's own `-mt-2`, so the 8px the plank is pulled
+        up lands in empty padding rather than across the plant name — the last
+        thing in each column. The row paints above the plank (z-10), so the
+        name was never hidden, but the plank's dark edge ran straight through
+        the middle of the glyphs and read as a strikethrough.
+      */}
+      <div className="relative z-10 flex items-end justify-around pb-2">
         {plants.map((avatar, index) =>
           avatar ? (
             <button
@@ -360,7 +368,11 @@ function Shelf({
                   Demo
                 </span>
               )}
-              <span className="font-pixel text-outline max-w-full truncate px-1 text-[9px] text-white sm:text-[9px]">
+              {/* `w-full`, not `max-w-full`: truncate needs a definite width
+                  to clip against. Without one a long binomial ("Papilionanthe
+                  teres") sized the span to its own text and overhung the
+                  slot's left edge instead of ellipsing. */}
+              <span className="font-pixel text-outline block w-full truncate px-1 text-center text-[9px] text-white sm:text-[9px]">
                 {avatar.name}
               </span>
             </button>

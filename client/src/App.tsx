@@ -19,6 +19,7 @@ import BackendTestPage from './pages/BackendTestPage';
 import AdminPage from './pages/AdminPage';
 import TicketManagerPage from './pages/TicketManagerPage';
 import StudioPage from './pages/StudioPage';
+import NotFoundPage from './pages/NotFoundPage';
 import './App.css';
 
 /** The nav is eight tab stops, repeated on every page, and a keyboard user had
@@ -182,6 +183,13 @@ function App() {
                     only the "where do I rank" panel needs a session, and the API
                     returns an empty standing for callers without one. */}
                 <Route path="/leaderboard" element={<LeaderboardPage />} />
+                {/* The nav labels this tab "Ranking", so /ranking is what a
+                    visitor types or bookmarks after reading it. It used to
+                    fall through to the catch-all and land on the home page. */}
+                <Route
+                  path="/ranking"
+                  element={<Navigate to="/leaderboard" replace />}
+                />
               </Route>
 
               <Route element={<StudioLayout />}>
@@ -195,7 +203,12 @@ function App() {
                 />
               </Route>
 
-              <Route path="*" element={<Navigate to="/" replace />} />
+              {/* A real 404 rather than a silent redirect home. Inside
+                  DocumentLayout so the page keeps the nav and the skip link —
+                  the whole point is to give someone who is lost a way out. */}
+              <Route element={<DocumentLayout />}>
+                <Route path="*" element={<NotFoundPage />} />
+              </Route>
             </Routes>
           </NavigationLockProvider>
         </ToastProvider>
