@@ -1,16 +1,47 @@
 services:
   - type: web
     name: sprout-backend
-    runtime: node
+    # Docker, not the Node buildpack (changed 2026-08-06).
+    #
+    # Render has always run this service in a container — it built one from our
+    # source using a buildpack we never saw or controlled. So this is not
+    # "adding containers"; it is taking ownership of the recipe. The base image,
+    # the Node patch version, the OS libraries beneath sharp's libvips, and the
+    # user the process runs as are now declared in server/Dockerfile and
+    # reviewed like any other code.
+    #
+    # The image is built and smoke-tested on every PR by
+    # .github/workflows/docker.yml — non-root, liveness answering with no
+    # credentials present, and a clean SIGTERM stop are all asserted there
+    # before anything reaches this file.
+    #
+    # ROLLBACK, if a deploy misbehaves: revert this one commit. It touches
+    # nothing else. Manually, that is `runtime: node` plus
+    #     buildCommand: npm install --include=dev && npm run build -w server
+    #     startCommand: npm start -w server
+    # and dropping dockerfilePath/dockerContext. No application code depends on
+    # which path built it, and the env vars below are identical either way.
+    #
+    # WATCH ON FIRST DEPLOY: the build is heavier than the buildpack's (it
+    # resolves sharp and bcrypt from scratch), and the free tier is the smallest
+    # machine Render offers. If the build times out, that — not the image — is
+    # the thing to fix.
+    runtime: docker
+    # Context is the repository ROOT: the root package.json declares the npm
+    # workspaces, and an install rooted at server/ cannot resolve the graph.
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: .
     plan: free
     region: singapore
-    buildCommand: npm install --include=dev && npm run build -w server
-    startCommand: npm start -w server
     healthCheckPath: /api/health
     autoDeployTrigger: commit
     envVars:
       - key: NODE_ENV
         value: production
+      # Inert under `runtime: docker` — the FROM line in server/Dockerfile is
+      # the only thing deciding the Node version now. Retained so the rollback
+      # above restores a pinned runtime rather than whatever the buildpack would
+      # pick that week.
       - key: NODE_VERSION
         value: "22.13.1"
       - key: AUTH_DEV_BYPASS
