@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import errorMiddleware from './middleware/error.middleware';
+import { createReadinessHandler } from './routes/health.routes';
 import authRoutes from './routes/auth.routes';
 import queryRoutes from './routes/query.routes';
 import avatarRoutes from './routes/avatar.routes';
@@ -74,10 +75,19 @@ app.use(
   })
 );
 
-// 9.5 health check — the Checkoff 2 "ping"
+// 9.5 health check — the Checkoff 2 "ping". LIVENESS: is this process running?
+//
+// Stays deliberately dependency-free. render.yaml points `healthCheckPath` here,
+// and the platform restarts whatever fails it, so making this touch Firestore
+// would convert a slow minute at the database into a restart loop across every
+// instance. The dependency question lives at /api/health/ready instead — see
+// services/readiness.service.ts for the full reasoning.
 app.get('/api/health', (_req, res) =>
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() })
 );
+
+// READINESS: can this instance actually serve? Nothing restarts on this route.
+app.get('/api/health/ready', createReadinessHandler());
 
 // Feature routers (auth/upload/battle mount here as they land)
 app.use('/api/auth', authRoutes);

@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "Emulator configuration for the containerised Firestore emulator.",
+    "The host MUST be 0.0.0.0. The emulator defaults to binding 127.0.0.1,",
+    "which inside a container means the container itself — unreachable from",
+    "the api service on the compose network. There is no --host flag on",
+    "`firebase emulators:start`; this file is the supported way to set it."
+  ],
+  "emulators": {
+    "firestore": {
+      "host": "0.0.0.0",
+      "port": 8080
+    },
+    "hub": {
+      "host": "0.0.0.0",
+      "port": 4400
+    },
+    "ui": {
+      "enabled": false
+    }
+  }
+}
