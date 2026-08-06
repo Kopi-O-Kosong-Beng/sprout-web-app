@@ -127,10 +127,10 @@ docker pull ghcr.io/kopi-o-kosong-beng/sprout-web-app-server:latest
 | [`md/requirements.md`](md/requirements.md) | Endpoint-level specification |
 | [`md/checkoff.md`](md/checkoff.md) | Flow-by-flow walkthrough with file references |
 | [`docs/`](docs/) | Verification evidence records and design specs |
-| [`Sprout_Vault/`](Sprout_Vault/README.md) | **The decision record** — an Obsidian vault holding why each choice was made, with dated evidence labels |
+| [`obsidian-vault/`](obsidian-vault/README.md) | **The decision record** — an Obsidian vault holding why each choice was made, with dated evidence labels |
 
 The split is deliberate: the documents above explain *how* the system works,
-[`Sprout_Vault/`](Sprout_Vault/README.md) explains *why* it is the way it is —
+[`obsidian-vault/`](obsidian-vault/README.md) explains *why* it is the way it is —
 the arguments, the rejected alternatives, and the open questions.
 
 ## Repository layout
@@ -148,7 +148,7 @@ sprout-app/
 ├── md/              Feature and subsystem documentation
 ├── scripts/         One-off tooling and the E2E stack orchestrator
 ├── e2e/             Playwright end-to-end journeys
-├── Sprout_Vault/    Obsidian decision record (the "why")
+├── obsidian-vault/    Obsidian decision record (the "why")
 ├── render.yaml      Backend infrastructure (declarative)
 ├── vercel.json      Frontend hosting
 └── docker-compose.yml
