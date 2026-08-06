@@ -1,0 +1,80 @@
+# Live-mode pipeline fuzzing — MANUAL TRIGGER ONLY. THIS SPENDS API CREDITS.
+#
+# There is deliberately no `schedule:` and no `push:`. Every run is a full
+# Plant.id -> Gemini/Gemma -> Flux render per mutation, and there is no cache
+# in front of Flux (sprite-storage dedupes by species key only AFTER
+# generation), so cost scales linearly with `runs` and nothing amortises it.
+#
+# Trigger it from the Actions tab, or from the superadmin platform via the
+# GitHub API:
+#
+#   POST /repos/{owner}/{repo}/actions/workflows/fuzz-live.yml/dispatches
+#   { "ref": "main", "inputs": { "runs": "10" } }
+#
+# The deterministic, free counterpart runs on every PR inside tests.yml
+# ("Group 10"). That one is the regression gate; this one is exploration.
+
+name: fuzz (live pipeline)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'Mutations to run. Each is a full paid pipeline render.'
+        required: true
+        default: '10'
+      rng_seed:
+        description: 'Optional. Set only to REPLAY a previous finding; leave blank to explore new mutations.'
+        required: false
+        default: ''
+
+# One live run at a time. Two concurrent runs would double the spend for no
+# extra coverage, and cancel-in-progress is deliberately false: killing a run
+# midway still bills for the calls already made.
+concurrency:
+  group: fuzz-live
+  cancel-in-progress: false
+
+jobs:
+  fuzz-live:
+    name: Fuzz the real pipeline (paid)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Requires a GitHub Environment named "fuzz-live". Add required reviewers
+    # to it for an approval gate before anything is billed; without reviewers
+    # it still scopes these secrets to this one job.
+    environment: fuzz-live
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install workspaces
+        run: npm ci
+        working-directory: .
+
+      # Nothing is hardcoded and nothing is echoed. These names match what
+      # server/platform/env.ts already resolves, so the fuzzer reads its
+      # credentials through exactly the same path the server does.
+      - name: Run live fuzz
+        env:
+          PLANT_API_KEY: ${{ secrets.PLANT_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          GEMMA_API_KEY: ${{ secrets.GEMMA_API_KEY }}
+          FLUX_API_KEY: ${{ secrets.FLUX_API_KEY }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          # Must stay false, or the run would fuzz the mock and bill nothing
+          # while reporting success — a green run that proved nothing.
+          USE_MOCK_APIS: 'false'
+        run: |
+          npm run fuzz:live -- \
+            --confirm-spend \
+            --runs "${{ inputs.runs }}" \
+            ${{ inputs.rng_seed != '' && format('--rng-seed {0}', inputs.rng_seed) || '' }}
