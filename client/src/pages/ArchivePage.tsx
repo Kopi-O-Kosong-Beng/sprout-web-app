@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import BackButton from '../components/common/BackButton';
+import { Overlay } from '../components/common/Overlay';
 import {
   CaptureBadge,
   PlantAvatar,
@@ -214,6 +215,16 @@ export default function ArchivePage() {
   // to the button's edge — much narrower than the real content — and never
   // correct itself, since a `[]`-dependency effect never re-runs. Re-running
   // once data actually arrives fixes that.
+  //
+  // `isFilterOpen` is also a dependency, and gates the scroll listener below,
+  // for two reasons together: opening the panel needs a fresh measurement
+  // (the position could have gone stale while it sat closed), and the panel
+  // is `position: fixed` — glued to the viewport, blind to scrolling on its
+  // own — so without a live listener while it's open, scrolling the page
+  // leaves the button behind while the panel stays frozen where it was
+  // measured. Listening for scroll unconditionally would recompute on every
+  // scroll pixel of the whole page even while the panel sits off-screen,
+  // which is wasted work for a position nobody can see yet.
   useEffect(() => {
     function updateFilterPanelPosition() {
       if (!filterButtonRef.current) return;
@@ -235,8 +246,22 @@ export default function ArchivePage() {
 
     updateFilterPanelPosition();
     window.addEventListener('resize', updateFilterPanelPosition);
-    return () => window.removeEventListener('resize', updateFilterPanelPosition);
-  }, [settled, visibleAvatars.length]);
+    // The archive's own scrolling container is `.screen-scrollable` (the
+    // <main>, via `overflow-y: auto`), not `window` — and a `scroll` event
+    // fired on that element does not bubble, so a plain window listener would
+    // never see it. A capture-phase listener does: capturing fires on the way
+    // down to the target regardless of whether the event bubbles back up.
+    if (isFilterOpen) {
+      window.addEventListener('scroll', updateFilterPanelPosition, {
+        capture: true,
+        passive: true,
+      });
+    }
+    return () => {
+      window.removeEventListener('resize', updateFilterPanelPosition);
+      window.removeEventListener('scroll', updateFilterPanelPosition, { capture: true });
+    };
+  }, [settled, visibleAvatars.length, isFilterOpen]);
 
   const selected = isDetailClosed
     ? null
@@ -373,7 +398,7 @@ export default function ArchivePage() {
       )}
 
       {status === 'error' && (
-        <ArchiveModal titleId="archive-error-heading">
+        <Overlay size="md" labelledBy="archive-error-heading" className="text-center">
           <h2 id="archive-error-heading" className="font-pixel text-xs leading-relaxed">
             Archive unavailable
           </h2>
@@ -387,12 +412,14 @@ export default function ArchivePage() {
           >
             Retry
           </button>
-        </ArchiveModal>
+        </Overlay>
       )}
 
       {settled && avatars.length === 0 && !isEmptyStateDismissed && (
-        <ArchiveModal
-          titleId="archive-empty-heading"
+        <Overlay
+          size="md"
+          labelledBy="archive-empty-heading"
+          className="text-center"
           onDismiss={() => setIsEmptyStateDismissed(true)}
         >
           <h2 id="archive-empty-heading" className="font-pixel text-xs leading-relaxed">
@@ -409,7 +436,7 @@ export default function ArchivePage() {
           >
             Back to Home
           </button>
-        </ArchiveModal>
+        </Overlay>
       )}
 
       {settled && avatars.length > 0 && (
@@ -440,9 +467,15 @@ export default function ArchivePage() {
                 aria-haspopup="true"
                 aria-expanded={isFilterOpen}
                 onClick={() => setIsFilterOpen((open) => !open)}
+                // .pixel-button's own min-height: 2.75rem (the 44px touch-target
+                // floor) is unlayered CSS, so it clamps the h-[2.2rem] utility
+                // above regardless of value — only an inline style, which isn't
+                // subject to that cascade-layer ordering, can bring this one
+                // button below it to match the search bar exactly.
+                style={{ minHeight: '2.2rem' }}
                 className="press pixel-button pixel-button-accent-hover relative h-[2.2rem] px-3 text-[9px]"
               >
-                Filter/Sort
+                Filter
                 {hasActiveFilters && (
                   <span
                     aria-hidden="true"
@@ -472,7 +505,7 @@ export default function ArchivePage() {
                 inert={!isFilterOpen}
               >
                 <div className="flex items-center justify-between">
-                  <h2 className="font-pixel text-xs font-bold">Filter/Sort</h2>
+                  <h2 className="font-pixel text-xs font-bold">Filter</h2>
                   <button
                     type="button"
                     onClick={() => setIsFilterOpen(false)}
@@ -601,63 +634,6 @@ export default function ArchivePage() {
         />
       )}
     </main>
-  );
-}
-
-/**
- * A true overlay for states that need to visually pop above the whole
- * screen — the failed-load and true-empty states — rather than swapping
- * into the content area the way the loading spinner and the "no filter
- * matches" message do. The header (Back button, title) sits at a higher
- * z-index than this so it stays reachable even while the modal is open.
- *
- * `onDismiss` is optional: omit it for a state with nothing meaningful to
- * reveal behind it (a failed load), where Retry is the only way out.
- */
-function ArchiveModal({
-  titleId,
-  onDismiss,
-  children,
-}: {
-  titleId: string;
-  onDismiss?: () => void;
-  children: ReactNode;
-}) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    if (!onDismiss) return;
-    // An arrow const, not a `function` declaration: declarations are hoisted,
-    // so TypeScript will not carry the `!onDismiss` narrowing into one and the
-    // call below fails the build. Same shape as ScanPage's Overlay.
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onDismiss();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onDismiss]);
-
-  return (
-    <div
-      className="fixed inset-0 z-20 flex items-center justify-center bg-black/50 p-6"
-      onClick={onDismiss}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        onClick={(event) => event.stopPropagation()}
-        className="pixel-panel w-full max-w-md p-6 text-center focus:outline-3 focus:outline-offset-1 focus:outline-[color:var(--color-brand)]"
-      >
-        {children}
-      </div>
-    </div>
   );
 }
 

@@ -367,6 +367,7 @@ export function CaptureBadge({
 
   return (
     <span
+      data-testid="capture-badge"
       className={`font-pixel inline-block border-2 border-black px-1 text-[9px] ${className}`}
       style={{
         background: isUpload ? 'var(--color-hp-mid)' : 'var(--color-hp-high)',
