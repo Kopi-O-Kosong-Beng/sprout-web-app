@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { ToastProvider } from '../components/common/Toast';
@@ -106,6 +106,45 @@ async function startScan() {
   // Returned so a test can carry on interacting — the naming flow answers a
   // dialog after the run stops.
   return user;
+}
+
+function validFile() {
+  return new File(['fake-jpeg'], 'plant.jpg', { type: 'image/jpeg' });
+}
+
+function oversizedFile() {
+  const file = new File(['x'], 'plant.jpg', { type: 'image/jpeg' });
+  // Real 5MB+ fixture bytes aren't needed — only the reported size matters to
+  // validateUploadFile, and `size` is otherwise read-only on a File.
+  Object.defineProperty(file, 'size', { value: 6_000_000 });
+  return file;
+}
+
+/** Renders the page and opens the Upload dialog — the entry point every
+ *  upload test drives, the same way startScan() drives the Test button. */
+async function openUploadDialog() {
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <ScanPage />
+      </ToastProvider>
+    </MemoryRouter>
+  );
+  await user.click(screen.getByRole('button', { name: /^upload$/i }));
+  const dialog = await screen.findByRole('dialog');
+  return { user, dialog };
+}
+
+/** The dropzone is the dashed-border div wrapping "Drag a photo here" — same
+ *  .parentElement-from-text idiom used above to reach the ResultDialog's
+ *  backdrop. */
+function dropzoneFor(dialog: HTMLElement) {
+  return within(dialog).getByText(/drag a photo here/i).parentElement!;
+}
+
+function fileInputFor(dialog: HTMLElement) {
+  return dialog.querySelector('input[type="file"]') as HTMLInputElement;
 }
 
 describe('ScanPage save outcome', () => {
@@ -269,6 +308,23 @@ describe('ScanPage save outcome', () => {
     expect(screen.getByRole('button', { name: /generate/i })).toBeInTheDocument();
   });
 
+  /**
+   * The shared Overlay focuses its own panel on mount for every dialog it
+   * wraps — but NameDialog's <input autoFocus> already claims focus during
+   * React's synchronous commit, before that effect runs. An unguarded
+   * Overlay would yank focus back onto the panel div a tick later; this
+   * pins the input as the one that actually ends up focused.
+   */
+  it('keeps the name input focused, not the dialog panel', async () => {
+    scriptStream([
+      { event: 'step_start', step: '1' },
+      { event: 'needs_name', step: '1', error: 'Not identified as a plant.' },
+    ]);
+    await startScan();
+
+    expect(await screen.findByPlaceholderText(/rose, sunflower/i)).toHaveFocus();
+  });
+
   it('re-runs with the name the player typed', async () => {
     scriptStream([
       { event: 'step_start', step: '1' },
@@ -348,6 +404,143 @@ describe('ScanPage save outcome', () => {
       expect(
         screen.queryByRole('button', { name: /see it in your archive/i })
       ).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe('ScanPage upload dialog', () => {
+  beforeEach(() => {
+    streamPipeline.mockReset();
+    stubDemoImageLoading();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('rejects a dropped file of the wrong type', async () => {
+    const { dialog } = await openUploadDialog();
+
+    fireEvent.drop(dropzoneFor(dialog), {
+      dataTransfer: { files: [new File(['x'], 'plant.gif', { type: 'image/gif' })] },
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/JPEG, PNG, or WEBP/i);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(streamPipeline).not.toHaveBeenCalled();
+  });
+
+  it('rejects a browsed file that is too large', async () => {
+    const { dialog } = await openUploadDialog();
+
+    fireEvent.change(fileInputFor(dialog), { target: { files: [oversizedFile()] } });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/too large/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/5 MB/i);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(streamPipeline).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The bug this replaces: onDragLeave fired on every boundary crossing,
+   * including into a child of the dropzone (its own text/button) — so the
+   * highlight flickered off and back on while dragging a file over them, and
+   * onDragOver re-asserting the highlight on every repeated fire made it
+   * worse. A drag-depth counter fixes both: entering/leaving a nested child
+   * no longer nets out to "left the zone", and onDragOver no longer touches
+   * the highlight at all.
+   */
+  it('keeps the dropzone highlighted while crossing into and out of its own children', async () => {
+    const { dialog } = await openUploadDialog();
+    const zone = dropzoneFor(dialog);
+    const child = within(dialog).getByText(/drag a photo here/i);
+    const highlighted = () => zone.className.includes('border-[color:var(--color-brand)]');
+
+    fireEvent.dragEnter(zone);
+    expect(highlighted()).toBe(true);
+
+    // Repeated dragover while hovering must not be what's carrying the
+    // highlight — enter/leave alone should own it now.
+    fireEvent.dragOver(zone);
+    fireEvent.dragOver(zone);
+    expect(highlighted()).toBe(true);
+
+    // Crossing onto a child bubbles a second dragenter up to the zone —
+    // nesting one level deeper, not leaving.
+    fireEvent.dragEnter(child);
+    expect(highlighted()).toBe(true);
+
+    // Leaving the child alone must not zero out the count.
+    fireEvent.dragLeave(child);
+    expect(highlighted()).toBe(true);
+
+    // Only leaving the outer zone itself clears it.
+    fireEvent.dragLeave(zone);
+    expect(highlighted()).toBe(false);
+  });
+
+  it('accepts a valid dropped file and runs it as a web upload', async () => {
+    scriptStream([completeEvent()]);
+    const { dialog } = await openUploadDialog();
+
+    fireEvent.drop(dropzoneFor(dialog), { dataTransfer: { files: [validFile()] } });
+
+    expect(await screen.findByText(/web upload/i)).toBeInTheDocument();
+    expect(streamPipeline).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ source: 'web' }),
+      expect.any(Function),
+      expect.anything()
+    );
+  });
+
+  it('accepts a valid browsed file and runs it as a web upload', async () => {
+    scriptStream([completeEvent()]);
+    const { dialog } = await openUploadDialog();
+
+    fireEvent.change(fileInputFor(dialog), { target: { files: [validFile()] } });
+
+    expect(await screen.findByText(/web upload/i)).toBeInTheDocument();
+    expect(streamPipeline).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ source: 'web' }),
+      expect.any(Function),
+      expect.anything()
+    );
+  });
+
+  describe('dismissing the upload dialog', () => {
+    it('closes on a press outside the panel', async () => {
+      const { user, dialog } = await openUploadDialog();
+
+      await user.click(dialog.parentElement!);
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('stays open when the press lands on the panel itself', async () => {
+      const { user, dialog } = await openUploadDialog();
+
+      await user.click(within(dialog).getByText(/drag a photo here/i));
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('closes on Escape', async () => {
+      const { user } = await openUploadDialog();
+
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('closes on Cancel', async () => {
+      const { user, dialog } = await openUploadDialog();
+
+      await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
   });
 });

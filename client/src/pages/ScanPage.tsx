@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import BackButton from '../components/common/BackButton';
+import { Overlay } from '../components/common/Overlay';
 import { CaptureBadge, StatGrid, type PlantAvatarData } from '../components/common/PlantVisuals';
 import { useToast } from '../hooks/useToast';
 import {
@@ -756,9 +757,8 @@ function StepMarker({ state }: { state: 'done' | 'active' | 'pending' }) {
  * File fallback, with real client-side format/size checks (UC6 alt-flow 2a) —
  * the picker's `accept` attribute is only a hint, browsers don't enforce it,
  * so this is the only place that actually rejects a bad file before it ever
- * reaches the pipeline. Styled like Archive's pop-ups (`.pixel-panel` on a
- * dark backdrop) rather than reusing this page's own `Overlay`, which is
- * hardcoded to a narrower width than a comfortable dropzone needs.
+ * reaches the pipeline. `size="lg"` on the shared Overlay, since a comfortable
+ * dropzone needs more width/padding than the default.
  */
 function UploadDialog({
   onFileAccepted,
@@ -770,19 +770,13 @@ function UploadDialog({
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onCancel();
-    }
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onCancel]);
+  // Counts nested enter/leave pairs rather than toggling a plain boolean.
+  // `dragleave` fires on every boundary crossing, including into a child
+  // element of this dropzone (its own text/button) — a boolean flicked the
+  // highlight off and back on while dragging over those children. Only
+  // clearing it once every entered element has also been left keeps the
+  // highlight steady for as long as the pointer is anywhere inside the zone.
+  const dragDepth = useRef(0);
 
   function handleFile(file: File | undefined) {
     if (!file) return;
@@ -796,84 +790,81 @@ function UploadDialog({
   }
 
   return (
-    <div
-      className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-6"
-      onClick={onCancel}
-    >
+    <Overlay size="lg" onDismiss={onCancel} labelledBy="upload-dialog-heading">
+      <h2 id="upload-dialog-heading" className="font-pixel text-center text-xs leading-relaxed">
+        Upload a plant photo
+      </h2>
+
       <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="upload-dialog-heading"
-        tabIndex={-1}
-        onClick={(event) => event.stopPropagation()}
-        className="pixel-panel w-full max-w-md p-8 outline-none"
+        onDragEnter={(event) => {
+          event.preventDefault();
+          dragDepth.current += 1;
+          setIsDraggingOver(true);
+        }}
+        // Still required even though enter/leave now own the highlight:
+        // without preventDefault() here the browser never treats this as a
+        // valid drop target, and `drop` never fires at all.
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          dragDepth.current = Math.max(0, dragDepth.current - 1);
+          if (dragDepth.current === 0) setIsDraggingOver(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          dragDepth.current = 0;
+          setIsDraggingOver(false);
+          handleFile(event.dataTransfer.files?.[0]);
+        }}
+        className={`mt-4 flex flex-col items-center gap-3 border-4 border-dashed px-6 py-14 text-center transition-colors ${
+          isDraggingOver
+            ? 'border-[color:var(--color-brand)] bg-[color:var(--color-brand)]/10'
+            : 'border-black/40'
+        }`}
       >
-        <h2 id="upload-dialog-heading" className="font-pixel text-center text-xs leading-relaxed">
-          Upload a plant photo
-        </h2>
-
-        <div
-          onDragOver={(event) => {
-            event.preventDefault();
-            setIsDraggingOver(true);
-          }}
-          onDragLeave={() => setIsDraggingOver(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDraggingOver(false);
-            handleFile(event.dataTransfer.files?.[0]);
-          }}
-          className={`mt-4 flex flex-col items-center gap-3 border-4 border-dashed px-6 py-14 text-center transition-colors ${
-            isDraggingOver
-              ? 'border-[color:var(--color-brand)] bg-[color:var(--color-brand)]/10'
-              : 'border-black/40'
-          }`}
-        >
-          <p className="font-pixel text-[9px] leading-relaxed">Drag a photo here</p>
-          <p className="text-[9px] leading-relaxed opacity-70">or</p>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="press pixel-button px-3 py-2 text-[9px]"
-          >
-            Browse File
-          </button>
-        </div>
-
-        <p className="mt-3 text-center text-[8px] leading-relaxed opacity-60">
-          Accepted formats: JPEG, PNG, or WEBP · Maximum size: 5 MB
-        </p>
-
-        {validationError && (
-          <p
-            role="alert"
-            className="pixel-panel mt-3 px-3 py-2 text-center text-[9px] leading-relaxed text-red-700"
-          >
-            {validationError}
-          </p>
-        )}
-
+        <p className="font-pixel text-[9px] leading-relaxed">Drag a photo here</p>
+        <p className="text-[9px] leading-relaxed opacity-70">or</p>
         <button
           type="button"
-          onClick={onCancel}
-          className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
+          onClick={() => fileInputRef.current?.click()}
+          className="press pixel-button px-3 py-2 text-[9px]"
         >
-          Cancel
+          Browse File
         </button>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          hidden
-          onChange={(event) => {
-            handleFile(event.target.files?.[0]);
-            event.target.value = '';
-          }}
-        />
       </div>
-    </div>
+
+      <p className="mt-3 text-center text-[8px] leading-relaxed opacity-60">
+        Accepted formats: JPEG, PNG, or WEBP · Maximum size: 5 MB
+      </p>
+
+      {validationError && (
+        <p
+          role="alert"
+          className="pixel-panel mt-3 px-3 py-2 text-center text-[9px] leading-relaxed text-red-700"
+        >
+          {validationError}
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={onCancel}
+        className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
+      >
+        Cancel
+      </button>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        hidden
+        onChange={(event) => {
+          handleFile(event.target.files?.[0]);
+          event.target.value = '';
+        }}
+      />
+    </Overlay>
   );
 }
 
@@ -1003,15 +994,23 @@ function ResultDialog({
      * where it is only in the browser.
      */
     <Overlay onDismiss={onGenerateAnother} labelledBy="scan-result-title">
-      <div className="flex items-center justify-between gap-2">
+      {/*
+        grid-cols-[1fr_auto_1fr], not flex + flex-1: ← Back and × are
+        different widths, so centering the heading in whatever space is left
+        over after two unequal-width flex siblings put it visibly off-centre
+        toward the narrower side. Two equal 1fr side columns guarantee the
+        auto middle column — and the heading inside it — sits at the row's
+        true centre regardless of what the side buttons contain.
+      */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
         <button
           type="button"
           onClick={onLeave}
-          className="press pixel-button px-2 py-1 text-[9px]"
+          className="press pixel-button justify-self-start px-2 py-1 text-[9px]"
         >
           ← Back
         </button>
-        <h2 id="scan-result-title" className="flex-1 text-center text-xs">
+        <h2 id="scan-result-title" className="text-center text-xs">
           New Discovery!
         </h2>
         {/*
@@ -1024,7 +1023,7 @@ function ResultDialog({
           type="button"
           onClick={onGenerateAnother}
           aria-label="Close"
-          className="press pixel-button pixel-button-icon flex h-6 w-6 shrink-0 items-center justify-center text-sm leading-none"
+          className="press pixel-button pixel-button-icon flex h-6 w-6 shrink-0 items-center justify-center justify-self-end text-sm leading-none"
         >
           ×
         </button>
@@ -1126,53 +1125,5 @@ function ResultDialog({
         Download Sprite
       </a>
     </Overlay>
-  );
-}
-
-/**
- * The scan screen's modal shell.
- *
- * `onDismiss` makes the backdrop and Escape close it, which is what pressing
- * outside a box is expected to do everywhere else. Dialogs that have no safe
- * way to be dismissed — one that must be answered — simply do not pass it, and
- * then neither affordance is offered rather than being offered and ignored.
- *
- * The click is checked against the backdrop itself, so a press that starts on
- * the panel and drifts onto the scrim does not count as clicking outside.
- */
-function Overlay({
-  children,
-  onDismiss,
-  labelledBy,
-}: {
-  children: React.ReactNode;
-  onDismiss?: () => void;
-  labelledBy?: string;
-}) {
-  useEffect(() => {
-    if (!onDismiss) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onDismiss();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onDismiss]);
-
-  return (
-    <div
-      className="absolute inset-0 z-20 flex items-center justify-center bg-black/70 p-6"
-      onClick={onDismiss ? (event) => {
-        if (event.target === event.currentTarget) onDismiss();
-      } : undefined}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={labelledBy}
-        className="pixel-panel w-full max-w-xs p-4"
-      >
-        {children}
-      </div>
-    </div>
   );
 }

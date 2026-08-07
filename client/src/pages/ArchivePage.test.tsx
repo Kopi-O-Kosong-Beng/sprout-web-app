@@ -521,11 +521,15 @@ describe('ArchivePage species detail (UC4 step 3)', () => {
     });
     renderArchive();
 
-    expect(await screen.findAllByText('IRL Scan')).not.toHaveLength(0);
-    // `{ selector: 'span' }` because the Filter/Sort toolbar's Source toggle
-    // also has a "Web Upload" button — this checks the actual capture badge,
-    // not that unrelated filter control.
-    expect(screen.queryByText('Web Upload', { selector: 'span' })).not.toBeInTheDocument();
+    const badges = await screen.findAllByTestId('capture-badge');
+    // By test id, not text: the Filter/Sort toolbar's Source toggle also has
+    // a "Web Upload" button, and matching on text alone (even scoped to a
+    // `span`) is fragile against that unrelated control ever changing tag.
+    // Two badges render for one avatar — shelf pot and detail card — so this
+    // checks every one rather than a single query that would throw on the
+    // second match.
+    expect(badges.length).toBeGreaterThan(0);
+    badges.forEach((badge) => expect(badge).toHaveTextContent('IRL Scan'));
     expect(screen.queryByText(/expires in/i)).not.toBeInTheDocument();
   });
 
@@ -617,5 +621,86 @@ describe('ArchivePage species detail (UC4 step 3)', () => {
     await screen.findByRole('button', { name: /battle with fern ward/i });
     expect(screen.queryByText('Habitat')).not.toBeInTheDocument();
     expect(screen.queryByText('Conservation status')).not.toBeInTheDocument();
+  });
+});
+
+describe('ArchivePage sort options', () => {
+  /**
+   * All 12 sort options must produce pairwise-distinct orderings — with fewer
+   * than 4 avatars several options coincidentally collide on the same order,
+   * which would hide a mis-wired comparator (e.g. attack-desc silently reusing
+   * hp's). Insertion order below (Basil, Cactus, Dahlia, Aloe) is deliberately
+   * not equal to any of the 12 expected orders, so a `default: return 0` no-op
+   * bug in the switch is caught too, not just a swapped comparator.
+   */
+  const AVATARS = {
+    aloe: avatar({
+      id: 'aloe',
+      metadata: { displayName: 'Aloe' },
+      discoveredAt: '2026-01-01T00:00:00.000Z',
+      stats: { hp: 60, attack: 55, defense: 120, speed: 70 },
+    }),
+    basil: avatar({
+      id: 'basil',
+      metadata: { displayName: 'Basil' },
+      discoveredAt: '2026-03-01T00:00:00.000Z',
+      stats: { hp: 150, attack: 40, defense: 90, speed: 100 },
+    }),
+    cactus: avatar({
+      id: 'cactus',
+      metadata: { displayName: 'Cactus' },
+      discoveredAt: '2026-02-01T00:00:00.000Z',
+      stats: { hp: 30, attack: 150, defense: 60, speed: 30 },
+    }),
+    dahlia: avatar({
+      id: 'dahlia',
+      metadata: { displayName: 'Dahlia' },
+      discoveredAt: '2026-04-01T00:00:00.000Z',
+      stats: { hp: 100, attack: 90, defense: 150, speed: 140 },
+    }),
+  };
+
+  const SORT_PAGE: PaginatedAvatars = {
+    items: [AVATARS.basil, AVATARS.cactus, AVATARS.dahlia, AVATARS.aloe],
+    total: 4,
+    page: 1,
+    pageSize: 100,
+  };
+
+  const EXPECTED_ORDER: [string, string[]][] = [
+    ['discovered-newest', ['Dahlia', 'Basil', 'Cactus', 'Aloe']],
+    ['discovered-oldest', ['Aloe', 'Cactus', 'Basil', 'Dahlia']],
+    ['hp-desc', ['Basil', 'Dahlia', 'Aloe', 'Cactus']],
+    ['hp-asc', ['Cactus', 'Aloe', 'Dahlia', 'Basil']],
+    ['attack-desc', ['Cactus', 'Dahlia', 'Aloe', 'Basil']],
+    ['attack-asc', ['Basil', 'Aloe', 'Dahlia', 'Cactus']],
+    ['defense-desc', ['Dahlia', 'Aloe', 'Basil', 'Cactus']],
+    ['defense-asc', ['Cactus', 'Basil', 'Aloe', 'Dahlia']],
+    ['speed-desc', ['Dahlia', 'Basil', 'Aloe', 'Cactus']],
+    ['speed-asc', ['Cactus', 'Aloe', 'Basil', 'Dahlia']],
+    ['name-asc', ['Aloe', 'Basil', 'Cactus', 'Dahlia']],
+    ['name-desc', ['Dahlia', 'Cactus', 'Basil', 'Aloe']],
+  ];
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    apiMocks.listOwnedAvatars.mockResolvedValue(SORT_PAGE);
+  });
+
+  it.each(EXPECTED_ORDER)('orders the shelf by %s', async (sortOption, expectedNames) => {
+    const { user } = renderArchive();
+
+    // The default sort (discovered-newest) is already applied to the initial
+    // render, so this can't wait on a specific pot/heading without begging
+    // the question of what order is under test — wait on the Filter button
+    // instead, which only renders once the archive has settled with data.
+    await user.click(await screen.findByRole('button', { name: /^filter$/i }));
+    await user.selectOptions(screen.getByLabelText(/sort by/i), sortOption);
+
+    const potNames = screen
+      .getAllByRole('button', { name: /^Select /i })
+      .map((button) => button.getAttribute('aria-label'));
+
+    expect(potNames).toEqual(expectedNames.map((name) => `Select ${name}`));
   });
 });

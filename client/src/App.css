@@ -1091,19 +1091,19 @@
  */
 @keyframes sprite-hop {
   0% {
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
   35% {
-    transform: translateX(-50%) translateY(-6px);
+    transform: translateY(-13px);
   }
   60% {
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
   80% {
-    transform: translateX(-50%) translateY(-1.5px);
+    transform: translateY(-3.5px);
   }
   100% {
-    transform: translateX(-50%) translateY(0);
+    transform: translateY(0);
   }
 }
 
@@ -1118,8 +1118,11 @@
 
 .archive-pot:hover .plant-sprite,
 .archive-pot:focus-visible .plant-sprite {
-  /* translateX(-50%) is baked into the keyframes so the sprite keeps its
-     horizontal centering throughout the hop instead of losing it mid-bounce. */
+  /* Only a vertical bounce here: horizontal centering is the base rule's
+     standalone `translate: -50%` (see .plant-avatar .plant-sprite), which
+     composes independently of this `transform` animation rather than being
+     overridden by it — baking translateX(-50%) into the keyframes here would
+     double up with that and shove the sprite sideways during the hop. */
   animation: sprite-hop 450ms ease-out;
 }
 
