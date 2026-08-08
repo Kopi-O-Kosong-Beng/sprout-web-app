@@ -52,11 +52,20 @@ export function toPlantAvatarData(record: AvatarRecord): PlantAvatarData {
     expiresAt: record.expiresAt,
     battleEligible: record.battleEligible,
     isDemo: record.metadata?.isDemo === true,
-    // UC4 step 3 lists habitat and conservation status among the details.
-    // Absent for records whose species metadata predates those fields.
-    habitat: metadataString(record.metadata, 'habitat') ?? undefined,
+    /*
+      What Plant.id told us about the species. Every one is optional: records
+      saved before the pipeline persisted them carry none, and an unidentified
+      scan never gets them at all.
+
+      habitat and conservationStatus were read here until it turned out
+      Plant.id returns neither, so nothing could ever populate them.
+    */
     description: metadataString(record.metadata, 'description') ?? undefined,
-    conservationStatus:
-      metadataString(record.metadata, 'conservationStatus') ?? undefined,
+    bestLightCondition:
+      metadataString(record.metadata, 'bestLightCondition') ?? undefined,
+    bestSoilType: metadataString(record.metadata, 'bestSoilType') ?? undefined,
+    bestWatering: metadataString(record.metadata, 'bestWatering') ?? undefined,
+    toxicity: metadataString(record.metadata, 'toxicity') ?? undefined,
+    commonUses: metadataString(record.metadata, 'commonUses') ?? undefined,
   };
 }

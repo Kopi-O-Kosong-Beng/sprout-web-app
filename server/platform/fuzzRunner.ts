@@ -1,5 +1,5 @@
 /**
- * The fuzz runs behind the studio's Fuzz Testing page.
+ * The fuzz runs behind the studio's Fuzzy Testing page.
  *
  * Runs IN-PROCESS rather than shelling vitest, which the Unit Tests page does.
  * That is the whole reason this exists: each harness produces a structured

@@ -45,3 +45,6 @@ test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+
+# Local output from scripts/backdrop-experiment.ts — renders, not source.
+server/backdrop-experiment-out/

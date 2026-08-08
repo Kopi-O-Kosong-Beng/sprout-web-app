@@ -172,6 +172,61 @@ describe('per-user demo avatar set', () => {
     });
   });
 
+  /*
+    A field REMOVED from a template, which is the half the drift check above
+    could not see: it only iterates the template's own entries, so a key the
+    template no longer declares matched by never being looked at.
+
+    That made deletions silently ineffective on already-seeded records.
+    `habitat` and `conservationStatus` were dropped because Plant.id returns
+    neither — no real scan can produce them — but without this, every demo
+    record already in Firestore kept carrying them and kept rendering them in
+    the archive alongside plants that had none.
+  */
+  it('rewrites a demo record carrying a field the template no longer declares', async () => {
+    await avatarRepository.ensureDemoSet(USER_ID);
+    const template = DEMO_AVATAR_TEMPLATES[0];
+    const ref = demoRef(template);
+    await ref.set(
+      {
+        metadata: {
+          ...(await ref.get()).data()!.metadata,
+          habitat: 'Open fields and cultivated plots in full sun',
+          conservationStatus: 'Least Concern',
+        },
+      },
+      { merge: true }
+    );
+
+    const refreshed = await avatarRepository.ensureDemoSet(USER_ID);
+
+    await expectExactDemoSet(refreshed);
+    const metadata = (await ref.get()).data()!.metadata;
+    expect(metadata.habitat).toBeUndefined();
+    expect(metadata.conservationStatus).toBeUndefined();
+  });
+
+  /*
+    The counter-case, and the reason the check tolerates specific keys rather
+    than demanding an exact key set. upsertFromScan stamps lastSeenAt onto
+    whichever record matches a scanned species, and that can be a demo record.
+    Treating it as drift would rewrite the document on every ensureDemoSet
+    after any such scan, throwing the stamp away each time.
+  */
+  it('leaves a demo record alone when a scan has stamped lastSeenAt on it', async () => {
+    await avatarRepository.ensureDemoSet(USER_ID);
+    const ref = demoRef();
+    const seenAt = '2026-08-09T00:00:00.000Z';
+    await ref.set(
+      { metadata: { ...(await ref.get()).data()!.metadata, lastSeenAt: seenAt } },
+      { merge: true }
+    );
+
+    await avatarRepository.ensureDemoSet(USER_ID);
+
+    expect((await ref.get()).data()!.metadata.lastSeenAt).toBe(seenAt);
+  });
+
   it('accepts an equivalent demo record when Firestore map keys are reordered', async () => {
     await avatarRepository.ensureDemoSet(USER_ID);
     const ref = demoRef();

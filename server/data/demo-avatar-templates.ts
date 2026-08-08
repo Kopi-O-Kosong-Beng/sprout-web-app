@@ -52,8 +52,6 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
       taxonomy: 'flower',
       confidence: 0.97,
       locality: { city: 'Singapore', venue: 'Gardens by the Bay' },
-      habitat: 'Open fields and cultivated plots in full sun',
-      conservationStatus: 'Least Concern',
     },
   },
   {
@@ -68,8 +66,6 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
       taxonomy: 'tree',
       confidence: 0.93,
       locality: { city: 'Singapore', venue: 'Botanic Gardens' },
-      habitat: 'Temperate deciduous woodland',
-      conservationStatus: 'Least Concern',
     },
   },
   {
@@ -83,8 +79,6 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     metadata: {
       taxonomy: 'plant',
       confidence: 0.91,
-      habitat: 'Tropical rainforest understorey',
-      conservationStatus: 'Least Concern',
     },
   },
   {
@@ -98,8 +92,6 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     metadata: {
       taxonomy: 'tree',
       confidence: 0.89,
-      habitat: 'West African lowland rainforest',
-      conservationStatus: 'Least Concern',
     },
   },
   {
@@ -113,8 +105,6 @@ export const DEMO_AVATAR_TEMPLATES: DemoAvatarTemplate[] = [
     metadata: {
       taxonomy: 'fungus',
       confidence: 0.82,
-      habitat: 'Birch and conifer woodland, often near host trees',
-      conservationStatus: 'Not Evaluated',
     },
   },
 ];

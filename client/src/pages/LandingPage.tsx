@@ -38,7 +38,7 @@ const STEPS = [
 const FEATURES = [
   {
     title: 'Real species, real data',
-    body: 'Every Plantemon is a real plant underneath with its very own scientific name, family, habitat, conservation status and battle stats!',
+    body: 'Every Plantemon is a real plant underneath with its very own scientific name, family, care notes and battle stats!',
   },
   {
     title: 'Sprites generated per plant',

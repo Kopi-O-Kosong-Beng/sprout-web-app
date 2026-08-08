@@ -234,8 +234,57 @@ function isExactDemoRecord(
     metadata.photoUrl === demoPhotoUrl(template) &&
     Object.entries(template.metadata).every(([key, value]) =>
       hasMatchingValue(metadata[key], value)
-    )
+    ) &&
+    hasNoStaleMetadataKeys(metadata, template)
   );
+}
+
+/** Metadata keys `buildDemoAvatarRecord` adds on top of the template's own. */
+const DEMO_STRUCTURAL_METADATA_KEYS = [
+  'isDemo',
+  'version',
+  'templateId',
+  'displayName',
+  'presentationKey',
+  'photoUrl',
+] as const;
+
+/**
+ * Keys a demo record may legitimately acquire after seeding.
+ *
+ * `upsertFromScan` stamps `lastSeenAt` onto whichever record matches a scanned
+ * species, and that record can be a demo one — scan a real sunflower with the
+ * demo Helianthus present and it lands here. Tolerated rather than treated as
+ * drift, or every such scan would trigger a pointless rewrite.
+ */
+const DEMO_TOLERATED_METADATA_KEYS = ['lastSeenAt'] as const;
+
+/**
+ * Catches a field REMOVED from a template, which the checks above cannot see.
+ *
+ * They only iterate the template's own entries, so a key the template no longer
+ * declares still matches — nothing ever looks for a key that should not be
+ * there. That made template deletions silently ineffective on already-seeded
+ * records: dropping `habitat` and `conservationStatus` (Plant.id returns
+ * neither, so no real scan can ever produce them) left every existing demo
+ * record still carrying them, still rendering them in the archive, and no
+ * amount of re-running ensureDemoSet would clear it.
+ *
+ * Bumping DEMO_SET_VERSION would not have helped: `demoAvatarId` hashes the
+ * version into the document id, so a bump changes the id, and `removeDemoSet`
+ * computes ids from the current version too — the old documents would be
+ * orphaned in every existing user's archive with nothing able to reach them.
+ */
+function hasNoStaleMetadataKeys(
+  metadata: Record<string, unknown>,
+  template: DemoAvatarTemplate
+): boolean {
+  const permitted = new Set<string>([
+    ...Object.keys(template.metadata),
+    ...DEMO_STRUCTURAL_METADATA_KEYS,
+    ...DEMO_TOLERATED_METADATA_KEYS,
+  ]);
+  return Object.keys(metadata).every((key) => permitted.has(key));
 }
 
 interface DemoAvatarConflictError extends Error {

@@ -36,11 +36,21 @@ export interface PlantAvatarData {
   /** False once a temporary record has expired — the server's own verdict. */
   battleEligible?: boolean;
   isDemo?: boolean;
-  /** UC4 detail fields; optional because older records may not carry them. */
-  habitat?: string;
   /** Plant.id's prose. Held whole; shortened at the point of display. */
   description?: string;
-  conservationStatus?: string;
+  /*
+    Care notes, straight from the identification. All optional: a record saved
+    before these were persisted has none, and an unidentified scan never gets
+    them because the species name is a stand-in.
+
+    `habitat` and `conservationStatus` used to sit here. Plant.id returns
+    neither — see md/PLANT_DETAILS.md for what it would take to add them back.
+  */
+  bestLightCondition?: string;
+  bestSoilType?: string;
+  bestWatering?: string;
+  toxicity?: string;
+  commonUses?: string;
 }
 
 export const plantAvatars: PlantAvatarData[] = [

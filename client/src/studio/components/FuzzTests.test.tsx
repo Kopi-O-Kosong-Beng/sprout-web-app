@@ -205,7 +205,9 @@ describe('FuzzTests', () => {
     expect(within(table).getByText('truncate')).toBeVisible();
     expect(within(table).getByText('pixel_noise')).toBeVisible();
     // The per-strategy explanation, so the table is readable without the source.
-    expect(within(table).getByText(/must be rejected/i)).toBeVisible();
+    // Matched loosely on purpose: this asserts the description renders at all,
+    // not its exact wording, which is plain-English copy and will be reworded.
+    expect(within(table).getByText(/must be REFUSED/i)).toBeVisible();
   });
 
   it('surfaces a runner error instead of a silent no-op', async () => {
@@ -284,7 +286,7 @@ describe('FuzzTests suites', () => {
     expect(await screen.findByText(/3 findings worth triaging/i)).toBeVisible();
   });
 
-  it('shows the text suite case count and the ReDoS timing bound', async () => {
+  it('shows the text suite case count and the slow-validation bound', async () => {
     respondWith(textSummary());
     const user = userEvent.setup();
     render(<FuzzTests />);
@@ -295,8 +297,10 @@ describe('FuzzTests suites', () => {
     // query matched both.
     const casesTile = (await screen.findByText('Cases')).closest('.rounded-card') as HTMLElement;
     expect(within(casesTile).getByText('93')).toBeVisible();
-    // A time bound nobody reports is a bound nobody notices moving.
-    expect(screen.getByText(/ReDoS bound 250ms/i)).toBeVisible();
+    // A time bound nobody reports is a bound nobody notices moving. The label
+    // dropped the word "ReDoS" — it meant nothing to a reader who had not been
+    // told what it was — but the 250ms figure still has to be on screen.
+    expect(screen.getByText(/limit 250ms/i)).toBeVisible();
   });
 
   it('hides the run-count field for the fixed-size text suite', async () => {

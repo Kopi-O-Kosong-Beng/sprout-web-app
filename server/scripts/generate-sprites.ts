@@ -156,7 +156,7 @@ async function renderEntry(
     serverEnv.withoutbgKey,
     deadline
   );
-  const finished = await finishSprite(cutout.png);
+  const finished = await finishSprite(cutout.png, { keyBackdrop: cutout.removeBgOk });
 
   await writeFile(outputPath, finished);
   return { model: render.model, cutout: cutout.removeBgOk, bytes: finished.length };
