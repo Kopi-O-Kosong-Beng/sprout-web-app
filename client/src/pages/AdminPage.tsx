@@ -512,10 +512,10 @@ function AdminAlmanacPanel() {
               </p>
               <ul>
                 {almanac.offTaxonomy.map((entry) => (
-                  <li key={entry.speciesId}>
+                  <li key={entry.speciesKey}>
                     <em>{entry.speciesName}</em> — {entry.discoveryCount} scan
-                    {entry.discoveryCount === 1 ? '' : 's'}, first by{' '}
-                    {entry.discoveredByName}
+                    {entry.discoveryCount === 1 ? '' : 's'}, first seen{' '}
+                    {new Date(entry.discoveredAt).toLocaleDateString()}
                   </li>
                 ))}
               </ul>

@@ -339,3 +339,86 @@ describe('AdminPage operations panels', () => {
     expect(screen.getByText('Not yet found')).toBeInTheDocument();
   });
 });
+
+/*
+ * A client/server contract drift that TypeScript could not catch, because the
+ * client type was hand-written and simply wrong.
+ *
+ * sproutApi declared offTaxonomy entries as { speciesId, discoveredByName },
+ * but the server sends { speciesKey, ... } and no finder name at all
+ * (OffTaxonomyDiscovery in server/services/almanac.service.ts). Two visible
+ * consequences: every row got key={undefined}, and the line ended "first by "
+ * with nothing after it.
+ */
+describe('admin almanac off-taxonomy rows', () => {
+  it('keys rows on the field the server actually sends', async () => {
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => {});
+    apiMocks.getAdminAlmanac.mockResolvedValue({
+      total: 2,
+      discovered: 1,
+      species: [
+        {
+          id: 'sp-1',
+          speciesName: 'Nephrolepis exaltata',
+          commonName: 'Boston fern',
+          family: 'Nephrolepidaceae',
+          discovered: true,
+          discoveryCount: 2,
+          discoveredByName: 'Ada',
+          discoveredAt: '2026-07-01T00:00:00.000Z',
+          growthForm: 'fern',
+          origin: 'native',
+          status: 'common',
+          spriteUrl: '',
+          stats: { hp: 1, attack: 1, defense: 1, speed: 1 },
+        },
+      ],
+      offTaxonomy: [
+        {
+          speciesKey: 'cymbidium_devonianum',
+          speciesName: 'Cymbidium devonianum',
+          discoveredAt: '2026-08-05T00:00:00.000Z',
+          discoveryCount: 1,
+        },
+      ],
+      source: 'test',
+    });
+
+    renderAdmin();
+
+    expect(await screen.findByText(/Cymbidium devonianum/)).toBeVisible();
+    // No React key warning: undefined keys break list reconciliation, which is
+    // how the wrong row keeps the wrong state after a re-render.
+    const keyWarnings = warn.mock.calls.filter((c) =>
+      String(c[0]).includes('unique "key"')
+    );
+    expect(keyWarnings).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('does not render a dangling "first by" with no name', async () => {
+    apiMocks.getAdminAlmanac.mockResolvedValue({
+      total: 1,
+      discovered: 0,
+      species: [],
+      offTaxonomy: [
+        {
+          speciesKey: 'grevillea_banksii',
+          speciesName: 'Grevillea banksii',
+          discoveredAt: '2026-08-05T00:00:00.000Z',
+          discoveryCount: 3,
+        },
+      ],
+      source: 'test',
+    });
+
+    renderAdmin();
+
+    const row = await screen.findByText(/Grevillea banksii/);
+    const text = row.closest('li')!.textContent ?? '';
+    expect(text).toMatch(/3 scans/);
+    // The old copy promised a finder the payload never carried.
+    expect(text).not.toMatch(/first by\s*$/);
+    expect(text).toMatch(/first seen/);
+  });
+});

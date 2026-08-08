@@ -339,10 +339,15 @@ export interface AlmanacSummary {
 
 export interface AdminAlmanac extends Omit<AlmanacSummary, 'species'> {
   species: AlmanacEntryDetail[];
+  /* Mirrors OffTaxonomyDiscovery in server/services/almanac.service.ts.
+     It previously declared `speciesId` and `discoveredByName`, neither of
+     which the server sends — the payload carries `speciesKey` and no finder
+     name at all. Nothing caught it: the type is hand-written, so TypeScript
+     was checking the UI against a fiction. The cost was a React key of
+     `undefined` on every row and a "first by" line that rendered blank. */
   offTaxonomy: Array<{
-    speciesId: string;
+    speciesKey: string;
     speciesName: string;
-    discoveredByName: string;
     discoveredAt: string;
     discoveryCount: number;
   }>;
