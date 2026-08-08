@@ -13,6 +13,28 @@ import { useArchive } from '../hooks/useArchive';
 import { summarise } from '../utils/text';
 
 /**
+ * The care notes a specimen card shows, in the order they earn their place.
+ *
+ * Toxicity leads because it is the one a player might act on — the rest is
+ * gardening advice. Driven off a list rather than four hand-written blocks so
+ * adding a field is one line and none of them can drift apart in styling.
+ *
+ * Keys are `PlantAvatarData` fields, so a rename that misses this list is a
+ * type error rather than a section that silently stops rendering.
+ */
+type StringValuedKey<T> = {
+  [K in keyof T]-?: NonNullable<T[K]> extends string ? K : never;
+}[keyof T];
+
+const CARE_FIELDS: { key: StringValuedKey<PlantAvatarData>; label: string }[] = [
+  { key: 'toxicity', label: 'Toxicity' },
+  { key: 'bestLightCondition', label: 'Light' },
+  { key: 'bestWatering', label: 'Water' },
+  { key: 'bestSoilType', label: 'Soil' },
+  { key: 'commonUses', label: 'Common uses' },
+];
+
+/**
  * The archive, drawn as the Android garden: pots resting on shelf planks, three
  * to a plank, with the selected plant's record on a card underneath.
  *
@@ -929,20 +951,22 @@ function SpecimenCard({
             </p>
           )}
 
-          {(avatar.habitat || avatar.conservationStatus) && (
+          {/* Care notes from the identification. Summarised at the same 180
+              characters as the description above — these arrive as several
+              sentences each, and four of them at full length would bury the
+              plant they describe. Toxicity is the one worth reading, so it
+              leads. */}
+          {CARE_FIELDS.some(({ key }) => summarise(avatar[key], 180)) && (
             <dl className="mt-3 space-y-1.5 text-xs leading-relaxed">
-              {avatar.habitat && (
-                <div>
-                  <dt className="font-pixel inline text-[9px]">Habitat</dt>{' '}
-                  <dd className="inline opacity-85">{avatar.habitat}</dd>
-                </div>
-              )}
-              {avatar.conservationStatus && (
-                <div>
-                  <dt className="font-pixel inline text-[9px]">Conservation status</dt>{' '}
-                  <dd className="inline opacity-85">{avatar.conservationStatus}</dd>
-                </div>
-              )}
+              {CARE_FIELDS.map(({ key, label }) => {
+                const value = summarise(avatar[key], 180);
+                return value ? (
+                  <div key={key}>
+                    <dt className="font-pixel inline text-[9px]">{label}</dt>{' '}
+                    <dd className="inline opacity-85">{value}</dd>
+                  </div>
+                ) : null;
+              })}
             </dl>
           )}
         </div>

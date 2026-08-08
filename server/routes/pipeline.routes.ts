@@ -34,7 +34,7 @@ import {
 } from '../pipeline/deadline';
 import { serverEnv } from '../platform/env';
 import { CAPTURE_SOURCES, type CaptureSource } from '../data/capture-source';
-import { persistScan } from '../services/scan-persistence';
+import { persistScan, type PlantDetails } from '../services/scan-persistence';
 import { resolveDiscovery } from '../services/discovery';
 import createFirebaseSpriteStorage from '../services/sprite-storage';
 import dexRepository from '../repositories/dex';
@@ -387,7 +387,17 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       deadline,
       req.user!.uid,
       identifiedSpecies,
-      readCaptureSource(req.body)
+      readCaptureSource(req.body),
+      {
+        description: identification.description,
+        commonNames: identification.common_names,
+        bestLightCondition: identification.best_light_condition,
+        bestSoilType: identification.best_soil_type,
+        bestWatering: identification.best_watering,
+        toxicity: identification.toxicity,
+        commonUses: identification.common_uses,
+        confidence: identification.probability,
+      }
     );
 
     sendEvent({
@@ -519,7 +529,19 @@ async function runStage2cOnward(
   /** False when identification.name is a placeholder — see persistScan. */
   identifiedSpecies: boolean,
   /** How the photo reached us, which decides the saved record's lifetime. */
-  captureSource: CaptureSource
+  captureSource: CaptureSource,
+  /*
+    What Plant.id said about the species, for the archive to keep.
+
+    An explicit argument rather than something read off `identification`,
+    because the two callers hold genuinely different things. The full run has a
+    real Plant.id response. The post-gate continuation builds a stand-in
+    (`probability: 0.95`, `common_names: [speciesName]`) purely to satisfy the
+    downstream shape — persisting that would record a fabricated confidence and
+    a common name that is just the species name again. So that leg passes
+    nothing, and cannot accidentally start passing something.
+  */
+  details?: PlantDetails
 ) {
   // Step 2c: Background Removal
   sendEvent({
@@ -655,7 +677,14 @@ async function runStage2cOnward(
     identification.name,
     identification.taxonomy?.family ?? null,
     finishedPngBuffer,
-    { identified: identifiedSpecies, source: captureSource }
+    {
+      identified: identifiedSpecies,
+      source: captureSource,
+      /* Only for a real identification: on the placeholder path the species
+         name is a stand-in, so care notes attached to it would describe a
+         plant the player did not scan — worse than showing nothing. */
+      details: identifiedSpecies ? details : undefined,
+    }
   );
 
   return {

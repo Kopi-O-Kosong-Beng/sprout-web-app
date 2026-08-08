@@ -493,15 +493,21 @@ describe('ArchivePage', () => {
 });
 
 describe('ArchivePage species detail (UC4 step 3)', () => {
-  it('shows habitat and conservation status when the record carries them', async () => {
+  /* Habitat and conservation status used to be the fields under test here.
+     Plant.id returns neither, so nothing could populate them; these are the
+     care notes the pipeline now persists in their place. */
+  it('shows the care notes when the record carries them', async () => {
     apiMocks.listOwnedAvatars.mockResolvedValue({
       ...collectedPage,
       items: [
         avatar({
           metadata: {
             displayName: 'Fern Ward',
-            habitat: 'Shaded tropical understorey',
-            conservationStatus: 'Least Concern',
+            toxicity: 'Toxic to humans and animals if eaten.',
+            bestLightCondition: 'Bright indirect light, shaded from midday sun.',
+            bestWatering: 'Keep the soil evenly moist, never waterlogged.',
+            bestSoilType: 'Rich, well-draining, slightly acidic.',
+            commonUses: 'Ornamental planting and cut foliage.',
           },
         }),
       ],
@@ -509,8 +515,36 @@ describe('ArchivePage species detail (UC4 step 3)', () => {
     });
     renderArchive();
 
-    expect(await screen.findByText('Shaded tropical understorey')).toBeInTheDocument();
-    expect(screen.getByText('Least Concern')).toBeInTheDocument();
+    expect(await screen.findByText('Toxicity')).toBeInTheDocument();
+    expect(screen.getByText('Toxic to humans and animals if eaten.')).toBeInTheDocument();
+    expect(screen.getByText('Light')).toBeInTheDocument();
+    expect(screen.getByText('Water')).toBeInTheDocument();
+    expect(screen.getByText('Soil')).toBeInTheDocument();
+    expect(screen.getByText('Common uses')).toBeInTheDocument();
+  });
+
+  /* Every field is optional, and a record carrying one must not be made to
+     render blank rows for the other four. */
+  it('shows only the care notes the record actually has', async () => {
+    apiMocks.listOwnedAvatars.mockResolvedValue({
+      ...collectedPage,
+      items: [
+        avatar({
+          metadata: {
+            displayName: 'Fern Ward',
+            toxicity: 'Toxic to humans and animals if eaten.',
+          },
+        }),
+      ],
+      total: 1,
+    });
+    renderArchive();
+
+    expect(await screen.findByText('Toxicity')).toBeInTheDocument();
+    expect(screen.queryByText('Light')).not.toBeInTheDocument();
+    expect(screen.queryByText('Water')).not.toBeInTheDocument();
+    expect(screen.queryByText('Soil')).not.toBeInTheDocument();
+    expect(screen.queryByText('Common uses')).not.toBeInTheDocument();
   });
 
   it('labels an IRL scan and says nothing about expiry', async () => {
@@ -619,8 +653,9 @@ describe('ArchivePage species detail (UC4 step 3)', () => {
     renderArchive();
 
     await screen.findByRole('button', { name: /battle with fern ward/i });
-    expect(screen.queryByText('Habitat')).not.toBeInTheDocument();
-    expect(screen.queryByText('Conservation status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Toxicity')).not.toBeInTheDocument();
+    expect(screen.queryByText('Light')).not.toBeInTheDocument();
+    expect(screen.queryByText('Common uses')).not.toBeInTheDocument();
   });
 });
 
