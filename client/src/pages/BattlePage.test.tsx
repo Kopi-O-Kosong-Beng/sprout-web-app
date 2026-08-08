@@ -858,8 +858,8 @@ describe('BattlePage', () => {
     await user.click(screen.getByRole('button', { name: /vine tap/i }));
 
     expect(
-      await screen.findByRole('status', { name: /battle synchronized/i })
-    ).toHaveTextContent(/latest server turn/i);
+      await screen.findByRole('status', { name: /battle caught up/i })
+    ).toHaveTextContent(/caught up to the current turn/i);
     expect(screen.getByRole('heading', { name: /turn 5/i })).toBeVisible();
     expect(screen.getByRole('progressbar', { name: /fern ward hp 73 of 132/i })).toBeVisible();
     expect(apiMocks.getPveBattle).not.toHaveBeenCalled();

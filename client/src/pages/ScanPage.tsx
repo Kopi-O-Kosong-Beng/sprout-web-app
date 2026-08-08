@@ -132,6 +132,34 @@ const STEP_FOR_HOP: Record<string, ScanStep> = {
   '4': 'finish',
 };
 
+/**
+ * What the player is told each hop is doing.
+ *
+ * The server sends its own `details` for every hop, and the studio's Live
+ * Scanner wants exactly that — it is a pipeline console. A player is not the
+ * audience for it. Passing it straight through meant every scan printed the
+ * vendor list ("via Plant.id API v3", "NVIDIA Flux.2 Klein 4B", "via
+ * withoutBG"), the exact model id, implementation detail ("nearest-neighbor",
+ * "Spica72 palette"), and — on hop 2a — the ENTIRE crafted prompt, verbatim.
+ *
+ * That is the pipeline's own IP and its whole supply chain, shown to anyone
+ * who scans a leaf. The codebase already guards this elsewhere: extractApiError
+ * exists to stop raw server text reaching players, and the battle serializer
+ * redacts the bot's move list. This path simply bypassed that thinking.
+ *
+ * So the copy lives here, on the client, keyed by hop. The server contract is
+ * untouched and the studio still sees everything.
+ */
+const PLAYER_HOP_COPY: Record<string, string> = {
+  '1': 'Analysing your plant...',
+  '2a': 'Dreaming up a design...',
+  '2b': 'Creating the sprite...',
+  '2c': 'Cleaning up the edges...',
+  '2d': 'Polishing the pixels...',
+  '3': 'Assigning stats and moves...',
+  '4': 'Almost done...',
+};
+
 const MAX_IMAGE_EDGE = 1024;
 
 /** UC6 alt-flow 2a: accepted upload formats and the 5 MB size ceiling. Client
@@ -330,18 +358,36 @@ export default function ScanPage() {
         },
         (event: PipelineEvent) => {
           if (event.event === 'step_start' || event.event === 'step_done') {
-            const step = STEP_FOR_HOP[String(event.step)];
+            const hop = String(event.step);
+            const step = STEP_FOR_HOP[hop];
             if (step) {
+              // Our copy, not the server's — see PLAYER_HOP_COPY.
               setStatus((current) =>
                 current.kind === 'busy'
-                  ? { ...current, step, detail: String(event.details ?? '') }
+                  ? { ...current, step, detail: PLAYER_HOP_COPY[hop] ?? '' }
                   : current
               );
             }
           }
 
           if (event.event === 'step_done' && event.step === '1') {
-            const identification = event.result as { name?: string } | undefined;
+            const identification = event.result as
+              | { name?: string; common_names?: string[] }
+              | undefined;
+            /* Name the find as soon as it is known, in the words a player uses.
+               Plant.id returns a binomial plus common names; "Is your plant a
+               chalk milkwort?" lands where "Polygala calcarea" does not. Falls
+               back to the binomial when there is no common name, which is
+               common for cultivars. */
+            const common = identification?.common_names?.[0];
+            if (common || identification?.name) {
+              const friendly = common ?? identification?.name;
+              setStatus((current) =>
+                current.kind === 'busy'
+                  ? { ...current, detail: `Is your plant a ${friendly}?` }
+                  : current
+              );
+            }
             if (identification?.name) {
               finalName = identification.name;
               setStatus((current) =>

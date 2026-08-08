@@ -544,3 +544,124 @@ describe('ScanPage upload dialog', () => {
     });
   });
 });
+
+
+/*
+ * The scan screen used to print the server's own `details` line under each
+ * step. That is right for the studio's Live Scanner, which is a pipeline
+ * console, and wrong for a player: it disclosed the vendor list ("via Plant.id
+ * API v3", "NVIDIA Flux.2 Klein 4B", "via withoutBG"), the exact model id,
+ * implementation detail ("nearest-neighbor", "Spica72 palette"), and on hop 2a
+ * the ENTIRE crafted prompt, verbatim — the pipeline's own IP, shown to anyone
+ * who scanned a leaf.
+ *
+ * These tests exist so it cannot come back by someone "helpfully" restoring
+ * the detail passthrough.
+ */
+describe('scan progress copy', () => {
+  // The Test button reaches the pipeline through fetch + createImageBitmap +
+  // canvas, none of which jsdom has. Same plumbing every other test here uses.
+  beforeEach(() => stubDemoImageLoading());
+
+  const HOPS = ['1', '2a', '2b', '2c', '2d', '3', '4'];
+
+  /* Emits the events and then never resolves, so the run stays in flight and
+     the progress screen stays mounted. scriptStream() returns immediately,
+     which tears the progress UI down before anything can be asserted — and
+     would make the leak check below pass by rendering nothing at all. */
+  function scriptStreamPending(events: PipelineEvent[]) {
+    streamPipeline.mockImplementation(
+      async (_p: string, _b: unknown, onEvent: (e: PipelineEvent) => void) => {
+        for (const event of events) onEvent(event);
+        await new Promise(() => {});
+      }
+    );
+  }
+
+  /** The real strings the server sends, which must never reach the screen. */
+  const SERVER_DETAILS: Record<string, string> = {
+    '1': 'Analyzing plant features via Plant.id API v3...',
+    '2a': 'Used Tier: GEMINI — Prompt: "a pixel-art fern, Spica72 palette, 192x192"',
+    '2b': 'Rendering via NVIDIA Flux.2 Klein 4B...',
+    '2c': 'Extracting foreground alpha channel via withoutBG...',
+    '2d': 'Resizing to 192x192 (nearest-neighbor) & snapping to Spica72 palette...',
+    '3': 'Creating stats (HP=100, speed, taxonomy moves)...',
+    '4': 'Running palette/dimension checks & Gemini VLM cute judge...',
+  };
+
+  it('never shows the server pipeline detail to the player', async () => {
+    scriptStreamPending(
+      HOPS.map((step) => ({
+        event: 'step_start',
+        step,
+        title: `hop ${step}`,
+        details: SERVER_DETAILS[step],
+      })) as PipelineEvent[]
+    );
+
+    await startScan();
+
+    const body = document.body.textContent ?? '';
+    for (const leak of [
+      'Plant.id',
+      'NVIDIA',
+      'Flux',
+      'withoutBG',
+      'Spica72',
+      'nearest-neighbor',
+      'GEMINI',
+      'Prompt:',
+      'HP=100',
+      'VLM',
+    ]) {
+      expect(body, `"${leak}" leaked to the player`).not.toContain(leak);
+    }
+  });
+
+  it('tells the player what is happening, abstractly', async () => {
+    scriptStreamPending([
+      { event: 'step_start', step: '2b', title: 'x', details: SERVER_DETAILS['2b'] },
+    ] as PipelineEvent[]);
+
+    await startScan();
+
+    expect(await screen.findByText(/Creating the sprite/i)).toBeInTheDocument();
+  });
+
+  /* The common name, not the binomial: "Is your plant a chalk milkwort?" lands
+     where "Polygala calcarea" does not. */
+  it('asks about the plant using its common name', async () => {
+    scriptStreamPending([
+      {
+        event: 'step_done',
+        step: '1',
+        title: 'x',
+        details: SERVER_DETAILS['1'],
+        result: {
+          name: 'Polygala calcarea',
+          common_names: ['chalk milkwort', 'milkwort'],
+        },
+      },
+    ] as unknown as PipelineEvent[]);
+
+    await startScan();
+
+    expect(await screen.findByText(/Is your plant a chalk milkwort\?/i)).toBeInTheDocument();
+  });
+
+  it('falls back to the botanical name when there is no common name', async () => {
+    scriptStreamPending([
+      {
+        event: 'step_done',
+        step: '1',
+        title: 'x',
+        details: SERVER_DETAILS['1'],
+        result: { name: 'Papilionanthe teres', common_names: [] },
+      },
+    ] as unknown as PipelineEvent[]);
+
+    await startScan();
+
+    expect(await screen.findByText(/Is your plant a Papilionanthe teres\?/i)).toBeInTheDocument();
+  });
+});
