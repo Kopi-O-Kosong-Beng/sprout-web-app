@@ -18,6 +18,7 @@
     "seed:admin": "tsx scripts/seed-admin-account.ts",
     "sprites:generate": "tsx scripts/generate-sprites.ts",
     "fuzz:live": "tsx scripts/fuzz-pipeline-live.ts",
+    "backdrop:experiment": "tsx scripts/backdrop-experiment.ts",
     "check:email": "tsx scripts/check-email.ts",
     "check:image": "tsx scripts/check-image.ts",
     "check:storage": "tsx scripts/check-storage.ts",

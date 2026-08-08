@@ -31,6 +31,87 @@ export interface ScanPersistOptions {
    *  scans get a per-user species key so they never share the canonical sprite
    *  object with a different user's plant. */
   identified: boolean;
+  /** What Plant.id said about the species, for the archive to show. Omitted on
+   *  an unidentified scan, where there is nothing true to record. */
+  details?: PlantDetails;
+}
+
+/**
+ * The Plant.id fields worth keeping, named as the archive reads them.
+ *
+ * Every one of these was already being fetched and thrown away: the route asks
+ * Plant.id for seventeen detail fields, and persistScan wrote `metadata: null`,
+ * so a scanned plant reached the archive with no description, no care notes and
+ * no toxicity warning while the seeded demo plants carried a richer record than
+ * anything a player could actually earn.
+ *
+ * Deliberately NOT here: habitat and conservation status. Plant.id returns
+ * neither — verified against the live API, which silently ignores unknown
+ * `details` names rather than erroring, so asking for them looks like it works
+ * and yields nothing. See md/PLANT_DETAILS.md for the route to adding them.
+ */
+export interface PlantDetails {
+  description?: string;
+  commonNames?: string[];
+  bestLightCondition?: string;
+  bestSoilType?: string;
+  bestWatering?: string;
+  toxicity?: string;
+  commonUses?: string;
+  /** Plant.id's own probability for the top suggestion, 0..1. */
+  confidence?: number;
+}
+
+/** Upstream prose is unbounded and this rides in every archive page payload.
+ *  A provider that starts returning essays must not quietly inflate the
+ *  collection; the client truncates for display anyway. */
+const MAX_DETAIL_CHARS = 600;
+
+function trimmedDetail(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  if (!text) return undefined;
+  return text.length > MAX_DETAIL_CHARS ? `${text.slice(0, MAX_DETAIL_CHARS - 1)}…` : text;
+}
+
+/**
+ * Drops every empty field, and returns null when nothing survives.
+ *
+ * Two reasons this is not merely tidy. Firestore rejects `undefined` outright,
+ * so an absent field has to be absent rather than present-and-undefined. And
+ * `metadata: {}` is not the same as `metadata: null` to the archive — an empty
+ * object would render a details panel with nothing in it.
+ */
+export function buildScanMetadata(
+  details: PlantDetails | undefined
+): Record<string, unknown> | null {
+  if (!details) return null;
+  const metadata: Record<string, unknown> = {};
+
+  const strings: [keyof PlantDetails, string | undefined][] = [
+    ['description', trimmedDetail(details.description)],
+    ['bestLightCondition', trimmedDetail(details.bestLightCondition)],
+    ['bestSoilType', trimmedDetail(details.bestSoilType)],
+    ['bestWatering', trimmedDetail(details.bestWatering)],
+    ['toxicity', trimmedDetail(details.toxicity)],
+    ['commonUses', trimmedDetail(details.commonUses)],
+  ];
+  for (const [key, value] of strings) {
+    if (value !== undefined) metadata[key] = value;
+  }
+
+  const commonNames = (details.commonNames ?? [])
+    .filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+    .map((name) => name.trim())
+    .slice(0, 5);
+  if (commonNames.length > 0) metadata.commonNames = commonNames;
+
+  // 0 is a legitimate confidence and must not be dropped by a falsy check.
+  if (typeof details.confidence === 'number' && Number.isFinite(details.confidence)) {
+    metadata.confidence = details.confidence;
+  }
+
+  return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
 export interface ScanPersistResult {
@@ -123,7 +204,9 @@ export async function persistScan(
       speciesFamily,
       spriteUrl,
       stats,
-      metadata: null,
+      // Was unconditionally null, which is why nothing Plant.id returned ever
+      // reached a player's archive. Still null for an unidentified scan.
+      metadata: buildScanMetadata(options.details),
       source: options.source,
     });
 

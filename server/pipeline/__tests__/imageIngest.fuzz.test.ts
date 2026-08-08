@@ -175,6 +175,21 @@ describe('image ingest fuzzing', () => {
     expect(report.findings[0].detail).toContain('decoder exploded');
   }, 60_000);
 
+  /*
+    120s, not 60s, and the reason is worth recording.
+
+    This case runs 50 mutants and takes about 4.8s on an idle machine. Under
+    the full `vitest run` glob it timed out at 60s — a >12x slowdown, because
+    16 test files share the worker pool and every fuzz mutation is CPU-bound
+    sharp encode/decode work competing for the same cores, with coverage
+    instrumentation on top. CI's Group 10 never saw it: that job runs this file
+    with a narrow file list and --coverage.enabled=false.
+
+    So the failure was contention, not a defect in the code under test — but a
+    suite whose whole claim is "a red build is reproducible from its log" must
+    not go red for reasons unrelated to the gate. Matched to the 120s its
+    sibling cases already use.
+  */
   it('reproduces exactly when replayed with the same seed', async () => {
     const seeds = await loadSeedCorpus();
     const options = { seeds, runs: 25, rngSeed: 7, sink } as const;
@@ -188,5 +203,5 @@ describe('image ingest fuzzing', () => {
     expect(second.results.map((r) => [r.seed, r.mutation, r.outcome])).toEqual(
       first.results.map((r) => [r.seed, r.mutation, r.outcome])
     );
-  }, 60_000);
+  }, 120_000);
 });

@@ -99,11 +99,19 @@ jobs:
       #
       # The LIVE fuzzer is deliberately not here: it spends API credits and is
       # reachable only from the fuzz-live workflow_dispatch job.
+      # All three free suites run here: the mutation fuzzer against the gate,
+      # the random-testing baseline that measures why mutation is necessary,
+      # and the text validators. The latter two were green locally and from the
+      # studio but ran in no CI job, so a regression in either could not turn a
+      # build red. They cost about 1.7s and 6ms respectively.
       - name: 'Group 10: image ingest + fuzz (vitest, no emulator)'
         run: |
           npm exec -- vitest run \
             pipeline/__tests__/imageIngest.test.ts \
             pipeline/__tests__/imageIngest.fuzz.test.ts \
+            pipeline/__tests__/baseline.test.ts \
+            pipeline/__tests__/textFuzz.test.ts \
+            pipeline/__tests__/fuzzRunner.test.ts \
             --coverage.enabled=false
 
   client-focused:
