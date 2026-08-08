@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { validateUploadedImage } from '../ingest/imageIngest';
+import {
+  validateUploadedImage,
+  type IngestAudience,
+} from '../ingest/imageIngest';
 import { runFuzz, formatReport, type SinkVerdict } from '../fuzz/runner';
 import { loadSeedCorpus } from '../fuzz/seedCorpus';
 
@@ -26,15 +29,27 @@ const RUNS = 300;
 
 /** The contract under test: never throw, always answer. A thrown error escapes
  *  to the runner and is recorded as a crash. */
-const sink = async (input: Buffer): Promise<SinkVerdict> => {
-  const result = await validateUploadedImage(input);
-  return {
-    accepted: result.ok,
-    detail: result.ok
-      ? `accepted ${result.format} ${result.width}x${result.height}`
-      : `rejected: ${result.reason}`,
+function makeSink(audience: IngestAudience) {
+  return async (input: Buffer): Promise<SinkVerdict> => {
+    const result = await validateUploadedImage(input, audience);
+    return {
+      accepted: result.ok,
+      detail: result.ok
+        ? `accepted ${result.format} ${result.width}x${result.height}`
+        : `rejected: ${result.reason}`,
+    };
   };
-};
+}
+
+/** `/api/pipeline/run-stream` — the camera photo on its way to Plant.id. */
+const sink = makeSink('photo');
+
+/** `/api/pipeline/run-stage2c` — the sprite echoed back through the studio's
+ *  human gate. Same rules, different rejection copy. Fuzzed separately because
+ *  "both entry points call the same validator" is a claim worth testing rather
+ *  than assuming: the audience parameter is a branch, and a branch that only
+ *  one caller exercises is a branch nobody checks. */
+const spriteSink = makeSink('sprite');
 
 describe('image ingest fuzzing', () => {
   it(
@@ -75,6 +90,54 @@ describe('image ingest fuzzing', () => {
     },
     120_000
   );
+
+  /*
+    The second entry point: /api/pipeline/run-stage2c, the sprite echoed back
+    through the studio's human gate.
+
+    Easy to mistake for internal traffic — the only caller is our own studio,
+    replaying a sprite this server produced one request earlier. It is not.
+    The pipeline router is behind authMiddleware but NOT requireSuperAdmin, so
+    any verified account can POST arbitrary bytes here, and they land in
+    Buffer.from(...,'base64') and then sharp.
+  */
+  it(
+    'survives the same mutations on the sprite leg',
+    async () => {
+      const seeds = await loadSeedCorpus();
+
+      const report = await runFuzz({
+        seeds,
+        runs: RUNS,
+        rngSeed: RNG_SEED,
+        sink: spriteSink,
+        timeoutMs: 10_000,
+      });
+
+      if (report.findings.length > 0) console.error(formatReport(report));
+      expect(report.findings, formatReport(report)).toEqual([]);
+      expect(report.counts.ok).toBeGreaterThan(RUNS / 2);
+    },
+    120_000
+  );
+
+  /*
+    Both legs must agree on the VERDICT and differ only in WORDING. If the two
+    ever diverge on whether something is acceptable, one entry point has become
+    a way around the other — which is precisely the hole that existed while
+    stage2c had no validation at all.
+  */
+  it('reaches the same verdict on both legs, differing only in copy', async () => {
+    const seeds = await loadSeedCorpus();
+    const options = { seeds, runs: 60, rngSeed: 11, timeoutMs: 10_000 } as const;
+
+    const photo = await runFuzz({ ...options, sink });
+    const sprite = await runFuzz({ ...options, sink: spriteSink });
+
+    expect(sprite.results.map((r) => [r.mutation, r.outcome])).toEqual(
+      photo.results.map((r) => [r.mutation, r.outcome])
+    );
+  }, 120_000);
 
   /*
     Does the harness have teeth?

@@ -9,13 +9,24 @@ Two things were built together, and neither makes sense without the other.
 
 ```text
 The gate    server/pipeline/ingest/imageIngest.ts
-            validates every uploaded photo before Plant.id sees it.
-            Runs on every scan.
+            validates untrusted image bytes at both pipeline entry
+            points. Runs on every scan.
 
 The fuzzer  server/pipeline/fuzz/
             mutates real plant photos and feeds them to that same
             function, checking it never crashes, hangs, or misjudges.
 ```
+
+Both entry points are guarded:
+
+| Route | Payload | Audience |
+|---|---|---|
+| `POST /api/pipeline/run-stream` | the camera photo, before Plant.id | `photo` |
+| `POST /api/pipeline/run-stage2c` | the sprite echoed back through the studio's human gate | `sprite` |
+
+Same rules on both. `audience` only changes the wording of a rejection: there
+is no photo at stage 2c, so "try taking the photo again" would be nonsense
+there.
 
 The fuzzer calls **the same function players hit**, not a copy. That is the
 whole point: a green fuzz run is a statement about production code.
@@ -313,7 +324,8 @@ server/pipeline/fuzz/mutations.ts            strategies + seedable PRNG
 server/pipeline/fuzz/runner.ts               the loop, sink-agnostic
 server/pipeline/fuzz/seedCorpus.ts           loads the golden-set photos
 server/pipeline/__tests__/imageIngest.test.ts       unit tests for the gate
-server/pipeline/__tests__/imageIngest.fuzz.test.ts  CI-mode fuzzing
+server/pipeline/__tests__/imageIngest.fuzz.test.ts  CI-mode fuzzing, both legs
+server/tests/pipeline-ingest-gate.test.ts    wire-level: do the routes call it?
 server/scripts/fuzz-pipeline-live.ts         live mode. NOT a vitest file
 server/scripts/check-image.ts                one-input inspector
 server/platform/fuzzRunner.ts                in-process runner for the studio
@@ -385,11 +397,36 @@ pixel ceiling.
 `imageIngest.fuzz.test.ts`. Changing the seed is a commit, which is the point: a
 fuzz suite that silently varies makes "it passed yesterday" meaningless.
 
+## The Second Entry Point
+
+`/run-stage2c` is the continuation after the studio's human gate. It receives
+`rawSpriteB64` — a sprite this server produced one request earlier — and for a
+while it was the only unguarded path left, decoding straight into
+`Buffer.from(..., 'base64')` and then sharp.
+
+It is tempting to call that internal traffic. It is not. The pipeline router is
+behind `authMiddleware` but **not** `requireSuperAdmin`, so any verified account
+can POST arbitrary bytes to it. Only the studio uses it; anyone can reach it.
+
+Two things make this leg different from the scan leg:
+
+- **The declared MIME is wrong, legitimately.** The studio labels the payload
+  `data:image/png` even when Flux answered with JPEG. Content sniffing is
+  load-bearing here rather than merely tidy: a validator that believed the
+  declared type would reject the pipeline's own output.
+- **The copy is for an operator.** `IngestAudience` picks the vocabulary. The
+  rules do not change, and a test asserts the two legs reach the same verdict
+  on identical input, differing only in wording. If they ever diverge, one
+  entry point has become a way around the other.
+
+Coverage: both legs are fuzzed with the same 300 mutations, and
+`server/tests/pipeline-ingest-gate.test.ts` asserts at the wire that each route
+actually calls the guard and stops before any provider is contacted. A unit
+test cannot catch a route that forgets to invoke its own gate, which is exactly
+the state stage 2c was in.
+
 ## Known Gaps
 
-- **`/run-stage2c` is unguarded.** It decodes `rawSpriteB64` with the same
-  absent validation the scan route used to have. Post-Flux rather than the
-  camera entry point, so it was out of scope, but it is the same hole.
 - **Live mode has never been run against real APIs.** Start with `--runs 2`.
 - **HEIC is refused.** The allow-list is jpeg/png/webp. If iPhone uploads land
   unconverted, this is the first thing to change.

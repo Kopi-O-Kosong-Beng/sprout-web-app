@@ -105,8 +105,39 @@ const MESSAGES: Record<IngestRejection, string> = {
   too_many_pixels: 'That image is too large. Try taking the photo again.',
 };
 
-function fail(reason: IngestRejection): IngestFailure {
-  return { ok: false, reason, message: MESSAGES[reason] };
+/**
+ * The same rules, addressed to an operator instead of a player.
+ *
+ * `/run-stage2c` validates a sprite the pipeline itself produced, echoed back
+ * through the studio's human gate. Telling that caller to "try taking the
+ * photo again" would be nonsense — there is no photo at that point, and the
+ * likely cause is a truncated echo or a mangled render, not a bad camera shot.
+ * Reason codes are shared; only the wording differs.
+ */
+const SPRITE_MESSAGES: Record<IngestRejection, string> = {
+  missing: 'No sprite provided.',
+  not_base64: 'The sprite payload is not valid base64.',
+  too_large: 'The sprite payload is too large.',
+  too_small: 'The sprite is smaller than the pipeline can finish.',
+  unreadable: 'The sprite could not be decoded. Re-run the render.',
+  truncated: 'The sprite data stops early. Re-run the render.',
+  unsupported_format: 'The render produced an unexpected image format.',
+  too_many_pixels: 'The sprite declares more pixels than the pipeline allows.',
+};
+
+/** Which vocabulary a rejection is phrased in. Default is the player-facing
+ *  scan copy, since that is the path almost every call takes. */
+export type IngestAudience = 'photo' | 'sprite';
+
+function fail(
+  reason: IngestRejection,
+  audience: IngestAudience = 'photo'
+): IngestFailure {
+  return {
+    ok: false,
+    reason,
+    message: (audience === 'sprite' ? SPRITE_MESSAGES : MESSAGES)[reason],
+  };
 }
 
 /**
@@ -141,34 +172,40 @@ function isWellFormedBase64(value: string): boolean {
 }
 
 /**
- * Validate an inbound photo.
+ * Validate an inbound image.
  *
  * Accepts the raw request field (with or without a data-URL prefix) or a
  * Buffer, so the fuzz harness can hand over mutated bytes without re-encoding
  * on every iteration.
+ *
+ * `audience` only chooses the wording of a rejection. The rules are identical
+ * for a camera photo and for a sprite echoed back through the studio's human
+ * gate — both are untrusted bytes arriving over HTTP from a caller that may
+ * not be the client we shipped.
  */
 export async function validateUploadedImage(
-  input: unknown
+  input: unknown,
+  audience: IngestAudience = 'photo'
 ): Promise<IngestResult> {
   let buffer: Buffer;
   let base64: string;
 
   if (Buffer.isBuffer(input)) {
     buffer = input;
-    if (buffer.byteLength === 0) return fail('missing');
+    if (buffer.byteLength === 0) return fail('missing', audience);
     base64 = buffer.toString('base64');
   } else {
     if (typeof input !== 'string' || input.trim().length === 0) {
-      return fail('missing');
+      return fail('missing', audience);
     }
     const stripped = stripDataUrlPrefix(input.trim());
-    if (!isWellFormedBase64(stripped)) return fail('not_base64');
+    if (!isWellFormedBase64(stripped)) return fail('not_base64', audience);
     buffer = Buffer.from(stripped, 'base64');
-    if (buffer.byteLength === 0) return fail('not_base64');
+    if (buffer.byteLength === 0) return fail('not_base64', audience);
     base64 = stripped;
   }
 
-  if (buffer.byteLength > MAX_IMAGE_BYTES) return fail('too_large');
+  if (buffer.byteLength > MAX_IMAGE_BYTES) return fail('too_large', audience);
 
   /*
     metadata() parses the header only — it does not decode pixels — so the
@@ -190,20 +227,20 @@ export async function validateUploadedImage(
         error instanceof Error ? error.message : error
       );
     }
-    return fail('unreadable');
+    return fail('unreadable', audience);
   }
 
   const { format, width, height } = metadata;
   if (!format || typeof width !== 'number' || typeof height !== 'number') {
-    return fail('unreadable');
+    return fail('unreadable', audience);
   }
   if (!ALLOWED_IMAGE_FORMATS.includes(format as AllowedImageFormat)) {
-    return fail('unsupported_format');
+    return fail('unsupported_format', audience);
   }
-  if (width < MIN_IMAGE_EDGE || height < MIN_IMAGE_EDGE) return fail('too_small');
+  if (width < MIN_IMAGE_EDGE || height < MIN_IMAGE_EDGE) return fail('too_small', audience);
   // Multiplied as declared. Both factors are already bounded by the byte cap
   // above, so this cannot overflow into a false pass.
-  if (width * height > MAX_IMAGE_PIXELS) return fail('too_many_pixels');
+  if (width * height > MAX_IMAGE_PIXELS) return fail('too_many_pixels', audience);
 
   /*
     Stage two: integrity.
@@ -235,7 +272,7 @@ export async function validateUploadedImage(
         error instanceof Error ? error.message : error
       );
     }
-    return fail('truncated');
+    return fail('truncated', audience);
   }
 
   return {
