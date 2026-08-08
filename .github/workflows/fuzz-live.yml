@@ -60,16 +60,27 @@ jobs:
         run: npm ci
         working-directory: .
 
-      # Nothing is hardcoded and nothing is echoed. These names match what
-      # server/platform/env.ts already resolves, so the fuzzer reads its
-      # credentials through exactly the same path the server does.
+      # Nothing is hardcoded and nothing is echoed.
+      #
+      # BOTH names are passed for the two keys that have an alias, because
+      # server/platform/env.ts accepts either and this repo's own .env uses the
+      # SECOND of each pair:
+      #
+      #   plantApiKey -> PLANT_API_KEY  or  PLANTID_API_KEY   (.env has PLANTID_)
+      #   geminiKey   -> GEMINI_KEY     or  GEMINI_API_KEY    (.env has _API_KEY)
+      #
+      # Naming only the first would have quietly failed for anyone who added
+      # the secret under the name they already use locally: the resolver would
+      # find nothing and the run would abort on the credential check.
       - name: Run live fuzz
         env:
           PLANT_API_KEY: ${{ secrets.PLANT_API_KEY }}
+          PLANTID_API_KEY: ${{ secrets.PLANTID_API_KEY }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           GEMMA_API_KEY: ${{ secrets.GEMMA_API_KEY }}
           FLUX_API_KEY: ${{ secrets.FLUX_API_KEY }}
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # Must stay false, or the run would fuzz the mock and bill nothing
           # while reporting success — a green run that proved nothing.
           USE_MOCK_APIS: 'false'
