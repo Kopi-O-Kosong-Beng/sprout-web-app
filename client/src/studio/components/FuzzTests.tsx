@@ -84,15 +84,15 @@ const SUITES: {
     id: 'mutation',
     label: 'Mutation',
     blurb:
-      'Mutates real plant photos and feeds each to the ingest gate. Checks it never crashes, hangs, or misjudges.',
+      'Takes a real plant photo and breaks it in one specific way — cuts it short, scrambles its header, replaces it with static — then checks the upload checker gives the right answer. Broken files must be refused; still-valid ones must be let through.',
     defaultRuns: 300,
-    approxSeconds: (runs) => Math.max(1, Math.round((runs / 300) * 25)),
+    approxSeconds: (runs) => Math.max(1, Math.round((runs / 300) * 7)),
   },
   {
     id: 'baseline',
     label: 'Random baseline',
     blurb:
-      'Fires random payloads at the same gate and counts how many survive. Measures the claim that random testing cannot reach anything interesting here — which is why mutation is a necessity, not a preference.',
+      'Throws completely random junk at the same upload checker and counts how much survives. The answer is zero — which is exactly the point. Random bytes never even resemble an image, so breaking real photos is the only way to reach anything worth testing.',
     defaultRuns: 10_000,
     approxSeconds: (runs) => Math.max(1, Math.round((runs / 10_000) * 4)),
   },
@@ -100,7 +100,7 @@ const SUITES: {
     id: 'text',
     label: 'Text validators',
     blurb:
-      'The contact and ticket schemas: injection payloads, Unicode normalisation, length boundaries, email grammar and ReDoS timing. The control group — free, instant, and a wrong answer is decidable.',
+      'Checks the contact form and ticket lookup rules against awkward input: an address like a@@b, a message one character over the limit, pasted HTML, an emoji that secretly counts as two characters. Every case here has an obviously right answer, which makes it the easy half.',
     defaultRuns: null,
     approxSeconds: () => 1,
   },
@@ -117,44 +117,53 @@ const OUTCOMES: Record<FuzzOutcome, { label: string; tone: Tone; blurb: string }
   ok: {
     label: 'Passed',
     tone: 'ok',
-    blurb: 'The gate answered within time, and its verdict matched what the mutant should get.',
+    blurb:
+      'The checker answered in time, and gave the answer this input was supposed to get. Note that "passed" can mean it correctly ACCEPTED something — not every input here is meant to be refused.',
   },
   crash: {
     label: 'Crashed',
     tone: 'danger',
     blurb:
-      'The gate threw. Always a bug: its contract is to return a result, never to raise — a throw here becomes a 500 on a real scan.',
+      'The checker threw an error instead of returning an answer. Always a bug: it is supposed to hand back a yes or a no, whatever it is given. On a real scan this becomes a 500 error page.',
   },
   hang: {
     label: 'Hung',
     tone: 'danger',
     blurb:
-      'The gate exceeded its time budget. A validator that stalls on crafted input is a denial of service even if it never crashes.',
+      'The checker took longer than its time limit. Even with no crash, an input that makes it stall is a way to take the server down — send a few of those and nobody else gets served.',
   },
   silent_bad_output: {
     label: 'Wrong verdict',
     tone: 'warn',
     blurb:
-      'The gate answered, but wrongly — either hostile input was accepted (a paid Plant.id call spent on garbage) or a genuine photo was refused (a player locked out).',
+      'The checker answered, but the answer was wrong. Either it accepted a broken file — so we pay Plant.id to look at garbage — or it refused a real photo, which locks a player out. Nothing crashes, so this is the one you would never notice without checking.',
   },
   skipped: {
     label: 'Skipped',
     tone: 'neutral',
     blurb:
-      'The mutation could not be applied to that seed. Not a finding, but a run that is mostly skips is not really testing anything.',
+      'This kind of damage could not be applied to that photo — you cannot cut 20 bytes off a 10-byte file. Not a problem in itself, but a run that is mostly skips has not tested much.',
   },
 };
 
-/** What each mutation strategy is trying to provoke. */
+/** What each way of breaking a photo does, and what the checker owes in reply. */
 const MUTATIONS: Record<string, string> = {
-  bitflip: 'Flips random bits anywhere in the file. May corrupt the header or merely alter a pixel, so either verdict is acceptable — this one hunts crashes.',
-  truncate: 'Cuts the file off partway, as a dropped upload would. Must be rejected: the header still looks valid, so only a real decode catches it.',
-  header_corrupt: 'Randomises the first 32 bytes, destroying the format marker. Must be rejected.',
-  format_confusion: 'Re-encodes to another format. PNG and WebP must be accepted (they are on the allow-list); GIF and TIFF must be refused.',
-  extreme_resize: 'Produces 1x1, 9000x9000 and 4000x4 shapes. All out of policy, all must be rejected.',
-  pixel_noise: 'Replaces the image with uniform noise or a flat field. A real, decodable photo — must be ACCEPTED, since judging content is Plant.id’s job, not the gate’s.',
-  exif_abuse: 'Strips EXIF, or writes an awkward orientation. Still a valid photo — must be accepted.',
-  not_an_image: 'Prose, a script tag, JSON, a fake PDF header. Must be rejected.',
+  bitflip:
+    'Flips a handful of random bits, like a download that got slightly corrupted. It might wreck the part that says "this is a JPEG", or it might just change one pixel — so either answer counts as correct. This one is hunting for crashes rather than wrong answers.',
+  truncate:
+    'Chops the end off the file, the way an upload cut off halfway would arrive. Must be REFUSED — and it is the sneaky one, because the start of the file still looks perfectly fine. The only way to catch it is to actually decode the picture and notice it stops early.',
+  header_corrupt:
+    'Scrambles the first 32 bytes — the part that says which image format this is. With that gone, nothing can read the file at all. Must be REFUSED.',
+  format_confusion:
+    'Re-saves the same photo in a different image format. PNG and WebP are on our allowed list, so those must be ACCEPTED; GIF and TIFF are not, so those must be REFUSED. Tests that we judge the actual bytes rather than trusting whatever the uploader claims.',
+  extreme_resize:
+    'Absurd shapes: a single pixel, a 4000x4 strip, a 4x4000 strip, and a tiny file whose header lies and claims to be 8000x8000. All are outside the sizes we allow, so all must be REFUSED. That last one is a "decompression bomb" — a small file that tries to trick the server into allocating a huge amount of memory.',
+  pixel_noise:
+    'Replaces the picture with TV static or a solid block of colour. This must be ACCEPTED — it is still a perfectly valid image file, and deciding whether it contains a plant is Plant.id’s job, not this checker’s. Someone photographing a blank wall must not get an error.',
+  exif_abuse:
+    'Removes or scrambles the camera metadata — including the tag saying which way up the photo is. Still a real photo, so it must be ACCEPTED. A phone with an unusual sensor cannot be locked out of the game.',
+  not_an_image:
+    'Sends something that was never an image: plain text, a script tag, JSON, a fake PDF header, a file path. All must be REFUSED.',
 };
 
 function outcomeTone(outcome: FuzzOutcome): Tone {
@@ -327,9 +336,12 @@ export const FuzzTests: React.FC = () => {
         </div>
         {takesRuns && (
           <p id="fuzz-seed-help" className="border-t border-line-soft px-4 py-2 text-label text-txt-4">
-            Leave the seed blank to explore; the seed used is always reported so
-            any finding can be replayed. Enter a seed to reproduce an earlier run
-            exactly.
+            Leave this blank and every run picks a fresh random seed, so each one
+            explores different damage — that is why the seed number changes each
+            time you press Run. Whichever seed was used is always shown with the
+            results. Type one in to repeat an earlier run exactly: the same seed
+            gives the same photos, the same damage and the same answers, every
+            time and on any machine.
           </p>
         )}
       </Panel>
@@ -413,7 +425,7 @@ export const FuzzTests: React.FC = () => {
                 <PanelHead
                   kicker="Funnel"
                   title="What stopped them"
-                  sub="The distribution is the real result, not the zero. One rule catching everything would mean the run measured one thing many times rather than covering the gate."
+                  sub="The spread matters more than the zero. If one rule caught all of them, we would have tested that single rule thousands of times rather than testing the checker. Two rules sharing the load means the junk is failing for genuinely different reasons."
                 />
                 <ul className="divide-y divide-line-soft">
                   {Object.entries(baseline.rejectedBy)
@@ -454,14 +466,14 @@ export const FuzzTests: React.FC = () => {
                   label="Slowest"
                   value={`${text.slowestMs}ms`}
                   tone={text.counts.slow > 0 ? 'danger' : 'neutral'}
-                  sub="ReDoS bound 250ms"
+                  sub="limit 250ms"
                 />
               </div>
               <Panel>
                 <PanelHead
                   kicker="Coverage"
                   title="By technique"
-                  sub="Each group is a different classical technique applied to the same validators."
+                  sub="Each group probes the same two forms a different way: awkward email addresses, messages that sit right on the length limit, pasted HTML, and inputs designed to make the checking itself slow."
                 />
                 <ul className="divide-y divide-line-soft">
                   {Object.entries(text.bySuite)
@@ -550,7 +562,7 @@ export const FuzzTests: React.FC = () => {
                 <PanelHead
                   kicker="Coverage"
                   title="By mutation strategy"
-                  sub="What each strategy provoked. A strategy showing only skips is not testing anything, which a pass/fail count alone would hide."
+                  sub="What each way of breaking a photo actually produced. Watch for a row that is all skips — that damage never applied to any photo, so it tested nothing, and a plain pass/fail count would hide that."
                   icon={<Bug className="h-4 w-4 text-brand" />}
                 />
                 <div className="overflow-x-auto">
@@ -590,7 +602,7 @@ export const FuzzTests: React.FC = () => {
                 <PanelHead
                   kicker="Reference"
                   title="What the outcomes mean"
-                  sub="Crash and hang are always bugs. A wrong verdict is the subtler one, and the class a crash-only fuzzer cannot see."
+                  sub="Crashed and Hung are always real bugs. Wrong verdict is the subtle one: nothing visibly breaks, so a test that only watches for crashes would report everything as fine."
                 />
                 <dl className="divide-y divide-line-soft">
                   {(Object.keys(OUTCOMES) as FuzzOutcome[]).map((outcome) => (
@@ -608,7 +620,7 @@ export const FuzzTests: React.FC = () => {
                 <PanelHead
                   kicker="Inputs"
                   title={`Seed corpus (${mutation.seedCorpus.length} photos)`}
-                  sub="Real camera photographs from the pipeline golden set — the same images the pipeline is evaluated against."
+                  sub="Real camera photographs, reused from the set the pipeline is graded against. Each run picks from these at random and damages a fresh copy — the originals are never altered."
                 />
                 <div className="flex flex-wrap gap-1.5 p-4">
                   {mutation.seedCorpus.map((name) => (

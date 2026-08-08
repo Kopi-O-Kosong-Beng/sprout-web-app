@@ -71,11 +71,13 @@ export const NAV: NavGroup[] = [
       },
       {
         id: 'fuzz',
-        label: 'Fuzz Testing',
+        label: 'Fuzzy Testing',
         icon: Bug,
         kicker: 'Studio',
-        title: 'Image Ingest Fuzzing',
-        sub: 'Mutates real plant photos and feeds them to the same gate every scan passes through. Free and offline — no provider is called and nothing is billed.',
+        title: 'Fuzzy Testing',
+        /* The old subtitle described only the image suite, which was accurate
+           when there was only one. Three suites run from here now. */
+        sub: 'Throws thousands of deliberately broken inputs at the code that guards real uploads and forms, then checks it never crashes, stalls, or gives a wrong answer. Free and offline — no provider is called and nothing is billed.',
       },
     ],
   },
