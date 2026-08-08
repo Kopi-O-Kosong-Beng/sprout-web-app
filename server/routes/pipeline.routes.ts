@@ -415,13 +415,37 @@ router.post('/run-stage2c', async (req: Request, res: Response) => {
 
   try {
     const { rawSpriteB64, plantName } = req.body;
-    if (!rawSpriteB64) {
-      sendEvent({ event: 'error', error: 'No rawSpriteB64 provided' });
+
+    /*
+      The second untrusted entry point, and for a while the only one left
+      unguarded after the scan leg was closed.
+
+      It is tempting to treat this as internal — the only caller is the
+      studio's human gate, echoing back a sprite this server produced one
+      request earlier. It is not internal. This router is behind
+      authMiddleware but NOT requireSuperAdmin, so any verified account can
+      POST here with anything at all, and the bytes go straight to
+      Buffer.from(...,'base64') and then into sharp.
+
+      Same rules as the scan leg, different words: there is no photo at this
+      point, so "try taking the photo again" would be nonsense. Content is
+      sniffed rather than trusted — the studio labels this payload
+      `data:image/png` even when Flux answered with JPEG, so a validator that
+      believed the declared type would reject the pipeline's own output.
+    */
+    const sprite = await validateUploadedImage(rawSpriteB64, 'sprite');
+    if (!sprite.ok) {
+      sendEvent({
+        event: 'error',
+        step: '2c',
+        error: sprite.message,
+        reason: sprite.reason,
+      });
       res.end();
       return;
     }
 
-    const cleanB64 = rawSpriteB64.replace(/^data:image\/\w+;base64,/, '');
+    const cleanB64 = sprite.base64;
     const rawSpriteBuffer = Buffer.from(cleanB64, 'base64');
     const speciesName = plantName || 'Plant Monster';
 

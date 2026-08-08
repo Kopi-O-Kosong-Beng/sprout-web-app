@@ -14,6 +14,7 @@
  *    exists to produce.
  */
 import sharp from 'sharp';
+import { crc32 as zlibCrc32 } from 'zlib';
 
 /** Deterministic PRNG (mulberry32). Small, seedable, and good enough — this
  *  picks mutation strategies, it does not generate keys. */
@@ -59,6 +60,19 @@ export type MutantExpectation = 'accept' | 'reject' | 'either';
 export interface Mutant {
   bytes: Buffer;
   expect: MutantExpectation;
+  /**
+   * How the sink should hand this to the target.
+   *
+   *   'base64'  encode the bytes and send the string, which is what the real
+   *             route receives: req.body.imageBase64 is always a string.
+   *   'literal' send the bytes decoded as UTF-8 text, unencoded — the attacker
+   *             case, where raw prose arrives in a field that should hold
+   *             base64. This is the ONLY way to exercise the not_base64 rule.
+   *
+   * Defaults to 'base64' because that is the honest default: a fuzzer that
+   * hands Buffers straight in tests a branch production never takes.
+   */
+  deliverAs?: 'base64' | 'literal';
 }
 
 export interface Mutation {
@@ -154,27 +168,76 @@ const formatConfusion: Mutation = {
   },
 };
 
-/** 1x1, absurdly large, or a sliver — the shapes that make a naive decoder
- *  allocate, divide by zero, or produce a degenerate resize. */
+/**
+ * Forges a PNG header declaring enormous dimensions, without rasterising them.
+ *
+ * This is what a decompression bomb actually IS: a small file that claims to
+ * be huge. The gate rejects it on the DECLARED dimensions read from the
+ * header, never decoding — so producing a real 81-megapixel raster to test
+ * that path was both unnecessary and dangerous.
+ *
+ * It was dangerous because this runs in-process on the server behind the
+ * studio's Fuzz Testing page, and the backend is on a 512 MB instance.
+ * Measured: 25 iterations of the old resize-to-9000x9000 version added just
+ * over 1 GB of RSS, which would OOM-kill the container. Every other strategy
+ * moved RSS by 0-35 MB.
+ *
+ * Patching IHDR means recomputing its CRC, or sharp rejects the file as
+ * corrupt and the mutant tests error handling instead of the pixel ceiling.
+ */
+function forgeGiantPngHeader(
+  template: Buffer,
+  width: number,
+  height: number
+): Buffer | null {
+  const out = Buffer.from(template);
+  // PNG: 8-byte signature, then the IHDR chunk (4 length, 4 type, 13 data).
+  const ihdr = out.indexOf('IHDR', 0, 'ascii');
+  if (ihdr < 0 || out.byteLength < ihdr + 21) return null;
+  out.writeUInt32BE(width, ihdr + 4);
+  out.writeUInt32BE(height, ihdr + 8);
+  // CRC covers the type and the data, not the length field.
+  const crc = zlibCrc32(out.subarray(ihdr, ihdr + 17));
+  out.writeUInt32BE(crc, ihdr + 17);
+  return out;
+}
+
+/** 1x1, a sliver, or a forged giant. Every shape is out of policy: the two
+ *  small ones fall under the 16px minimum edge, and the giant is over the
+ *  40-megapixel ceiling. */
 const extremeResize: Mutation = {
   name: 'extreme_resize',
   async apply(seed, rng) {
     const shape = pick(rng, ['tiny', 'huge', 'sliver', 'tall'] as const);
+
+    if (shape === 'huge') {
+      try {
+        // A genuinely small PNG, then a forged header on top of it.
+        const small = await sharp(seed).resize(8, 8, { fit: 'fill' }).png().toBuffer();
+        /* 64 megapixels: comfortably over our 40 MP ceiling, and comfortably
+           under sharp's own ~268 MP default. Above that, sharp throws while
+           parsing the header and the mutant lands on 'unreadable' — still a
+           rejection, but it would exercise error handling instead of the
+           pixel-ceiling rule this case exists to test. */
+        const bytes = forgeGiantPngHeader(small, 8_000, 8_000);
+        if (!bytes) return null;
+        return { bytes, expect: 'reject' };
+      } catch {
+        return null;
+      }
+    }
+
     const dims =
       shape === 'tiny'
         ? { width: 1, height: 1 }
-        : shape === 'huge'
-          ? { width: 9000, height: 9000 }
-          : shape === 'sliver'
-            ? { width: 4000, height: 4 }
-            : { width: 4, height: 4000 };
+        : shape === 'sliver'
+          ? { width: 4_000, height: 4 }
+          : { width: 4, height: 4_000 };
     try {
       const bytes = await sharp(seed)
         .resize(dims.width, dims.height, { fit: 'fill' })
         .png()
         .toBuffer();
-      // Every shape here is out of policy: 1x1 and the two slivers fall under
-      // the 16px minimum edge, and 9000x9000 is 81 MP against a 40 MP ceiling.
       return { bytes, expect: 'reject' };
     } catch {
       return null;
@@ -263,9 +326,78 @@ const notAnImage: Mutation = {
       '../../etc/passwd',
       'a'.repeat(10_000),
     ] as const);
-    return { bytes: Buffer.from(payload, 'utf8'), expect: 'reject' };
+    // Literal: this is prose arriving in a base64 field, not an encoding of it.
+    return { bytes: Buffer.from(payload, 'utf8'), expect: 'reject', deliverAs: 'literal' };
   },
 };
+
+
+/* ==========================================================================
+   Random-testing baseline
+   --------------------------------------------------------------------------
+   These are NOT mutation strategies. They ignore the seed entirely and
+   generate from nothing, which is the point: they measure the claim that
+   modern input validation rejects random input before it reaches anything
+   interesting, and therefore that mutation-based fuzzing is a necessity
+   rather than a preference.
+
+   Kept out of MUTATIONS so a normal run is not diluted by inputs that are
+   uninteresting once the claim has been measured. BASELINE_MUTATIONS below is
+   what the baseline run uses.
+   ========================================================================== */
+
+/** Uniform random bytes, 0 to ~64 kB. The naive fuzzer from the textbook. */
+const randomBytes: Mutation = {
+  name: 'random_bytes',
+  async apply(_seed, rng) {
+    const length = randomInt(rng, 0, 65_536);
+    const out = Buffer.allocUnsafe(length);
+    for (let i = 0; i < length; i += 1) out[i] = randomInt(rng, 0, 255);
+    // A random byte string is not a JPEG. If one is ever accepted, that is a
+    // genuine finding and not a fluke worth shrugging at.
+    return { bytes: out, expect: 'reject' };
+  },
+};
+
+/**
+ * Random PRINTABLE text, which is the more interesting half of the baseline.
+ *
+ * Uniform bytes usually fail at the base64 check before anything looks at
+ * image structure, so they only ever exercise one rule. Printable text is
+ * well-formed enough to get past `not_base64` and die at `unreadable`
+ * instead — which is how the funnel shows two gates doing separate jobs
+ * rather than one gate doing everything.
+ */
+const randomPrintable: Mutation = {
+  name: 'random_printable',
+  async apply(_seed, rng) {
+    /*
+      Printable ASCII, INCLUDING characters outside the base64 alphabet.
+
+      An earlier version drew only from the base64 alphabet, which made every
+      payload accidentally well-formed base64 — it decoded to garbage and died
+      at `unreadable`, so the run measured one rule 9,999 times and reported
+      the base64 gate as if it barely existed. Spaces and punctuation are what
+      make this strategy reach `not_base64`, which is the whole reason it is
+      separate from random_bytes.
+    */
+    const alphabet =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' +
+      " !\"#$%&'()*,-.:;<=>?@[]^_`{|}~";
+    const length = randomInt(rng, 16, 32_768);
+    let text = '';
+    for (let i = 0; i < length; i += 1) {
+      text += alphabet[randomInt(rng, 0, alphabet.length - 1)];
+    }
+    return { bytes: Buffer.from(text, 'utf8'), expect: 'reject', deliverAs: 'literal' };
+  },
+};
+
+/** The baseline set. Deliberately separate from MUTATIONS. */
+export const BASELINE_MUTATIONS: readonly Mutation[] = [
+  randomBytes,
+  randomPrintable,
+];
 
 /** Every mutation the runner may choose from. */
 export const MUTATIONS: readonly Mutation[] = [

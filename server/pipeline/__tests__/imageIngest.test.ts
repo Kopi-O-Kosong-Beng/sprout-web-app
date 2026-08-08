@@ -174,6 +174,57 @@ describe('validateUploadedImage', () => {
     expect(result).toMatchObject({ ok: false, reason: 'too_large' });
   });
 
+  /*
+   * The sprite audience, used by /run-stage2c. Same rules, different words:
+   * that leg validates a sprite the pipeline itself produced, so telling the
+   * caller to retake a photo would be nonsense — there is no photo involved.
+   */
+  describe('sprite audience', () => {
+    it('applies identical rules, so a verdict never depends on the audience', async () => {
+      const cases: unknown[] = [
+        await image(256, 256, 'png'),
+        await image(1, 1, 'png'),
+        await image(64, 64, 'tiff'),
+        'hello world!!',
+        '',
+      ];
+      for (const input of cases) {
+        const asPhoto = await validateUploadedImage(input, 'photo');
+        const asSprite = await validateUploadedImage(input, 'sprite');
+        expect(asSprite.ok).toBe(asPhoto.ok);
+        if (!asPhoto.ok && !asSprite.ok) {
+          expect(asSprite.reason).toBe(asPhoto.reason);
+        }
+      }
+    });
+
+    it('phrases the rejection for an operator, not a player', async () => {
+      const sprite = await validateUploadedImage('data:image/png;base64,AAAA', 'sprite');
+      const photo = await validateUploadedImage('data:image/png;base64,AAAA', 'photo');
+
+      expect(sprite.ok).toBe(false);
+      if (sprite.ok || photo.ok) return;
+      expect(sprite.message).toMatch(/sprite/i);
+      expect(sprite.message).not.toMatch(/photo/i);
+      expect(photo.message).toMatch(/photo/i);
+    });
+
+    /*
+     * The studio labels this payload `data:image/png` even when Flux answered
+     * with JPEG. A validator that believed the declared type would reject the
+     * pipeline's own output, so content sniffing is load-bearing here rather
+     * than merely tidy.
+     */
+    it('sniffs content rather than believing a mislabelled data URL', async () => {
+      const jpegBytes = await image(512, 512, 'jpeg');
+      const mislabelled = `data:image/png;base64,${jpegBytes.toString('base64')}`;
+
+      const result = await validateUploadedImage(mislabelled, 'sprite');
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.format).toBe('jpeg');
+    });
+  });
+
   it('never leaks decoder output into the player-facing message', async () => {
     const result = await validateUploadedImage(
       Buffer.from('a'.repeat(4096)).toString('base64')

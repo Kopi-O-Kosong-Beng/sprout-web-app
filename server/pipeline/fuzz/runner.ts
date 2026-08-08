@@ -36,6 +36,11 @@ export interface FuzzResult {
   seed: string;
   mutation: string;
   outcome: FuzzOutcome;
+  /** Whether the sink let this input through. Undefined when it never
+   *  answered (crash, hang, skipped). Distinct from `outcome`: an acceptance
+   *  can be perfectly correct, and the random-testing baseline needs the raw
+   *  count of what survived rather than the count of what was wrong. */
+  accepted?: boolean;
   detail: string;
   elapsedMs: number;
   /** Everything needed to replay this exact case by hand. */
@@ -54,7 +59,11 @@ export interface SinkVerdict {
   detail: string;
 }
 
-export type FuzzSink = (input: Buffer, mutation: string) => Promise<SinkVerdict>;
+export type FuzzSink = (
+  input: Buffer,
+  mutation: string,
+  deliverAs: 'base64' | 'literal'
+) => Promise<SinkVerdict>;
 
 export interface FuzzOptions {
   seeds: FuzzSeed[];
@@ -71,6 +80,9 @@ export interface FuzzReport {
   results: FuzzResult[];
   rngSeed: number;
   counts: Record<FuzzOutcome, number>;
+  /** How many inputs the sink let through, right or wrong. The
+   *  random-testing baseline exists to report exactly this number. */
+  acceptedCount: number;
   findings: FuzzResult[];
 }
 
@@ -156,7 +168,7 @@ export async function runFuzz(options: FuzzOptions): Promise<FuzzReport> {
     let result: FuzzResult;
     try {
       const raced = await withTimeout(
-        sink(mutated.bytes, mutation.name),
+        sink(mutated.bytes, mutation.name, mutated.deliverAs ?? 'base64'),
         timeoutMs
       );
       const elapsedMs = Date.now() - startedAt;
@@ -188,6 +200,7 @@ export async function runFuzz(options: FuzzOptions): Promise<FuzzReport> {
           seed: seed.name,
           mutation: mutation.name,
           outcome: wrong ? 'silent_bad_output' : 'ok',
+          accepted: raced.value.accepted,
           detail: wrong
             ? expected === 'accept'
               ? `a valid image was refused: ${raced.value.detail}`
@@ -227,6 +240,7 @@ export async function runFuzz(options: FuzzOptions): Promise<FuzzReport> {
     results,
     rngSeed,
     counts,
+    acceptedCount: results.filter((r) => r.accepted === true).length,
     findings: results.filter(
       (r) => r.outcome === 'crash' || r.outcome === 'hang' || r.outcome === 'silent_bad_output'
     ),

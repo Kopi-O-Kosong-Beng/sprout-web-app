@@ -235,9 +235,9 @@ export default function SignupPage() {
           <p className="eyebrow">What unlocks</p>
           <h2>Archive, upload, battle, and contact support with one account.</h2>
           <ul>
-            <li>Firebase-backed account profile</li>
+            <li>One account across web and mobile</li>
             <li>Seeded demo avatar collection</li>
-            <li>Future GenAI Plantemon pipeline</li>
+            <li>New Plantemon as you scan</li>
           </ul>
         </div>
       </aside>

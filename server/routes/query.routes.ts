@@ -39,7 +39,10 @@ const statusLimiter = rateLimit({
 
 // Field set per UC8 step 1: name, email, organisation (optional), subject,
 // message, inquiry type.
-const querySchema = Joi.object({
+/* Exported so the text fuzz harness can drive the REAL schema rather than a
+   copy of it. A harness that fuzzed a reimplementation would prove nothing
+   about what the route actually accepts. */
+export const querySchema = Joi.object({
   name: Joi.string().trim().min(1).max(100).required(),
   email: Joi.string().trim().email().required(),
   organisation: Joi.string().trim().max(120).allow('').optional(),
@@ -51,7 +54,7 @@ const querySchema = Joi.object({
 });
 
 /** SPR-YYYYMMDD-NNNN, accepted in any case and trimmed by the service. */
-const statusSchema = Joi.object({
+export const statusSchema = Joi.object({
   refNumber: Joi.string()
     .trim()
     .pattern(/^[Ss][Pp][Rr]-\d{8}-\d{4}$/)

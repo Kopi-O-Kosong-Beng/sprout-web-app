@@ -6,7 +6,9 @@ import { isTestRunInFlight, runTests } from "./testRunner";
 import {
   clampRuns,
   isFuzzRunInFlight,
+  isFuzzSuite,
   runIngestFuzz,
+  FUZZ_SUITES,
   DEFAULT_FUZZ_RUNS,
   MAX_FUZZ_RUNS,
   MIN_FUZZ_RUNS,
@@ -315,8 +317,12 @@ adminRouter.post("/run-fuzz", async (req, res) => {
     return res.status(409).json({ error: "A fuzz run is already in progress." });
   }
 
+  const suite = isFuzzSuite(req.body?.suite) ? req.body.suite : "mutation";
+
+  // Undefined lets each suite pick its own default: the baseline is far
+  // cheaper per run than a mutation, so they do not share a sensible number.
   const rawRuns = req.body?.runs;
-  const runs = rawRuns === undefined ? DEFAULT_FUZZ_RUNS : clampRuns(Number(rawRuns));
+  const runs = rawRuns === undefined ? undefined : clampRuns(Number(rawRuns));
 
   // Distinguish "explore" from "replay seed 0", which is a legitimate seed.
   const rawSeed = req.body?.rngSeed;
@@ -328,15 +334,18 @@ adminRouter.post("/run-fuzz", async (req, res) => {
     return res.status(400).json({ error: "rngSeed must be a number." });
   }
 
-  logAdminEvent("info", "Fuzz", `Ingest fuzz run started (${runs} runs)`);
+  logAdminEvent("info", "Fuzz", `Fuzz run started: ${suite}`);
 
   try {
-    const result = await runIngestFuzz({ runs, rngSeed });
+    const result = await runIngestFuzz({ suite, runs, rngSeed });
+    const findings =
+      result.mutation?.findings.length ??
+      result.text?.findings.length ??
+      (result.baseline ? result.baseline.survivors : 0);
     logAdminEvent(
       result.ok ? "info" : "error",
       "Fuzz",
-      `Ingest fuzz finished in ${result.durationMs}ms: ` +
-        `${result.findings.length} finding(s), seed ${result.rngSeed}`,
+      `Fuzz (${suite}) finished in ${result.durationMs}ms: ${findings} finding(s)`,
     );
     res.json(result);
   } catch (err: any) {
@@ -352,5 +361,6 @@ adminRouter.get("/fuzz-config", (_req, res) => {
     minRuns: MIN_FUZZ_RUNS,
     maxRuns: MAX_FUZZ_RUNS,
     defaultRuns: DEFAULT_FUZZ_RUNS,
+    suites: FUZZ_SUITES,
   });
 });

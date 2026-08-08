@@ -699,8 +699,8 @@ export default function BattlePage() {
           kind: 'stale',
           message:
             current.status === 'active'
-              ? 'Battle synchronized to the latest server turn.'
-              : 'This battle had already ended — showing its final result.',
+              ? 'Caught up to the current turn.'
+              : 'This battle already ended — here is how it finished.',
         });
         setView(viewForSession(current));
         finishRequest(request);
@@ -829,7 +829,7 @@ export default function BattlePage() {
           result.stale
             ? {
                 kind: 'stale',
-                message: 'Battle synchronized to the latest server turn.',
+                message: 'Caught up to the current turn.',
               }
             : null
         );
@@ -1207,7 +1207,7 @@ export default function BattlePage() {
             {error && retryCommand?.kind !== 'load' && (
               <div className="pixel-panel p-3" role="alert">
                 <strong className="font-pixel block text-[9px] leading-relaxed">
-                  Battle command not saved
+                  That move did not go through
                 </strong>
                 <p className="battle-server-copy mt-1.5 text-[10px] leading-relaxed opacity-80">{error}</p>
                 <button
@@ -1276,7 +1276,7 @@ export default function BattlePage() {
                         role="status"
                         aria-label="Starting battle"
                       >
-                        Creating a persisted match...
+                        Setting up the match...
                       </p>
                     )}
                     <button
@@ -1315,7 +1315,7 @@ export default function BattlePage() {
               <p
                 className="pixel-panel px-3 py-2 text-center text-[10px] leading-relaxed"
                 role="status"
-                aria-label="Battle synchronized"
+                aria-label="Battle caught up"
               >
                 {notice.message}
               </p>
@@ -1331,7 +1331,7 @@ export default function BattlePage() {
                 ref={scrollErrorIntoView}
               >
                 <strong className="font-pixel block text-[9px] leading-relaxed">
-                  Battle command not saved
+                  That move did not go through
                 </strong>
                 <p className="battle-server-copy mt-1.5 text-[10px] leading-relaxed opacity-80">{error}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -1466,7 +1466,7 @@ export default function BattlePage() {
                       role="status"
                       aria-label={`Resolving turn ${session.turnNumber}`}
                     >
-                      Resolving turn {session.turnNumber} on the server...
+                      Resolving turn {session.turnNumber}...
                     </p>
                   )}
                   {pendingCommand === 'abandon' && (
@@ -1475,7 +1475,7 @@ export default function BattlePage() {
                       role="status"
                       aria-label="Abandoning battle"
                     >
-                      Saving abandonment...
+                      Ending the match...
                     </p>
                   )}
 
@@ -1686,7 +1686,7 @@ export default function BattlePage() {
                       role="status"
                       aria-label="Starting replay"
                     >
-                      Creating a new persisted match...
+                      Setting up a new match...
                     </p>
                   )}
                   <div className="mt-4 flex flex-col gap-2">

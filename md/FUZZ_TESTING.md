@@ -1,7 +1,20 @@
-# Image Pipeline Fuzz Testing
+# Fuzz Testing
 
-This document covers the image ingest gate and the fuzz harness that tests it:
-what they are, how to run them, how to read a finding, and how to extend them.
+This document has two halves.
+
+**Part 1 (built, green)** covers the image ingest gate and the fuzz harness that
+tests it: what they are, how to run them, how to read a finding, and how to
+extend them.
+
+**Part 2 (roadmap)** is the work not yet done — metamorphic oracles,
+generation-based fuzzing, a genetic search, and a second harness for the text
+entry points. It is written as implementation instructions, in dependency order,
+with acceptance criteria for each item. Nothing in Part 2 exists yet; do not
+document it as if it does.
+
+---
+
+# Part 1 — The Image Harness
 
 ## One-Minute Summary
 
@@ -9,13 +22,24 @@ Two things were built together, and neither makes sense without the other.
 
 ```text
 The gate    server/pipeline/ingest/imageIngest.ts
-            validates every uploaded photo before Plant.id sees it.
-            Runs on every scan.
+            validates untrusted image bytes at both pipeline entry
+            points. Runs on every scan.
 
 The fuzzer  server/pipeline/fuzz/
             mutates real plant photos and feeds them to that same
             function, checking it never crashes, hangs, or misjudges.
 ```
+
+Both entry points are guarded:
+
+| Route | Payload | Audience |
+|---|---|---|
+| `POST /api/pipeline/run-stream` | the camera photo, before Plant.id | `photo` |
+| `POST /api/pipeline/run-stage2c` | the sprite echoed back through the studio's human gate | `sprite` |
+
+Same rules on both. `audience` only changes the wording of a rejection: there
+is no photo at stage 2c, so "try taking the photo again" would be nonsense
+there.
 
 The fuzzer calls **the same function players hit**, not a copy. That is the
 whole point: a green fuzz run is a statement about production code.
@@ -135,8 +159,17 @@ The ten real plant photographs already in the repo, at
 the same images the pipeline is evaluated against and already include deliberate
 stress cases (`blurred_plants.jpg`, `lego_plant.jpg`).
 
-Read across the workspace boundary on purpose: copying them into `server/` would
-give the repo two corpora that drift apart.
+Resolution searches, in order: `SPROUT_FUZZ_SEEDS`, a server-local
+`server/fuzz-seeds` (what the Docker image ships), then the monorepo golden set
+found by walking up from `seedCorpus.ts`.
+
+The walk matters. An earlier version resolved one fixed path,
+`__dirname/../../../client/...`, which is correct only from TypeScript source —
+`tsc` inserts a `dist` level, so every *compiled* run resolved to
+`<repo>/server/client/...` and failed with ENOENT. The container could not have
+worked either way: `server/Dockerfile` copies only `client/package.json`, so the
+photographs never reached it. They are now copied to `server/fuzz-seeds` at
+build time. The golden set stays the single source; the image gets a copy.
 
 ### Mutation strategies
 
@@ -312,8 +345,10 @@ server/pipeline/ingest/imageIngest.ts        the gate. the thing being tested
 server/pipeline/fuzz/mutations.ts            strategies + seedable PRNG
 server/pipeline/fuzz/runner.ts               the loop, sink-agnostic
 server/pipeline/fuzz/seedCorpus.ts           loads the golden-set photos
+server/pipeline/__tests__/seedCorpus.test.ts        corpus resolution across layouts
 server/pipeline/__tests__/imageIngest.test.ts       unit tests for the gate
-server/pipeline/__tests__/imageIngest.fuzz.test.ts  CI-mode fuzzing
+server/pipeline/__tests__/imageIngest.fuzz.test.ts  CI-mode fuzzing, both legs
+server/tests/pipeline-ingest-gate.test.ts    wire-level: do the routes call it?
 server/scripts/fuzz-pipeline-live.ts         live mode. NOT a vitest file
 server/scripts/check-image.ts                one-input inspector
 server/platform/fuzzRunner.ts                in-process runner for the studio
@@ -385,11 +420,36 @@ pixel ceiling.
 `imageIngest.fuzz.test.ts`. Changing the seed is a commit, which is the point: a
 fuzz suite that silently varies makes "it passed yesterday" meaningless.
 
+## The Second Entry Point
+
+`/run-stage2c` is the continuation after the studio's human gate. It receives
+`rawSpriteB64` — a sprite this server produced one request earlier — and for a
+while it was the only unguarded path left, decoding straight into
+`Buffer.from(..., 'base64')` and then sharp.
+
+It is tempting to call that internal traffic. It is not. The pipeline router is
+behind `authMiddleware` but **not** `requireSuperAdmin`, so any verified account
+can POST arbitrary bytes to it. Only the studio uses it; anyone can reach it.
+
+Two things make this leg different from the scan leg:
+
+- **The declared MIME is wrong, legitimately.** The studio labels the payload
+  `data:image/png` even when Flux answered with JPEG. Content sniffing is
+  load-bearing here rather than merely tidy: a validator that believed the
+  declared type would reject the pipeline's own output.
+- **The copy is for an operator.** `IngestAudience` picks the vocabulary. The
+  rules do not change, and a test asserts the two legs reach the same verdict
+  on identical input, differing only in wording. If they ever diverge, one
+  entry point has become a way around the other.
+
+Coverage: both legs are fuzzed with the same 300 mutations, and
+`server/tests/pipeline-ingest-gate.test.ts` asserts at the wire that each route
+actually calls the guard and stops before any provider is contacted. A unit
+test cannot catch a route that forgets to invoke its own gate, which is exactly
+the state stage 2c was in.
+
 ## Known Gaps
 
-- **`/run-stage2c` is unguarded.** It decodes `rawSpriteB64` with the same
-  absent validation the scan route used to have. Post-Flux rather than the
-  camera entry point, so it was out of scope, but it is the same hole.
 - **Live mode has never been run against real APIs.** Start with `--runs 2`.
 - **HEIC is refused.** The allow-list is jpeg/png/webp. If iPhone uploads land
   unconverted, this is the first thing to change.
@@ -398,7 +458,494 @@ fuzz suite that silently varies makes "it passed yesterday" meaningless.
 - **CI adds ~40 s** to the `server-focused` job (20-minute budget, so
   comfortable).
 
-## Related
+---
+
+# Part 2 — Roadmap
+
+Everything above this line is built, tested and green. Everything below is not
+built. It is ordered by dependency: each item unblocks the ones after it, so
+build top to bottom rather than picking the interesting-looking one.
+
+## The Thesis
+
+Classical fuzzing, as taught, rests on two assumptions:
+
+1. **Execution is free.** You can afford millions of runs, so coverage-guided
+   feedback and genetic search are worth their iteration count.
+2. **A crash is the oracle.** You do not need to know the right answer, because
+   any answer that is not a segfault or a hang counts as a pass.
+
+An ML image pipeline violates both. Every run is billed, and the characteristic
+failure is not a crash but a fluent, confident, wrong answer. That is the whole
+reason `silent_bad_output` had to be invented as an outcome class.
+
+This is the claim the work should defend, and the table it produces:
+
+| Technique | Against the text endpoints | Against the image pipeline |
+|---|---|---|
+| Random testing | works, finds little | dies at the ingest gate — measure this |
+| Mutation-based | works | works, and is the only way past the gate |
+| Generation-based (EBNF) | works, email has a real grammar | needs reinvention: container grammar *and* scene grammar |
+| Coverage-guided feedback | works, coverage is meaningful | meaningless — the logic under test is inside Plant.id |
+| Genetic algorithms | affordable | only with a free surrogate fitness function |
+| Symbolic execution | works on the validators | does not transfer at all |
+| Crash oracle | sufficient | insufficient — needs metamorphic relations |
+
+Producing that table with evidence behind each cell is the deliverable. The
+individual harnesses are how the cells get filled in.
+
+## Standing Invariants
+
+These already hold and must keep holding through every item below.
+
+- **Nothing that spends money may match the vitest glob.** Not
+  `*.test.ts`, not under `pipeline/**/__tests__/`. Paid harnesses live in
+  `server/scripts/` and fail closed without `--confirm-spend`.
+- **Randomness stays injected, never ambient.** Every new fuzzer takes an
+  `rngSeed` and prints the one it used.
+- **Mutants declare their own expectation.** Never infer an expectation from a
+  strategy name. See "A Mistake Worth Knowing About" — that bug cost 38 false
+  findings once already.
+- **The harness calls production code, not a copy of it.** Thresholds, keys and
+  argument order come from the same resolvers the routes use.
+
+## Step 0 — Cost Tiers
+
+**Why.** Every item after this one needs to run thousands of iterations, and at
+present the only two options are "free but shallow" (the gate) and "expensive
+and deep" (the full chain). A tiered sink makes depth a dial instead of a
+binary, and makes the funnel measurable.
+
+**Build.** A `FuzzTier` enum and a sink factory that composes the pipeline up to
+a given depth:
+
+| Tier | Sink reaches | Cost | Feasible runs |
+|---|---|---|---|
+| `L0` | `validateUploadedImage` only | free | unlimited |
+| `L1` | + local surrogate classifier | free | thousands |
+| `L2` | + Plant.id, no render | cheap | hundreds |
+| `L3` | + prompt craft + Flux | expensive | tens |
+
+The runner already takes a sink and does not care what is behind it, so this is
+additive. `L0` is exactly today's CI sink; `L3` is exactly today's live sink.
+The new work is `L1` and `L2`, and the report field recording *which tier a
+mutant died at*.
+
+**Files.**
+
+```text
+server/pipeline/fuzz/tiers.ts        FuzzTier + makeSink(tier)
+server/pipeline/fuzz/runner.ts       add `diedAtTier` to the per-run record
+```
+
+**Acceptance.** `formatReport` prints a survival funnel: how many mutants
+entered each tier and how many passed it. Existing CI and live runs produce
+identical results to before when pinned to `L0` and `L3`.
+
+## Step 1 — The Random-Testing Baseline — BUILT
+
+**Result: 0 of 10,000 random payloads survived the ingest gate (0.00%).**
+
+Two rules stopped them, in roughly even halves — about 5,060 at `not_base64`
+and 4,940 at `unreadable`. The split is the real finding: a single rule
+catching everything would mean the run measured one thing 10,000 times rather
+than covering the gate.
+
+Getting that split honestly took a correction. The first version drew "random
+printable" text from the base64 alphabet, so every payload was accidentally
+well-formed base64, decoded to garbage and died at `unreadable` — 9,999 hits on
+one rule, reported as though the gate had been covered. Printable ASCII
+including punctuation is what reaches `not_base64`.
+
+Runs in about 4 seconds. `server/pipeline/fuzz/baseline.ts`, exposed in the
+studio as the **Random baseline** suite.
+
+### Original plan
+
+**Why.** The course's claim is that modern input validation rejects random bytes
+before they reach anything interesting, which is *the* justification for
+mutation-based fuzzing. Right now that claim is asserted in this repo, not
+measured. At `L0` it costs nothing to measure.
+
+**Build.** A random-bytes generator (the naive one: uniform bytes, length 0 to
+1 MB) and a run mode that fires 10,000 of them at `L0`.
+
+**Acceptance.** A recorded number: how many of 10,000 random payloads survive
+the gate. Expected answer is zero or near it. Then the same 10,000 as base64 of
+random *printable* text, to show `not_base64` and `unreadable` doing separate
+jobs. Record both figures in this document when they exist — they are the
+opening slide.
+
+**Cost.** Free. Half a day.
+
+## Step 2 — Findings As Artifacts
+
+**Why.** Replay by `rngSeed` is weaker than it looks. It reproduces the same
+mutant *input*, but Plant.id and Flux are non-deterministic and can change
+underneath you between runs. So an `L2`/`L3` finding may not reproduce, and its
+failure to reproduce does not clear it. At `L0` the seed is enough; past `L0` it
+is not.
+
+**Build.** On every finding, write the actual mutant bytes plus the raw
+upstream response to a run-scoped directory. Print the path in the finding line.
+
+```text
+server/pipeline/fuzz/artifacts.ts    writeFinding(runId, finding, bytes, raw)
+.gitignore                           the artifact directory
+```
+
+**Acceptance.** A finding line carries a file path; `check:image` accepts that
+path directly and reproduces the verdict. Artifacts are never committed and
+never contain credentials.
+
+## Step 3 — Record-Replay Cassettes
+
+**Why.** With Step 2 capturing real upstream responses, those responses become
+reusable. A cassette turns the orchestration code — the drift check, the
+`fromModel` logic, the deadline handling — into something fuzzable for free and
+deterministically, which is the only way to iterate on it.
+
+**Build.** A cassette-backed implementation of the Plant.id and Flux calls,
+keyed by a hash of the input bytes. Three modes: `record` (live, writes),
+`replay` (offline, throws on a miss), `passthrough` (today's behaviour).
+
+**Acceptance.** A cassette-mode fuzz run over recorded responses produces
+byte-identical reports on repeat, and spends nothing. It must be impossible for
+a cassette run to reach the network — assert it, do not assume it.
+
+**Note.** Cassettes are *not* mocks in the `USE_MOCK_APIS` sense. They are real
+responses replayed. Keep them distinct, and never let a cassette run report as
+if it were a live run — that is the same failure mode as fuzzing the mock.
+
+## Step 4 — Metamorphic Relations
+
+**This is the highest-value item in the roadmap.** Everything before it is
+plumbing to make it affordable.
+
+**Why.** The only content oracle today is "the mutation was `pixel_noise`, so
+any confident answer is wrong" — which works solely because the answer was
+hardcoded. Metamorphic testing removes that dependency: instead of asking *is
+this output correct*, it asserts *relations between the outputs of related
+inputs*. No ground truth needed, which is precisely the problem with testing a
+model whose job is to know things you do not.
+
+**Build two families.**
+
+**4a. Invariance relations.** Transform an input in a way that cannot change
+what the plant is, and assert the identification does not change:
+
+| Transform | Relation |
+|---|---|
+| rotate 90/180/270 | species unchanged |
+| horizontal flip | species unchanged |
+| crop 5% from each edge | species unchanged |
+| re-encode JPEG q95 | species unchanged |
+| resize to 80% | species unchanged |
+
+A different species for a flipped photo is a finding, and it was found without
+knowing what the plant was. Allow a configurable confidence tolerance; the
+*species label* is the assertion, not the exact probability.
+
+**4b. Monotonicity relations.** Interpolate a real photo toward uniform noise in
+ten steps and assert two things:
+
+- confidence decreases monotonically (allow a small epsilon for model jitter);
+- confidence crosses below `minConfidenceThreshold` **before** the image stops
+  being recognisable to a human.
+
+A confidence that stays above the floor at 90% noise is the strongest possible
+version of the finding the live sink currently gets by hardcoding.
+
+**Files.**
+
+```text
+server/pipeline/fuzz/metamorphic.ts           relations + transforms
+server/scripts/fuzz-metamorphic-live.ts       paid runner. NOT a vitest file
+server/pipeline/__tests__/metamorphic.test.ts relations tested against cassettes
+```
+
+**Acceptance.** The noise sweep produces a confidence-vs-noise curve per seed,
+emitted as JSON, with the threshold as a horizontal line and the crossing point
+recorded. Ten API calls per seed at `L2`. This is the headline result — make the
+output plottable, not just printable.
+
+## Step 5 — Generation-Based Fuzzing
+
+**Why.** Mutation starts from real photos and can only ever wander outward from
+them. Generation reaches inputs mutation cannot construct at all. The course
+teaches this over an expression grammar; the interesting move is that images
+admit **two different grammars at two different levels**, and saying so is most
+of the novelty claim.
+
+**5a. Container grammar (targets the decoder and the gate).**
+
+JPEG is a byte grammar. Write it as EBNF and generate structurally valid but
+unusual files:
+
+```text
+JPEG    ::= SOI Segment+ SOS ScanData EOI
+Segment ::= APPn | DQT | SOF0 | DHT | COM | DRI
+SOF0    ::= marker length precision height width components
+```
+
+Then generate: segments out of order, duplicate `DQT`, `SOF0` declaring zero
+height, missing `EOI`, `COM` of absurd length. Apply the course's expansion
+limits so recursion terminates. This is the literal instantiation of the
+lecture, and it targets `sharp` and the two-stage gate directly.
+
+**5b. Scene grammar (targets the model).**
+
+More interesting, and the part with no established literature to lean on. A
+grammar that synthesises *images* rather than bytes:
+
+```text
+Scene    ::= Background Object+
+Background ::= solid(Colour) | gradient(Colour, Colour) | noise(density)
+Object   ::= Shape Colour Size Position
+Shape    ::= leaf | stem | lobed_blob | serrated_blob | circle | rect
+Colour   ::= green_range | brown_range | random_rgb
+```
+
+Render with `sharp` compositing or node-canvas. This produces **plant-like
+non-plants** — the input class where a confident identification is most
+damning, and one that mutating real photographs can never reach. Object count
+and nesting depth are the expansion limits.
+
+**Files.**
+
+```text
+server/pipeline/fuzz/grammar/jpegGrammar.ts    container-level EBNF + generator
+server/pipeline/fuzz/grammar/sceneGrammar.ts   scene EBNF + renderer
+server/pipeline/fuzz/grammar/expand.ts         shared bounded expansion
+```
+
+**Acceptance.** Container grammar: 1,000 generated files at `L0`, no crashes, and
+a per-rule breakdown of which productions the gate refuses. Scene grammar: 50
+generated scenes at `L2`, reporting how many drew a confident species. Both
+seeded and reproducible. Save a grid of generated scenes as a PNG — it is the
+most legible slide in the deck.
+
+## Step 6 — Genetic Search With A Surrogate
+
+**Why.** GA needs many generations and the pipeline costs money per evaluation,
+so the textbook form is unaffordable. The standard escape is a **surrogate
+fitness function**: evolve against a free local model, then spend real money
+only on the elite few.
+
+**Build.**
+
+- **Population** — candidate images, seeded from Step 5b scenes.
+- **Fitness** — a local classifier's confidence that a provable non-plant is a
+  plant. Maximise it. Any small local vision model with a plant-ish head is
+  fine; it does not need to be good, it needs to be free and correlated.
+- **Crossover** — patch splice. Take rectangular regions of parent A and paste
+  them into parent B. The course describes crossover at byte offsets; the 2D
+  generalisation is the interesting bit and is worth stating explicitly.
+- **Mutation** — pixel perturbation at a random position, exactly as taught.
+- **Termination** — max generations, or fitness plateau below a delta.
+
+Then promote the top 5 individuals to `L2` and check whether they fool the real
+Plant.id.
+
+**Files.**
+
+```text
+server/pipeline/fuzz/surrogate.ts   local classifier wrapper, free
+server/pipeline/fuzz/genetic.ts     population, fitness, crossover, mutation
+server/scripts/fuzz-genetic.ts      L1 loop free; promotion to L2 gated
+```
+
+**Acceptance.** A fitness-over-generations curve, plus the transfer rate: of the
+elite promoted to Plant.id, how many kept their confidence. **If an image evolved
+against a free surrogate transfers to the paid model, that is the strongest
+result available from this whole roadmap** — cross-model transfer is a real and
+well-documented phenomenon and it makes the surrogate trick sound rather than
+merely thrifty.
+
+## Step 7 — EXIF As A Trust Boundary
+
+**Why.** This is the bridge between the image work and the text work, and it
+stops the two halves reading as unrelated projects. Image files carry text
+metadata. If any of it reaches storage or the UI, an image is a delivery vehicle
+for exactly the injection payloads from the code-standards material — and the
+boundary is not where anyone expects it to be.
+
+Note the current mutation table treats `exif_abuse` as `accept`, which is
+correct *for the gate*. The question here is different: what happens downstream.
+
+**Build.** EXIF fields (`ImageDescription`, `Artist`, `UserComment`,
+`Software`) carrying:
+
+- a `<script>` tag,
+- an SQL fragment,
+- the same payloads in `\uFE64`/`\uFE65` fullwidth form, to test whether
+  anything normalises **before** validating rather than after,
+- a `COM` segment of several megabytes.
+
+**Also here: decompression bombs.** The gate handles the declared-dimensions
+case at Stage 1. Add the compression-ratio case — a small PNG that expands to
+gigabytes — and assert the pixel ceiling catches it on declared size before
+allocation.
+
+**Acceptance.** A trace of where each EXIF field ends up: dropped at the gate,
+stored, or rendered. Any field that reaches a template unescaped is a real
+finding and should be written up as one.
+
+## Step 8 — The Dedupe Race
+
+**Why.** This document already states the bug's precondition, in "Live mode,
+paid": sprite-storage dedupes by species key *only after* generation. Two
+concurrent scans of the same species therefore both generate, and both write.
+That is the concurrency material instantiated on a defect this system plausibly
+has right now.
+
+**Build.** A test firing concurrent uploads of the same species through
+`Promise.all`, with the generator mocked so it costs nothing and counts its
+invocations.
+
+**Acceptance.** The test demonstrates either double generation or a write race,
+and fails before the fix and passes after. If the fix is a transaction or an
+advisory lock on the species key, say which and why in the commit.
+
+---
+
+# Part 3 — Text Fuzzing — BUILT
+
+**Result: 93 cases, 0 findings, slowest validation 1 ms** (against a 250 ms
+ReDoS bound). Runs in under 10 ms — it is Joi calls, nothing else.
+
+Built as `server/pipeline/fuzz/text/`, exposed in the studio as the **Text
+validators** suite. It drives the real `querySchema` and `statusSchema` from
+`routes/query.routes.ts`, not copies.
+
+Two results worth stating plainly, both negative:
+
+- **ReDoS: not vulnerable.** Joi's email validator does not backtrack —
+  measured at about 1 ms on nested-quantifier shapes, a 5,000-character local
+  part, and 500 repeated separators. "We looked and it is safe" is a finding,
+  and the time bound is asserted so nobody has to look again.
+- **Injection payloads are ACCEPTED, deliberately.** A contact form that
+  refuses an angle bracket is broken: someone reporting a scanner bug may need
+  to paste markup. Safety here is escaping on output, not refusal on input, and
+  the tests assert acceptance so nobody "fixes" it in the wrong direction.
+
+Not yet built from this part: coverage-guided feedback, and symbolic execution.
+See the note at the end of this section on why the latter is limited here.
+
+### Original plan
+
+A second harness against the text entry points. Deliberately kept separate from
+the image work, because its value in the presentation is as the **control
+group**: it is the domain where both classical assumptions hold, so it is where
+the techniques that do not transfer to images can be shown working properly.
+
+## Targets
+
+**Contact form.**
+
+| Field | Constraint |
+|---|---|
+| name | required |
+| email | required, format-validated |
+| organisation | optional |
+| inquiry type | enumerated |
+| subject | required |
+| message | required, max 2000 characters |
+
+**Ticket manager.**
+
+| Field | Constraint |
+|---|---|
+| feedback number | numeric identifier |
+| email | format-validated |
+
+## What Belongs Here Rather Than In Part 2
+
+**Coverage-guided feedback.** Free, deterministic, and coverage is actually
+meaningful because the logic under test is code in this repo rather than a
+remote model. Emit a JSON coverage report per generation and feed it back as
+fitness. This is the honest home for the feedback loop — do not fake one on the
+image side.
+
+**EBNF done properly.** Email has a real grammar. Generate valid, near-valid and
+invalid addresses from it, and show the parse trees. Quoted local parts, IP
+literals, plus-addressing, consecutive dots, trailing dot, IDN. This is where
+the grammar material gets its full treatment, with a grammar nobody has to be
+convinced exists.
+
+**Boundary values.** Message at 1999 / 2000 / 2001 characters. Feedback number
+as negative, zero, float, scientific notation, `2^31`, `2^53`, leading zeros,
+and — separately — a valid ID belonging to someone else. That last one is an
+authorisation test wearing a fuzzing costume, and it is usually the one that
+finds something.
+
+**Injection and normalisation.** SQL, XML and XSS payloads into name, subject
+and message, each in plain form *and* in a Unicode form that only becomes
+dangerous after `NFKC`. The pairing is the point: it tests whether the system
+normalises before validating or after, which is the difference between a filter
+and a decoration.
+
+**ReDoS.** If email validation uses a backtracking regex, test it with the
+nested-quantifier pattern. Assert a time bound, not just a verdict — a validator
+that eventually returns the right answer after eight seconds has already failed.
+
+**Symbolic execution.** The validators are small, pure and total, which makes
+them genuinely tractable: solve the path constraints to derive boundary inputs
+rather than searching for them. State plainly in the write-up that this is the
+technique's ceiling — you can symbolically execute a length check, and you
+cannot symbolically execute a diffusion model. Naming where a technique stops
+working is a stronger result than pretending it applies everywhere.
+
+**Files.**
+
+```text
+server/pipeline/fuzz/text/mutations.ts       text mutation strategies
+server/pipeline/fuzz/text/emailGrammar.ts    RFC-derived EBNF + generator
+server/pipeline/fuzz/text/payloads.ts        injection corpus, plain + fullwidth
+server/pipeline/fuzz/text/coverage.ts        JSON coverage -> fitness
+server/pipeline/__tests__/textFuzz.test.ts   CI mode, free, pinned seed
+```
+
+**Acceptance.** Runs in CI in under 20 seconds. Same standing invariants as the
+image harness: seeded, mutants declare expectations, sink is production code.
+The same three "prove the harness can fail" tests, adapted.
+
+---
+
+# Part 4 — The Presentation
+
+Image fuzzing is thin in the literature, so the framing that earns the talk is
+the *comparison*, not either harness alone. Suggested arc:
+
+1. **The funnel.** 10,000 random payloads, zero survivors past the gate. The
+   course's claim, measured here. Establishes why mutation-based is not a
+   preference but a necessity.
+2. **Mutation-based, and the 38 false findings.** The oracle-before-bug lesson.
+   Audiences remember the mistake more than the method.
+3. **The oracle problem.** A crash oracle passes a pipeline that renders a
+   confident fern from static. Introduce `silent_bad_output`.
+4. **Metamorphic relations.** How to test a model without ground truth. Land the
+   confidence-vs-noise curve here — it is the headline.
+5. **Generation-based, twice.** Container grammar for the decoder, scene grammar
+   for the model. Show the grid of generated scenes.
+6. **GA with a surrogate.** The cost problem and the transfer result.
+7. **Where the techniques stop.** The two-assumption table from the top of Part
+   2, now with evidence in every cell. This is the contribution.
+
+**Related work to have in hand.** Metamorphic testing (Chen et al., 1998, and
+its ML applications); DeepXplore and neuron coverage; DeepTest; TensorFuzz; and
+the long history of AFL against libjpeg and libpng for the container-level side.
+Verify publication details before citing — that list is from memory and the ML
+testing literature moves quickly.
+
+**What to be honest about in the talk.** Live mode has still never been run
+against real APIs. Non-determinism means an `L2`/`L3` finding may not reproduce.
+Surrogate transfer may simply not happen. A negative result, stated clearly, is
+a better talk than an overstated positive one.
+
+---
+
+# Related
 
 - [DEPLOYMENT.md](DEPLOYMENT.md) — how CI and the deployments fit together
 - [AGENT_HOOKS.md](AGENT_HOOKS.md) — the pre-commit checks that run alongside
