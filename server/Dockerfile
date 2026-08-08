@@ -98,6 +98,21 @@ COPY --from=builder --chown=node:node /app/server/dist ./server/dist
 COPY --from=deps --chown=node:node /app/server/package.json ./server/
 COPY --from=deps --chown=node:node /app/package.json ./
 
+# The fuzz harness's seed corpus: ten real plant photographs, ~600 kB.
+#
+# They live under client/ because the studio's golden set owns them, and this
+# image contains no client/ — only client/package.json, for the workspace
+# install. Without this line the studio's Fuzz Testing page fails with ENOENT
+# on a deployed backend while working perfectly in dev, which is exactly what
+# happened. pipeline/fuzz/seedCorpus.ts looks here second, after
+# SPROUT_FUZZ_SEEDS and before the monorepo layout.
+#
+# Copied into the runtime stage directly from the build context rather than
+# through the builder: they are data, nothing compiles them, and routing them
+# through a stage that runs `tsc` would only invalidate that layer whenever a
+# photograph changed.
+COPY --chown=node:node client/src/studio/pipeline/goldenset/photos/ ./server/fuzz-seeds/
+
 USER node
 
 # Documentation only — EXPOSE publishes nothing. `-p` at run time, or `ports:`

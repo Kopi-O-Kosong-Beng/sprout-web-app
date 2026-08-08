@@ -28,7 +28,7 @@
  */
 import '../env';
 import { runFuzz, formatReport, type SinkVerdict } from '../pipeline/fuzz/runner';
-import { loadSeedCorpus, SEED_CORPUS_DIR } from '../pipeline/fuzz/seedCorpus';
+import { loadSeedCorpus } from '../pipeline/fuzz/seedCorpus';
 import { validateUploadedImage } from '../pipeline/ingest/imageIngest';
 import { identifyPlant } from '../pipeline/stages/identify';
 import { craftPromptTiered } from '../pipeline/stages/promptCraft';
@@ -40,11 +40,12 @@ interface Args {
   runs: number;
   confirmSpend: boolean;
   rngSeed?: number;
-  seedsDir: string;
+  /** Undefined lets loadSeedCorpus search its candidate roots. */
+  seedsDir?: string;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { runs: 10, confirmSpend: false, seedsDir: SEED_CORPUS_DIR };
+  const args: Args = { runs: 10, confirmSpend: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--confirm-spend') args.confirmSpend = true;
