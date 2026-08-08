@@ -6,6 +6,10 @@ supersedes: "[[Test Inventory 2026-08-03]]"
 status: current
 ---
 
+> [!warning] SUPERSEDED by [[Test Inventory 2026-08-09]]
+> Measured before PRs #25–#28. Every figure below is stale: the suite is now
+> **1074 tests across 95 files**. Kept as the 6 Aug record, not as a source.
+
 # Test Inventory — 2026-08-06
 
 **The figures to quote in the final report.** Every earlier count in this vault

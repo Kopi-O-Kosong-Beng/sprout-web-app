@@ -13,8 +13,9 @@ drives components against a mocked network boundary. End-to-end journeys sit
 above both: a real Chromium drives the real client, server, and emulators with
 nothing between the click and the database substituted.
 
-Suite totals (measured from the runners, 2026-08-06): **565** server Jest ·
-**265** client Vitest · **113** pipeline Vitest · **11** Playwright E2E.
+Suite totals, measured from the runners on `main`, 2026-08-09: **603** server
+Jest (44 files) · **309** client Vitest (28) · **149** pipeline Vitest (17) ·
+**13** Playwright E2E (6). **1074 across 95 files.**
 
 ---
 
@@ -40,6 +41,8 @@ Suite totals (measured from the runners, 2026-08-06): **565** server Jest ·
 | Integration (API) | [`server/tests/auth-user-repo-firestore.test.ts`](../server/tests/auth-user-repo-firestore.test.ts) | Profile synchronisation on login |
 | Client | [`client/src/pages/LoginPage.test.tsx`](../client/src/pages/LoginPage.test.tsx) | Form flows, the Google sign-in redirect race regression, audit-failure resilience |
 | **E2E** | [`e2e/archive-to-battle.spec.ts`](../e2e/archive-to-battle.spec.ts) | Sign-in through the real form establishing a session (the dev-session path; the Firebase-token path is covered by the integration tier above) |
+| Client (unit) | [`client/src/context/AuthContext.logout.test.tsx`](../client/src/context/AuthContext.logout.test.tsx) | `logout()` in isolation with Firebase mocked: audit-then-sign-out order, audit-failure resilience, the dev-session branch, unconfigured Firebase |
+| **E2E** | [`e2e/logout.spec.ts`](../e2e/logout.spec.ts) | Sign-out as a round trip in a real browser — the header button is wired, the redirect happens, the stored session record is **removed** (jsdom's localStorage is a shim, so only this tier can tell), a protected route re-locks, and the state survives a reload. The server audit write is not exercised: the dev-session path returns before `POST /api/auth/session/logout`, which `auth.test.ts` owns |
 
 ## UC3 — Reset Password
 
