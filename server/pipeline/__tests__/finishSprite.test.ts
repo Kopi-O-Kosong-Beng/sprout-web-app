@@ -260,6 +260,74 @@ describe("finishSprite", () => {
     expect(distance(got)).toBeLessThan(distance(blended));
   });
 
+  /*
+    The Portulaca failure, in miniature.
+
+    White is distance 0 from SPROUT_PALETTE, so backdrop the matting missed is
+    bit-identical to a legitimately white plant pixel — no colour test can
+    separate them. Connectivity can: the surviving background is reachable from
+    the frame edge through the transparent moat, and the creature's interior
+    whites sit behind the black outline the style already demands.
+
+    The image: a transparent field, a creature drawn as a black outline ring
+    filled with white, and an opaque white patch of un-removed background
+    pressed against the outline's outside.
+  */
+  const buildCutoutWithSurvivingBackdrop = async () => {
+    const W = 192;
+    const raw = Buffer.alloc(W * W * 4, 0);
+    const paint = (x0: number, y0: number, x1: number, y1: number, rgb: number[]) => {
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const i = (y * W + x) * 4;
+          raw[i] = rgb[0];
+          raw[i + 1] = rgb[1];
+          raw[i + 2] = rgb[2];
+          raw[i + 3] = 255;
+        }
+      }
+    };
+    const WHITE = [255, 255, 255];
+    const BLACK = [0, 0, 0];
+
+    paint(60, 60, 132, 132, BLACK); // creature: outline...
+    paint(64, 64, 128, 128, WHITE); // ...with a white interior, 64x64
+    paint(40, 70, 60, 120, WHITE); //  un-removed background against its left side
+
+    return sharp(raw, { raw: { width: W, height: W, channels: 4 } })
+      .png()
+      .toBuffer();
+  };
+
+  const alphaAt = (data: Buffer, x: number, y: number) =>
+    data[(y * SPRITE_SIZE + x) * 4 + 3];
+
+  it("[black-box] keyBackdrop clears border-reachable backdrop but cannot cross the outline", async () => {
+    const input = await buildCutoutWithSurvivingBackdrop();
+    const { data } = await sharp(await finishSprite(input, { keyBackdrop: true }))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    expect(alphaAt(data, 50, 95)).toBe(0); //    background patch: cleared
+    expect(alphaAt(data, 96, 96)).toBe(255); //  interior white: kept
+    expect(alphaAt(data, 62, 96)).toBe(255); //  outline itself: kept
+  });
+
+  it("[black-box] without keyBackdrop the surviving backdrop is left alone", async () => {
+    // The passthrough contract: when matting never produced a cutout, the
+    // white background staying visible is the honest degradation the golden
+    // set's edge_removebg_degraded case asserts. Off must mean off.
+    const input = await buildCutoutWithSurvivingBackdrop();
+    const { data } = await sharp(await finishSprite(input))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    expect(alphaAt(data, 50, 95)).toBe(255); //  background patch: untouched
+    expect(alphaAt(data, 96, 96)).toBe(255);
+  });
+
   it("[black-box: equivalence] crops photo to 192x192 PNG buffer for Tier 4 fallback", async () => {
     const photoB64 = (await createSolidPng("#51B341", 400, 300)).toString("base64");
     const cropped = await cropPhoto(photoB64);

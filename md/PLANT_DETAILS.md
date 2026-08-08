@@ -243,6 +243,15 @@ this result suggests it would move far.
   stopped dead at the creature's black outline, leaving all 7,853 interior white
   pixels intact. The bold black outline the style already demands is what makes
   this safe — it is a wall the fill cannot cross.
+
+  This now ships as `clearBorderConnectedBackdrop` in
+  `server/pipeline/stages/finish.ts`, behind `finishSprite`'s `keyBackdrop`
+  option. The pipeline sets it only when withoutBG returned a real cutout
+  (`removeBgOk`); a passthrough render keeps its background baked in, because
+  that visible degradation is the contract the golden set's
+  `edge_removebg_degraded` case pins (`hasAlpha: false`). Validated against the
+  three white-backdrop experiment renders: the full white field cleared on all
+  three, interior whites survived (2,513 px of white flower on Portulaca).
 - **Colour alone was never sufficient anyway.** The earlier local keyer was
   reverted because it matched on a sampled corner colour with no connectivity,
   so a sprite touching the frame edge lost chunks of itself. Connectivity is the

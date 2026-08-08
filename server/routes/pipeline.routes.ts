@@ -583,7 +583,11 @@ async function runStage2cOnward(
   });
 
   const startTime2d = Date.now();
-  const finishedPngBuffer = await finishSprite(removeBgResult.png);
+  // keyBackdrop only on a real cutout: on a passthrough render the white
+  // background staying visible is the honest degradation the golden set pins.
+  const finishedPngBuffer = await finishSprite(removeBgResult.png, {
+    keyBackdrop: removeBgResult.removeBgOk,
+  });
   const lat2d = Date.now() - startTime2d;
   const finishedB64 = finishedPngBuffer.toString('base64');
 
