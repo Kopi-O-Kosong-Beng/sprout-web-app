@@ -14,6 +14,7 @@
  *    exists to produce.
  */
 import sharp from 'sharp';
+import { crc32 as zlibCrc32 } from 'zlib';
 
 /** Deterministic PRNG (mulberry32). Small, seedable, and good enough — this
  *  picks mutation strategies, it does not generate keys. */
@@ -167,27 +168,76 @@ const formatConfusion: Mutation = {
   },
 };
 
-/** 1x1, absurdly large, or a sliver — the shapes that make a naive decoder
- *  allocate, divide by zero, or produce a degenerate resize. */
+/**
+ * Forges a PNG header declaring enormous dimensions, without rasterising them.
+ *
+ * This is what a decompression bomb actually IS: a small file that claims to
+ * be huge. The gate rejects it on the DECLARED dimensions read from the
+ * header, never decoding — so producing a real 81-megapixel raster to test
+ * that path was both unnecessary and dangerous.
+ *
+ * It was dangerous because this runs in-process on the server behind the
+ * studio's Fuzz Testing page, and the backend is on a 512 MB instance.
+ * Measured: 25 iterations of the old resize-to-9000x9000 version added just
+ * over 1 GB of RSS, which would OOM-kill the container. Every other strategy
+ * moved RSS by 0-35 MB.
+ *
+ * Patching IHDR means recomputing its CRC, or sharp rejects the file as
+ * corrupt and the mutant tests error handling instead of the pixel ceiling.
+ */
+function forgeGiantPngHeader(
+  template: Buffer,
+  width: number,
+  height: number
+): Buffer | null {
+  const out = Buffer.from(template);
+  // PNG: 8-byte signature, then the IHDR chunk (4 length, 4 type, 13 data).
+  const ihdr = out.indexOf('IHDR', 0, 'ascii');
+  if (ihdr < 0 || out.byteLength < ihdr + 21) return null;
+  out.writeUInt32BE(width, ihdr + 4);
+  out.writeUInt32BE(height, ihdr + 8);
+  // CRC covers the type and the data, not the length field.
+  const crc = zlibCrc32(out.subarray(ihdr, ihdr + 17));
+  out.writeUInt32BE(crc, ihdr + 17);
+  return out;
+}
+
+/** 1x1, a sliver, or a forged giant. Every shape is out of policy: the two
+ *  small ones fall under the 16px minimum edge, and the giant is over the
+ *  40-megapixel ceiling. */
 const extremeResize: Mutation = {
   name: 'extreme_resize',
   async apply(seed, rng) {
     const shape = pick(rng, ['tiny', 'huge', 'sliver', 'tall'] as const);
+
+    if (shape === 'huge') {
+      try {
+        // A genuinely small PNG, then a forged header on top of it.
+        const small = await sharp(seed).resize(8, 8, { fit: 'fill' }).png().toBuffer();
+        /* 64 megapixels: comfortably over our 40 MP ceiling, and comfortably
+           under sharp's own ~268 MP default. Above that, sharp throws while
+           parsing the header and the mutant lands on 'unreadable' — still a
+           rejection, but it would exercise error handling instead of the
+           pixel-ceiling rule this case exists to test. */
+        const bytes = forgeGiantPngHeader(small, 8_000, 8_000);
+        if (!bytes) return null;
+        return { bytes, expect: 'reject' };
+      } catch {
+        return null;
+      }
+    }
+
     const dims =
       shape === 'tiny'
         ? { width: 1, height: 1 }
-        : shape === 'huge'
-          ? { width: 9000, height: 9000 }
-          : shape === 'sliver'
-            ? { width: 4000, height: 4 }
-            : { width: 4, height: 4000 };
+        : shape === 'sliver'
+          ? { width: 4_000, height: 4 }
+          : { width: 4, height: 4_000 };
     try {
       const bytes = await sharp(seed)
         .resize(dims.width, dims.height, { fit: 'fill' })
         .png()
         .toBuffer();
-      // Every shape here is out of policy: 1x1 and the two slivers fall under
-      // the 16px minimum edge, and 9000x9000 is 81 MP against a 40 MP ceiling.
       return { bytes, expect: 'reject' };
     } catch {
       return null;
