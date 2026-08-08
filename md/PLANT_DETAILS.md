@@ -181,6 +181,73 @@ not advertising it.
 
 ---
 
+# Appendix — The Chroma-Key Backdrop That Flux Would Not Paint
+
+A measured negative result, kept so nobody spends the same credits proving it
+twice. Re-runnable: `npm run backdrop:experiment -w server -- --confirm-spend`.
+
+## Why it looked like a good idea
+
+`finishSprite` has to tell background from creature, and with a white backdrop
+it cannot. White is **distance 0 from SPROUT_PALETTE** — it is literally palette
+entry `#FFFFFF` — so any leftover backdrop snaps to exactly the same value as a
+legitimately white plant pixel. Portulaca grandiflora came back as a white
+creature on a white field with roughly 7,500 px of background still baked in,
+and nothing downstream could detect it.
+
+A backdrop far from the palette would fix that. Measured distances:
+
+| Candidate | Nearest palette entry | Distance |
+|---|---|---|
+| white `#FFFFFF` | `#FFFFFF` | **0** |
+| chroma blue `#0000FF` | `#565FBF` | 143 |
+| magenta `#FF00FF` | `#DE5995` | 142 |
+| cyan `#00FFFF` | `#59F7FF` | 89 |
+| chroma green `#00FF00` | `#26FF43` | 77 |
+
+Magenta was chosen over blue on two grounds: nine palette entries are
+recognisably blue, so leftover blue would read as a deliberate design choice,
+and blue flowers are real — hydrangea is in the golden set. A magenta failure
+is unmissable.
+
+## What actually happened
+
+Six Flux renders, three pale/white-flowered species with the backdrop clause as
+the only variable:
+
+| Subject | Backdrop asked for | Border match | Corner offset |
+|---|---|---|---|
+| Portulaca grandiflora | pure-white | **100.0%** | 2 |
+| Portulaca grandiflora | pure magenta | **0.0%** | 253 |
+| Leucophyllum frutescens | pure-white | **100.0%** | 2 |
+| Leucophyllum frutescens | pure magenta | **0.0%** | 253 |
+| Achillea millefolium | pure-white | **100.0%** | 3 |
+| Achillea millefolium | pure magenta | **0.0%** | 253 |
+
+**Flux ignored the instruction completely.** 253 is the distance from magenta to
+white, so it painted white every time. Compliance with `pure-white` is
+essentially perfect; compliance with a chroma key is zero.
+
+Not a tuning problem. The clause sits in the same sentence, in the same
+position, with the same surrounding words — the only thing that changed is the
+colour named, and the model overrode it. Rewording might move it; nothing in
+this result suggests it would move far.
+
+## What follows
+
+- **Do not change the backdrop colour** while Flux is the renderer. Re-run the
+  experiment if the renderer changes; a model that obeys would make the
+  detectability argument live again.
+- **Connectivity is the tool that works.** A flood fill inward from the frame
+  edge cleared 7,547 px of un-removed background from the Portulaca sprite and
+  stopped dead at the creature's black outline, leaving all 7,853 interior white
+  pixels intact. The bold black outline the style already demands is what makes
+  this safe — it is a wall the fill cannot cross.
+- **Colour alone was never sufficient anyway.** The earlier local keyer was
+  reverted because it matched on a sampled corner colour with no connectivity,
+  so a sprite touching the frame edge lost chunks of itself. Connectivity is the
+  fix; a different colour would not have been.
+
 # Related
 
 - [FUZZ_TESTING.md](FUZZ_TESTING.md) — the gate every scanned photo passes first
