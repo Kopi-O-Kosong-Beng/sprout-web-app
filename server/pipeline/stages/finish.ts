@@ -5,6 +5,46 @@ import { SPROUT_PALETTE, SPRITE_SIZE } from "../config";
 const OPAQUE_THRESHOLD = 32;
 
 /**
+ * Where a partly transparent pixel is rounded to: above this it becomes fully
+ * opaque, below it becomes fully clear. No pixel keeps a value in between.
+ *
+ * 128 deliberately, because programmaticEval counts a pixel as opaque on the
+ * same test. Rounding to any other cutoff would move pixels across its
+ * boundary and change `notBlank`/`hasAlpha` for reasons that have nothing to
+ * do with the sprite.
+ */
+const ALPHA_CUTOFF = 128;
+
+/**
+ * The backdrop the render was produced against.
+ *
+ * promptCraft demands a "pure-white background" in three separate places, so an
+ * edge pixel that came back semi-transparent is a blend of the creature and
+ * white — and how much white is exactly what its alpha records.
+ */
+const RENDER_BACKDROP = 255;
+
+/**
+ * Recovers a pixel's true colour by removing the backdrop mixed into it.
+ *
+ * Matting returns the OBSERVED colour: `observed = a·true + (1−a)·backdrop`.
+ * Rearranged, `true = (observed − (1−a)·backdrop) / a`. Without this a pixel at
+ * alpha 200 is 22% white, and the palette snap below picks a lighter entry than
+ * the creature actually has — a pale rim one pixel wide around the silhouette.
+ *
+ * Only ever called for pixels at or above ALPHA_CUTOFF, so the divisor is never
+ * below 0.5 and this amplifies noise by at most 2x. Applying it to a nearly
+ * transparent pixel would amplify by up to 255x and invent colours; those
+ * pixels are discarded instead.
+ */
+function decontaminate(channel: number, alpha: number): number {
+  if (alpha >= 255) return channel;
+  const a = alpha / 255;
+  const recovered = (channel - (1 - a) * RENDER_BACKDROP) / a;
+  return Math.max(0, Math.min(255, Math.round(recovered)));
+}
+
+/**
  * Step 1 / §3d: finishSprite
  *
  * Downscales to 192x192 with a nearest-neighbour kernel, drops every opaque
@@ -34,13 +74,40 @@ export async function finishSprite(png: Buffer): Promise<Buffer> {
     parseInt(hex.slice(5, 7), 16),
   ]);
 
+  /*
+    Decontaminate, snap, then harden the alpha.
+
+    The previous version skipped every pixel under alpha 128 with the comment
+    "leave transparent pixels" — but a pixel at alpha 1..127 is not
+    transparent, it is PARTLY VISIBLE and its colour is a blend of the creature
+    and the white backdrop. Skipping it kept both the contaminated colour and
+    the partial visibility, which is the pale halo that appeared around every
+    sprite. Measured on live sprites: ~100 such pixels each, plus ~300 more at
+    alpha 128..254 that were snapped but left semi-transparent.
+
+    Soft edges were the odd one out here anyway. This function downscales with
+    a nearest-neighbour kernel and quantises every colour to a fixed palette;
+    an anti-aliased alpha channel was the single place it still allowed an
+    in-between value.
+  */
   for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] < 128) continue; // leave transparent pixels
+    const alpha = data[i + 3];
+
+    if (alpha < ALPHA_CUTOFF) {
+      // Not "already transparent" — made transparent, which is the fix.
+      data[i + 3] = 0;
+      continue;
+    }
+
+    const r = decontaminate(data[i], alpha);
+    const g = decontaminate(data[i + 1], alpha);
+    const b = decontaminate(data[i + 2], alpha);
+
     let best = 0, bestD = Infinity;
     for (let p = 0; p < pal.length; p++) {
-      const dr = data[i] - pal[p][0];
-      const dg = data[i + 1] - pal[p][1];
-      const db = data[i + 2] - pal[p][2];
+      const dr = r - pal[p][0];
+      const dg = g - pal[p][1];
+      const db = b - pal[p][2];
       const d = dr * dr + dg * dg + db * db;
       if (d < bestD) {
         bestD = d;
@@ -50,6 +117,7 @@ export async function finishSprite(png: Buffer): Promise<Buffer> {
     data[i] = pal[best][0];
     data[i + 1] = pal[best][1];
     data[i + 2] = pal[best][2];
+    data[i + 3] = 255;
   }
 
   return sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } })

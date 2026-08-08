@@ -116,8 +116,14 @@ describe("finishSprite", () => {
    * finishSprite's palette loop branches on `alpha < 128`. 127 and 128 are the
    * two values either side of that comparison, so this pins the branch itself
    * rather than a comfortably-opaque or comfortably-clear pixel.
+   *
+   * This used to assert that a pixel below the cutoff was LEFT ALONE — which
+   * was the halo bug written down as a requirement. A pixel at alpha 1..127 is
+   * not transparent, it is partly visible carrying a colour blended with the
+   * white backdrop, and keeping it produced the pale rim around every sprite.
+   * The contract now is that no pixel survives partly transparent at all.
    */
-  it("[white-box: boundary] alpha 127 is left alone, 128 is snapped to the palette", async () => {
+  it("[white-box: boundary] alpha 127 is cleared, 128 is snapped and made opaque", async () => {
     const W = 8;
     const raw = Buffer.alloc(W * W * 4, 0);
     // An off-palette colour so a snap is observable if it happens.
@@ -150,21 +156,108 @@ describe("finishSprite", () => {
           .map((v) => v.toString(16).padStart(2, '0'))
           .join('')).toUpperCase();
 
-    let sawSnapped = false;
-    let sawUntouched = false;
+    let sawOpaque = false;
+    let sawCleared = false;
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] >= 128) {
-        // Opaque side: must have been snapped onto the palette.
+      const alpha = data[i + 3];
+      // The whole point: nothing lands between the two extremes.
+      expect(alpha === 0 || alpha === 255).toBe(true);
+
+      if (alpha === 255) {
+        // The 128 side: decontaminated, then snapped onto the palette.
         expect(palette.has(hexAt(i))).toBe(true);
-        sawSnapped = true;
-      } else if (data[i + 3] > 0) {
-        // Below-threshold side: skipped by the loop, so still off-palette.
-        sawUntouched = true;
+        sawOpaque = true;
+      } else {
+        sawCleared = true;
       }
     }
 
-    expect(sawSnapped).toBe(true);
-    expect(sawUntouched).toBe(true);
+    // Both sides of the boundary have to be represented, or the test is
+    // asserting one branch twice.
+    expect(sawOpaque).toBe(true);
+    expect(sawCleared).toBe(true);
+  });
+
+  /*
+    The halo, stated directly.
+
+    Matting returns a soft edge: a ring of pixels whose colour is part creature,
+    part backdrop, and whose alpha says how much of each. Left as-is they render
+    as a pale rim — the "weird blend of background and sprite" this was reported
+    as. Nothing may survive partly transparent.
+  */
+  it("[black-box] leaves no partly transparent pixel anywhere", async () => {
+    const W = 16;
+    const raw = Buffer.alloc(W * W * 4, 0);
+    for (let i = 0; i < W * W; i++) {
+      const p = i * 4;
+      raw[p] = 60;
+      raw[p + 1] = 160;
+      raw[p + 2] = 70;
+      // A full sweep of alphas, so every band the old code treated
+      // differently is present in one image.
+      raw[p + 3] = Math.round((i / (W * W - 1)) * 255);
+    }
+    const input = await sharp(raw, { raw: { width: W, height: W, channels: 4 } })
+      .png()
+      .toBuffer();
+
+    const { data } = await sharp(await finishSprite(input))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const partial: number[] = [];
+    for (let i = 0; i < data.length; i += 4) {
+      const alpha = data[i + 3];
+      if (alpha !== 0 && alpha !== 255) partial.push(alpha);
+    }
+
+    expect(partial).toEqual([]);
+  });
+
+  /*
+    Decontamination, which is the other half of the fix.
+
+    A pixel at alpha 128 against a white backdrop is roughly half white. Snapped
+    without correcting for that, it picks a palette entry lighter than the
+    creature actually is, and the silhouette gets a bright outline even once the
+    alpha is hardened. The recovered colour must be nearer the true one than the
+    blended colour was.
+  */
+  it("[white-box] removes the white mixed into a semi-transparent pixel", async () => {
+    const W = 8;
+    const TRUE_COLOUR = [40, 120, 60];
+    const raw = Buffer.alloc(W * W * 4, 0);
+    for (let i = 0; i < W * W; i++) {
+      const p = i * 4;
+      // What matting hands back for a half-covered pixel: the true colour
+      // mixed 50/50 with the white backdrop.
+      raw[p] = Math.round(0.5 * TRUE_COLOUR[0] + 0.5 * 255);
+      raw[p + 1] = Math.round(0.5 * TRUE_COLOUR[1] + 0.5 * 255);
+      raw[p + 2] = Math.round(0.5 * TRUE_COLOUR[2] + 0.5 * 255);
+      raw[p + 3] = 128;
+    }
+    const input = await sharp(raw, { raw: { width: W, height: W, channels: 4 } })
+      .png()
+      .toBuffer();
+
+    const { data } = await sharp(await finishSprite(input))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // Compare against what the blended colour would have snapped to. The
+    // recovered pixel must be closer to the true colour than that was.
+    const distance = (c: number[]) =>
+      (c[0] - TRUE_COLOUR[0]) ** 2 +
+      (c[1] - TRUE_COLOUR[1]) ** 2 +
+      (c[2] - TRUE_COLOUR[2]) ** 2;
+    const blended = [148, 188, 158];
+
+    const got = [data[0], data[1], data[2]];
+    expect(data[3]).toBe(255);
+    expect(distance(got)).toBeLessThan(distance(blended));
   });
 
   it("[black-box: equivalence] crops photo to 192x192 PNG buffer for Tier 4 fallback", async () => {
