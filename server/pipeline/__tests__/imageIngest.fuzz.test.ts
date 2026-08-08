@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import {
-  validateUploadedImage,
-  type IngestAudience,
-} from '../ingest/imageIngest';
-import { runFuzz, formatReport, type SinkVerdict } from '../fuzz/runner';
+import { makeImageSink } from '../fuzz/imageSink';
+import { runFuzz, formatReport } from '../fuzz/runner';
 import { loadSeedCorpus } from '../fuzz/seedCorpus';
 
 /**
@@ -28,28 +25,15 @@ const RNG_SEED = 42;
 const RUNS = 300;
 
 /** The contract under test: never throw, always answer. A thrown error escapes
- *  to the runner and is recorded as a crash. */
-function makeSink(audience: IngestAudience) {
-  return async (input: Buffer): Promise<SinkVerdict> => {
-    const result = await validateUploadedImage(input, audience);
-    return {
-      accepted: result.ok,
-      detail: result.ok
-        ? `accepted ${result.format} ${result.width}x${result.height}`
-        : `rejected: ${result.reason}`,
-    };
-  };
-}
-
-/** `/api/pipeline/run-stream` — the camera photo on its way to Plant.id. */
-const sink = makeSink('photo');
+ *  to the runner and is recorded as a crash. Both sinks deliver input the way
+ *  the routes do — as a string — rather than handing Buffers straight in. */
+const sink = makeImageSink('photo');
 
 /** `/api/pipeline/run-stage2c` — the sprite echoed back through the studio's
  *  human gate. Same rules, different rejection copy. Fuzzed separately because
  *  "both entry points call the same validator" is a claim worth testing rather
- *  than assuming: the audience parameter is a branch, and a branch that only
- *  one caller exercises is a branch nobody checks. */
-const spriteSink = makeSink('sprite');
+ *  than assuming. */
+const spriteSink = makeImageSink('sprite');
 
 describe('image ingest fuzzing', () => {
   it(

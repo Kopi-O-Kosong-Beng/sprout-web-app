@@ -59,6 +59,19 @@ export type MutantExpectation = 'accept' | 'reject' | 'either';
 export interface Mutant {
   bytes: Buffer;
   expect: MutantExpectation;
+  /**
+   * How the sink should hand this to the target.
+   *
+   *   'base64'  encode the bytes and send the string, which is what the real
+   *             route receives: req.body.imageBase64 is always a string.
+   *   'literal' send the bytes decoded as UTF-8 text, unencoded — the attacker
+   *             case, where raw prose arrives in a field that should hold
+   *             base64. This is the ONLY way to exercise the not_base64 rule.
+   *
+   * Defaults to 'base64' because that is the honest default: a fuzzer that
+   * hands Buffers straight in tests a branch production never takes.
+   */
+  deliverAs?: 'base64' | 'literal';
 }
 
 export interface Mutation {
@@ -263,9 +276,78 @@ const notAnImage: Mutation = {
       '../../etc/passwd',
       'a'.repeat(10_000),
     ] as const);
-    return { bytes: Buffer.from(payload, 'utf8'), expect: 'reject' };
+    // Literal: this is prose arriving in a base64 field, not an encoding of it.
+    return { bytes: Buffer.from(payload, 'utf8'), expect: 'reject', deliverAs: 'literal' };
   },
 };
+
+
+/* ==========================================================================
+   Random-testing baseline
+   --------------------------------------------------------------------------
+   These are NOT mutation strategies. They ignore the seed entirely and
+   generate from nothing, which is the point: they measure the claim that
+   modern input validation rejects random input before it reaches anything
+   interesting, and therefore that mutation-based fuzzing is a necessity
+   rather than a preference.
+
+   Kept out of MUTATIONS so a normal run is not diluted by inputs that are
+   uninteresting once the claim has been measured. BASELINE_MUTATIONS below is
+   what the baseline run uses.
+   ========================================================================== */
+
+/** Uniform random bytes, 0 to ~64 kB. The naive fuzzer from the textbook. */
+const randomBytes: Mutation = {
+  name: 'random_bytes',
+  async apply(_seed, rng) {
+    const length = randomInt(rng, 0, 65_536);
+    const out = Buffer.allocUnsafe(length);
+    for (let i = 0; i < length; i += 1) out[i] = randomInt(rng, 0, 255);
+    // A random byte string is not a JPEG. If one is ever accepted, that is a
+    // genuine finding and not a fluke worth shrugging at.
+    return { bytes: out, expect: 'reject' };
+  },
+};
+
+/**
+ * Random PRINTABLE text, which is the more interesting half of the baseline.
+ *
+ * Uniform bytes usually fail at the base64 check before anything looks at
+ * image structure, so they only ever exercise one rule. Printable text is
+ * well-formed enough to get past `not_base64` and die at `unreadable`
+ * instead — which is how the funnel shows two gates doing separate jobs
+ * rather than one gate doing everything.
+ */
+const randomPrintable: Mutation = {
+  name: 'random_printable',
+  async apply(_seed, rng) {
+    /*
+      Printable ASCII, INCLUDING characters outside the base64 alphabet.
+
+      An earlier version drew only from the base64 alphabet, which made every
+      payload accidentally well-formed base64 — it decoded to garbage and died
+      at `unreadable`, so the run measured one rule 9,999 times and reported
+      the base64 gate as if it barely existed. Spaces and punctuation are what
+      make this strategy reach `not_base64`, which is the whole reason it is
+      separate from random_bytes.
+    */
+    const alphabet =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789' +
+      " !\"#$%&'()*,-.:;<=>?@[]^_`{|}~";
+    const length = randomInt(rng, 16, 32_768);
+    let text = '';
+    for (let i = 0; i < length; i += 1) {
+      text += alphabet[randomInt(rng, 0, alphabet.length - 1)];
+    }
+    return { bytes: Buffer.from(text, 'utf8'), expect: 'reject', deliverAs: 'literal' };
+  },
+};
+
+/** The baseline set. Deliberately separate from MUTATIONS. */
+export const BASELINE_MUTATIONS: readonly Mutation[] = [
+  randomBytes,
+  randomPrintable,
+];
 
 /** Every mutation the runner may choose from. */
 export const MUTATIONS: readonly Mutation[] = [

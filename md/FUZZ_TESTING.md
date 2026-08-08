@@ -542,7 +542,25 @@ server/pipeline/fuzz/runner.ts       add `diedAtTier` to the per-run record
 entered each tier and how many passed it. Existing CI and live runs produce
 identical results to before when pinned to `L0` and `L3`.
 
-## Step 1 — The Random-Testing Baseline
+## Step 1 — The Random-Testing Baseline — BUILT
+
+**Result: 0 of 10,000 random payloads survived the ingest gate (0.00%).**
+
+Two rules stopped them, in roughly even halves — about 5,060 at `not_base64`
+and 4,940 at `unreadable`. The split is the real finding: a single rule
+catching everything would mean the run measured one thing 10,000 times rather
+than covering the gate.
+
+Getting that split honestly took a correction. The first version drew "random
+printable" text from the base64 alphabet, so every payload was accidentally
+well-formed base64, decoded to garbage and died at `unreadable` — 9,999 hits on
+one rule, reported as though the gate had been covered. Printable ASCII
+including punctuation is what reaches `not_base64`.
+
+Runs in about 4 seconds. `server/pipeline/fuzz/baseline.ts`, exposed in the
+studio as the **Random baseline** suite.
+
+### Original plan
 
 **Why.** The course's claim is that modern input validation rejects random bytes
 before they reach anything interesting, which is *the* justification for
@@ -791,7 +809,30 @@ advisory lock on the species key, say which and why in the commit.
 
 ---
 
-# Part 3 — Text Fuzzing
+# Part 3 — Text Fuzzing — BUILT
+
+**Result: 93 cases, 0 findings, slowest validation 1 ms** (against a 250 ms
+ReDoS bound). Runs in under 10 ms — it is Joi calls, nothing else.
+
+Built as `server/pipeline/fuzz/text/`, exposed in the studio as the **Text
+validators** suite. It drives the real `querySchema` and `statusSchema` from
+`routes/query.routes.ts`, not copies.
+
+Two results worth stating plainly, both negative:
+
+- **ReDoS: not vulnerable.** Joi's email validator does not backtrack —
+  measured at about 1 ms on nested-quantifier shapes, a 5,000-character local
+  part, and 500 repeated separators. "We looked and it is safe" is a finding,
+  and the time bound is asserted so nobody has to look again.
+- **Injection payloads are ACCEPTED, deliberately.** A contact form that
+  refuses an angle bracket is broken: someone reporting a scanner bug may need
+  to paste markup. Safety here is escaping on output, not refusal on input, and
+  the tests assert acceptance so nobody "fixes" it in the wrong direction.
+
+Not yet built from this part: coverage-guided feedback, and symbolic execution.
+See the note at the end of this section on why the latter is limited here.
+
+### Original plan
 
 A second harness against the text entry points. Deliberately kept separate from
 the image work, because its value in the presentation is as the **control
