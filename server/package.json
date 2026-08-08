@@ -67,6 +67,7 @@
     "preset": "ts-jest",
     "testEnvironment": "node",
     "testTimeout": 15000,
+    "globalSetup": "<rootDir>/tests/require-emulator.ts",
     "setupFiles": [
       "<rootDir>/tests/setup-env.ts"
     ],
