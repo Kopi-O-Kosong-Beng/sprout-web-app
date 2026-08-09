@@ -6,8 +6,6 @@ import { isStrongPassword, PASSWORD_POLICY_MESSAGE } from './password-policy';
 import type { AuthProviderTag, AuthUserProfile } from '../models/auth';
 import { backgroundDispatcher } from '../utils/background-dispatch';
 
-export const GOOGLE_ONLY_LOGIN_MESSAGE =
-  'This email signs in with Google. Use "Continue with Google" below.';
 export const GOOGLE_ONLY_SIGNUP_MESSAGE =
   'This email is already registered through Google. Continue with Google instead.';
 

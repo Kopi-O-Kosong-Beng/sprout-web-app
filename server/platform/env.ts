@@ -14,35 +14,6 @@
  * serves both halves of the app.
  */
 
-/** Companion to resolveKeys: a getter that fails loudly on a missing name. */
-export function required(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing ${name}. Add it to .env.local (see .env.example).`);
-  }
-  return value;
-}
-
-/**
- * Resolves secrets up front so a misconfigured deployment reports a config
- * error rather than being mistaken for an upstream network failure.
- * Returns null (and logs) when anything is missing.
- */
-export function resolveKeys<T extends Record<string, () => string>>(
-  getters: T,
-): { [K in keyof T]: string } | null {
-  const resolved = {} as { [K in keyof T]: string };
-  for (const name of Object.keys(getters) as (keyof T)[]) {
-    try {
-      resolved[name] = getters[name]();
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : error);
-      return null;
-    }
-  }
-  return resolved;
-}
-
 /** Fallback when MIN_CONFIDENCE_THRESHOLD is unset or unparseable. */
 const DEFAULT_MIN_CONFIDENCE = 0.7;
 

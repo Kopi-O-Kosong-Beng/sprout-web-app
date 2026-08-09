@@ -14,12 +14,18 @@ export interface DexDiscovery {
 }
 
 export interface DexRepository {
-  /** Creates the species record, or increments its count if it already exists. */
+  /** Creates the species record, or increments its count if it already exists.
+   *
+   *  `forceSpriteUrl` replaces an existing record's spriteUrl instead of
+   *  keeping it. Normally the canonical url is written once and never changed,
+   *  but when storage had to repair a token-less object the url the record
+   *  already holds is a dead link, so the fresh one must overwrite it. */
   recordDiscovery(
     speciesKey: string,
     userId: string,
     speciesName: string,
-    spriteUrl?: string
+    spriteUrl?: string,
+    forceSpriteUrl?: boolean
   ): Promise<DexDiscovery>;
   get(speciesKey: string): Promise<DexDiscovery | null>;
   /** Every species found so far. The almanac renders 200 cards in one pass, so

@@ -217,6 +217,11 @@ async function recordCandidate(
   speciesKey: string,
   speciesName: string,
   userId: string,
+  /** The species' first discoverer per the dex record. Used to attribute a
+   *  backfilled v1 when this scan is a rescan of a species that predates the
+   *  candidate collection — never the empty string, which would erase the real
+   *  discoverer if a rescan's backfill won the race against their first scan. */
+  firstDiscoveredBy: string,
   png: Buffer,
   stored: { url: string; created: boolean },
   options: ScanPersistOptions
@@ -251,6 +256,10 @@ async function recordCandidate(
   if (maxVersion === 0) {
     // No candidate rows yet: this species predates the collection. Backfill
     // the canonical sprite as v1/PUBLISHED so the gate shows the incumbent.
+    // scannedBy comes from the dex record's first discoverer, not '': a
+    // first-discovery scan and this rescan's backfill both try to create v1,
+    // and if the backfill wins the race an empty scannedBy would permanently
+    // discard the real discoverer's uid.
     try {
       await dependencies.candidates.create({
         id: candidateId(speciesKey, 1),
@@ -259,7 +268,7 @@ async function recordCandidate(
         version: 1,
         spriteUrl: stored.url,
         status: 'PUBLISHED',
-        scannedBy: '',
+        scannedBy: firstDiscoveredBy,
         createdAt: now,
         evaluation: null,
       });
@@ -268,9 +277,22 @@ async function recordCandidate(
     }
   }
 
-  const MAX_ALLOCATION_ATTEMPTS = 3;
+  // Allocate a version. saveVersion is create-only: a null return means a
+  // concurrent rescan already claimed this version's object, so advance rather
+  // than overwrite it. A Firestore create() conflict on the row means the same
+  // thing from the other direction. Either way, try the next version.
+  const MAX_ALLOCATION_ATTEMPTS = 5;
   for (let attempt = 1; ; attempt++) {
+    if (attempt > MAX_ALLOCATION_ATTEMPTS) {
+      throw new Error(
+        `Could not allocate a candidate version for ${speciesKey} after ${MAX_ALLOCATION_ATTEMPTS} attempts`
+      );
+    }
     const spriteUrl = await dependencies.storage.saveVersion(speciesKey, version, png);
+    if (spriteUrl === null) {
+      version++;
+      continue;
+    }
     try {
       await dependencies.candidates.create({
         id: candidateId(speciesKey, version),
@@ -285,12 +307,10 @@ async function recordCandidate(
       });
       return { version, status: 'PENDING' };
     } catch (error) {
-      if (!isAlreadyExists(error) || attempt >= MAX_ALLOCATION_ATTEMPTS) throw error;
-      // A concurrent rescan claimed this version between maxVersion and
-      // create. The object we just uploaded at v<N> is now an orphan the
-      // winner's row does not reference; the retry uploads to v<N+1>, and
-      // saveVersion's unconditional write makes a later reuse of the orphaned
-      // slot self-healing.
+      if (!isAlreadyExists(error)) throw error;
+      // The storage object at v<N> we just created is now an orphan the
+      // winner's row does not reference. saveVersion is create-only, so it will
+      // report that slot taken on any future reuse rather than clobbering it.
       version++;
     }
   }
@@ -337,11 +357,14 @@ export async function persistScan(
     const spriteUrl = stored.url;
     // The sprite goes on the dex record too: it is canonical per species, and
     // the almanac needs it without reading any player's avatar document.
+    // stored.repaired forces the url onto the record: storage just stamped a
+    // token onto a token-less object, so whatever url the dex holds is dead.
     const dex = await dependencies.dex.recordDiscovery(
       speciesKey,
       userId,
       speciesName,
-      spriteUrl
+      spriteUrl,
+      stored.repaired
     );
 
     // Keep this render as a dex candidate. Best-effort by design: the player's
@@ -356,6 +379,7 @@ export async function persistScan(
           speciesKey,
           speciesName,
           userId,
+          dex.firstDiscoveredBy,
           png,
           stored,
           options

@@ -44,6 +44,11 @@ function fakeFile(initial: { exists?: boolean; metadata?: Record<string, string>
       state.metadata = metadata?.metadata ?? {};
       return undefined;
     }),
+    // Metadata-only update: bytes are untouched, custom metadata keys merge in.
+    setMetadata: jest.fn(async (update: { metadata: Record<string, string> }): Promise<unknown> => {
+      state.metadata = { ...state.metadata, ...update.metadata };
+      return undefined;
+    }),
   };
 }
 
@@ -145,39 +150,46 @@ describe('firebase sprite storage', () => {
 /**
  * The recovery path for an object that exists but carries no download token.
  * Such an object cannot be served over the Firebase download URL at all, so
- * returning its URL is a dead link — and returning a URL built from a token
- * that was never written is a dead link that also looks fine in the archive
- * record. The repair has to actually store the token.
+ * returning its URL is a dead link. The repair stamps a token onto the object
+ * via a metadata-only update — it must NOT re-upload the current render, which
+ * would silently replace the canonical sprite's content — and it reports
+ * repaired:true so the caller can overwrite the dex's dead url.
  */
 describe('firebase sprite storage token-less recovery', () => {
-  it('stores the token it hands back when the object has lost its own', async () => {
+  it('stamps a token onto the object without rewriting its bytes', async () => {
     const file = fakeFile({ exists: true, metadata: {} });
-    const { url } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
+    const { url, repaired } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
 
-    expect(file.save).toHaveBeenCalledTimes(1);
-    // The write cannot be create-only: the object already exists, so
-    // ifGenerationMatch: 0 could only ever 412.
-    expect(file.save).toHaveBeenCalledWith(
-      PNG,
-      expect.not.objectContaining({ preconditionOpts: expect.anything() })
-    );
+    // The bytes are left as they were — the current render must not overwrite
+    // the canonical sprite. A metadata-only setMetadata does the stamping.
+    expect(file.save).not.toHaveBeenCalled();
+    expect(file.setMetadata).toHaveBeenCalledTimes(1);
+    expect(file.state.bytes).toBeNull();
     expect(storedToken(file)).toBe(TOKEN);
-    expect(url).toContain(`token=${storedToken(file)}`);
+    expect(url).toContain(`token=${TOKEN}`);
+    expect(repaired).toBe(true);
   });
 
-  it('repairs a token-less object that won the create race', async () => {
+  it('repairs a token-less object that won the create race, preserving its bytes', async () => {
+    const winnerBytes = Buffer.from('winner-render');
     const file = fakeFile();
-    // The other writer created the object first, and stored no token.
+    // The other writer created the object first, with content but no token.
     file.save.mockImplementationOnce(async () => {
       file.state.exists = true;
+      file.state.bytes = winnerBytes;
       file.state.metadata = {};
       throw Object.assign(new Error('Precondition Failed'), { code: 412 });
     });
-    const { url } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
+    const { url, repaired } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
 
-    expect(file.save).toHaveBeenCalledTimes(2);
+    // Only the losing create-only save() ran; the repair is metadata-only, so
+    // the winner's bytes survive rather than being clobbered by our PNG.
+    expect(file.save).toHaveBeenCalledTimes(1);
+    expect(file.setMetadata).toHaveBeenCalledTimes(1);
+    expect(file.state.bytes).toBe(winnerBytes);
     expect(storedToken(file)).toBe(TOKEN);
     expect(url).toContain(`token=${TOKEN}`);
+    expect(repaired).toBe(true);
   });
 
   it('leaves the object servable — the returned token is the stored one', async () => {
@@ -188,6 +200,7 @@ describe('firebase sprite storage token-less recovery', () => {
     const token = metadata.metadata?.firebaseStorageDownloadTokens;
     expect(token).toBeTruthy();
     expect(url).toContain(`token=${token}`);
-    expect(file.state.bytes).toBe(PNG);
+    // cacheControl (a sibling metadata field) is preserved by the merge.
+    expect(file.state.metadata.cacheControl).toBe('public');
   });
 });

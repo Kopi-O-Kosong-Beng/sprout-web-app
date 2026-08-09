@@ -162,7 +162,6 @@ const KEY_DESCRIPTIONS: Record<string, string> = {
   FLUX_API_KEY: 'NVIDIA — Flux.2 Klein image render',
   NVIDIA_API_KEY: 'Accepted as a fallback for either NVIDIA key',
   WITHOUTBG_KEY: 'withoutBG background cutout',
-  DATABASE_URL: 'Postgres connection for Dex persistence',
 };
 
 /* -------------------------------------------------------------------------- */

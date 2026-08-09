@@ -18,6 +18,7 @@ import { Router, json } from 'express';
 import type { Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import authMiddleware from '../middleware/auth.middleware';
+import requireSuperAdmin from '../middleware/admin.middleware';
 import { identifyPlant, isMockIdentification } from '../pipeline/stages/identify';
 import { validateUploadedImage } from '../pipeline/ingest/imageIngest';
 import { craftPromptTiered } from '../pipeline/stages/promptCraft';
@@ -433,11 +434,25 @@ router.post('/run-stream', async (req: Request, res: Response) => {
           : `Every configured image model failed: ${renderError}. Fell back to a centre photo crop.`,
     }[renderSource];
 
+    // Attribute the metric to the model that ACTUALLY rendered, not the one
+    // configured. On a Flux failure that falls back to Gemini, renderSource
+    // stays 'model' and renderModel is the Gemini model — recording against
+    // serverEnv.imageProvider would log a success on the Flux series while
+    // Flux failed every call, so the observability page would show the broken
+    // provider as healthy. On a total failure (photoCrop) no model produced
+    // bytes, so the best available attribution is the configured primary.
+    //
     // 'placeholder' means no image key is configured and no API was called, so
     // it stays out of the latency series; a photoCrop fallback IS a failed
     // provider call and counts as one.
+    const configuredImageApi =
+      serverEnv.imageProvider === 'gemini' ? 'Gemini (image)' : 'Flux';
     const imageApi =
-      serverEnv.imageProvider === 'gemini' ? `Gemini (image)` : 'Flux';
+      renderSource === 'model'
+        ? renderModel.includes('flux')
+          ? 'Flux'
+          : 'Gemini (image)'
+        : configuredImageApi;
     if (renderSource !== 'placeholder') {
       recordApiCall(imageApi, lat2b, renderSource === 'model');
     }
@@ -520,8 +535,21 @@ router.post('/run-stream', async (req: Request, res: Response) => {
   }
 });
 
-/** Continuation from the human gate: cutout, finish, assemble, evaluate. */
-router.post('/run-stage2c', async (req: Request, res: Response) => {
+/**
+ * Continuation from the human gate: cutout, finish, assemble, evaluate.
+ *
+ * SUPERADMIN ONLY, unlike /run-stream. This is the one entry point that takes
+ * a client-supplied sprite (rawSpriteB64) rather than generating it from an
+ * identified photo — so whatever bytes arrive here become the species' sprite
+ * and, on a first discovery, the canonical global-dex reference. /run-stream
+ * cannot be abused that way: it renders the sprite server-side from the photo
+ * it identified. This route's only caller is the studio's manual gate
+ * (PipelineStudio.tsx), which is already a superadmin surface; the game's Scan
+ * screen sends pauseAt2b:false and never reaches here. Without this guard any
+ * verified account could POST an arbitrary image + species name and publish it
+ * as the global reference for an undiscovered species.
+ */
+router.post('/run-stage2c', requireSuperAdmin, async (req: Request, res: Response) => {
   const sendEvent = openEventStream(res);
 
   try {
