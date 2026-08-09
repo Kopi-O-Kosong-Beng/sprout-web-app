@@ -16,6 +16,7 @@
  */
 import { Router, json } from 'express';
 import type { Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import authMiddleware from '../middleware/auth.middleware';
 import { identifyPlant, isMockIdentification } from '../pipeline/stages/identify';
 import { validateUploadedImage } from '../pipeline/ingest/imageIngest';
@@ -47,6 +48,36 @@ const router = Router();
 
 router.use(json({ limit: '20mb' }));
 router.use(authMiddleware);
+
+/**
+ * Per-account scan budget: 100 pipeline runs per rolling hour.
+ *
+ * This is the one route where every request spends real credits — up to five
+ * paid calls per scan (Plant.id, Gemini prompt, Flux, withoutBG, judge) — and
+ * until now it sat behind only the global 1000 req/15 min per-IP limit, a
+ * looser budget than the free routes get. Keyed by uid like the battle
+ * limiters, not by IP: the resource being protected is the account's spend,
+ * and NAT'd players must not share a bucket while a scripted account rotates
+ * IPs freely.
+ *
+ * Counted per REQUEST, so a studio run that pauses at 2b and continues via
+ * /run-stage2c costs two of the hundred. The game's Scan screen sends
+ * pauseAt2b: false and costs one.
+ *
+ * Same in-memory caveat as every limiter here: per instance, reset on deploy.
+ */
+const scanLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user!.uid,
+  handler: (_req, res) =>
+    res.status(429).json({
+      error: 'Scan limit reached (100 per hour per account). Please try again later.',
+    }),
+});
+router.use(scanLimiter);
 
 /**
  * How the photo reached the pipeline, as declared by the caller.

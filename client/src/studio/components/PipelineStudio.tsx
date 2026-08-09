@@ -286,7 +286,16 @@ export const PipelineStudio: React.FC<PipelineStudioProps> = () => {
         }),
       });
 
-      if (!response.ok) throw new Error(`Pipeline API HTTP ${response.status}`);
+      if (!response.ok) {
+        // Prefer the server's own reason (the scan limiter's 429 in
+        // particular) over a bare status code.
+        const body = await response.json().catch(() => null);
+        throw new Error(
+          typeof body?.error === 'string' && body.error
+            ? body.error
+            : `Pipeline API HTTP ${response.status}`,
+        );
+      }
       await consumeStream(response);
     } catch (err) {
       // Show the failure. This used to call runSimulatedFallback(), which
