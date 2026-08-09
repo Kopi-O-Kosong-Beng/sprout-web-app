@@ -11,7 +11,9 @@ const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
 const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /**
- * Art direction for the sprite prompt — plantemon-web's wording, verbatim.
+ * Art direction for the sprite prompt — plantemon-web's wording, revised
+ * against Nat's review rubric (see ../SPRITE_QUALITY.md, which logs every
+ * reviewed batch and distills the standards this instruction encodes).
  *
  * The distinction that matters: the sprite is an original creature *derived*
  * from the plant, not the literal plant with eyes added.
@@ -32,6 +34,20 @@ const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models
  *     that rather than choosing from it, so the anatomy line has to be phrased
  *     as a selection with an explicit "only what the plant supports" bound, and
  *     the default features it drifts back toward have to be named and refused.
+ *   • "a simple bold silhouette" licensed over-simplification: florets became
+ *     smooth scale texture, whole species collapsed into plain blobs, and
+ *     "too simple" became the most common human reject. "Simple" is gone; the
+ *     silhouette stays bold but the signature details are required to stay
+ *     distinct (rubric rules 2 and 6).
+ *   • "large expressive eyes" was too vague to hit: it produced lazy dot eyes
+ *     and mismatched googly eyes, the single most frequent reject cause. The
+ *     eye requirement now spells out two, symmetrical, cleanly drawn, and
+ *     names the failure shapes it refuses (rubric rules 1 and 7).
+ *   • Nothing steered away from the genre's stock design — a flower head on a
+ *     plain round body — so reviews kept scoring clean sprites as "cute but
+ *     overly generic". The accepted designs all drew their body plan from the
+ *     species' less obvious structures (a bud, a vine, the foliage mass), so
+ *     the cliché is now named and demoted to last resort (rubric rule 5).
  *
  * The reference wording sits between those: soft, round, cute, plant-first.
  * Prefer tuning a single clause over reaching for a new body plan.
@@ -57,16 +73,22 @@ export function buildInstruction(plantName: string): string {
     "pixel-art creature design in the style of a retro monster-collecting video game: a " +
     "chubby, big-eyed plant/nature-themed monster drawn from this exact plant. It must read " +
     "instantly to a young child as a friendly collectible creature — toy-like and huggable, " +
-    "never scary or menacing, with an oversized head on a small rounded body, a simple bold " +
-    "silhouette that stays readable at thumbnail size, and bright saturated colours. Carry the " +
-    "real plant's colours, leaf shapes, and flowers into the creature, and let this plant's " +
-    "own growth habit decide its body plan: pick only the two or three features the plant " +
-    "actually has — a trailing stem can become a tail, a broad opposite leaf pair can become " +
-    "wings, a low rosette can become a ruff or mane, a bulb or berry cluster can become the " +
-    "body itself, an upright spike or plume can become a crest, horns, or a topknot. Do not " +
-    "give it wings, a tail, or any other feature this plant's form does not suggest. Build it " +
-    "on a round, soft-proportioned body " +
-    "with large expressive eyes, a small friendly face, and tiny clawed or root-like feet. " +
+    "never scary or menacing, never humanoid in face or silhouette, with an oversized head " +
+    "on a small rounded body, a bold silhouette that stays readable at thumbnail size, and " +
+    "bright saturated colours. Carry the real plant's colours and its signature structures " +
+    "into the creature accurately and distinctly — the exact petal count, the individual " +
+    "florets of a cluster, the true leaf shape — never simplified into plain texture or " +
+    "dropped. Let this plant's own growth habit decide its body plan, preferring its less " +
+    "obvious structures — a bud, a twining vine, a dense foliage mass, a seed pod — over " +
+    "the stock design of a flower head on a plain round body, which is the genre cliché to " +
+    "avoid unless this plant offers nothing else: pick only the two or three features the " +
+    "plant actually has — a trailing stem can become a tail, a broad opposite leaf pair can " +
+    "become wings, a low rosette can become a ruff or mane, a bulb or berry cluster can " +
+    "become the body itself, an upright spike or plume can become a crest, horns, or a " +
+    "topknot. Do not give it wings, a tail, or any other feature this plant's form does not " +
+    "suggest. Build it on a round, soft-proportioned body with exactly two large, " +
+    "well-drawn, symmetrical friendly eyes — clean deliberate shapes, not tiny lazy dots, " +
+    "not mismatched googly whites — a small friendly face, and tiny clawed or root-like feet. " +
     "Style: clean bold black outlines, flat cel-shaded colouring, retro 16-bit pixel art, " +
     "grid-aligned pixels, even lighting, no shadows. Describe only the creature's own " +
     "design — never name or reference any existing game, brand, or character. " +
@@ -182,23 +204,31 @@ export function nameOnlyPrompt(plantName: string): string {
 
   const traitsString = traits ? `${traits}, ` : "";
 
-  // Mirrors buildInstruction so the tier-3 sprite matches the tier-1 look. The
-  // only difference is that the traits string stands in for the photo the
-  // vision models would otherwise have read.
+  // Mirrors buildInstruction's requirements, but this text goes to the
+  // renderer directly, which imposes a structure the tier-1 path doesn't have:
+  //
+  // On Flux, applyStyleScaffold trims it to the ~496-char description budget,
+  // cutting from the tail. So the sentences are ordered by what the sprite
+  // can least afford to lose — species traits in distinct detail, growth-habit
+  // body plan, proportions, eyes, feet, then the white-background isolation —
+  // all of which must sit inside the budget. Everything after the isolation
+  // sentence is the deliberate trim zone: style vocabulary the scaffold
+  // restates anyway, plus every negation ("no wings", "never scary"). Flux
+  // up-weights the tokens a negation names rather than parsing the "no", so
+  // losing that zone to the trim is correct for Flux — while Gemini, which is
+  // instruction-following and has no cap, keeps and honours it.
   return (
-    `An original pixel-art creature design in the style of a retro monster-collecting ` +
-    `video game: a chubby, big-eyed plant/nature-themed monster drawn from ${plantName}, ` +
-    `reading instantly to a young child as a friendly collectible creature — toy-like and ` +
-    `huggable, never scary, with an oversized head on a small rounded body, a simple bold ` +
-    `silhouette readable at thumbnail size, and bright saturated colours — ` +
-    `${traitsString}with only the two or three creature features those traits actually ` +
-    `support, and no wings, tail, or other feature the plant's form does not suggest, ` +
-    `on a round, soft-proportioned body with large expressive eyes, a small ` +
-    `friendly face, and tiny clawed or root-like feet. Clean bold black outlines, flat ` +
-    `cel-shaded colouring, retro 16-bit pixel art, grid-aligned pixels, even lighting, ` +
-    `no shadows. One single creature, front-facing and centered, shown whole with a clear ` +
-    `margin on every side, fully isolated on a solid flat pure-white background — no ` +
-    `scenery, pot, ground, gradient, shadow or reflection, so it cuts out cleanly.`
+    `A chubby ${plantName} plant-monster creature: ${traitsString}rendered in exact, ` +
+    `distinct detail, a body plan from the plant's own growth habit, an oversized head ` +
+    `on a small rounded body, two large well-drawn symmetrical friendly eyes, and tiny ` +
+    `clawed or root-like feet. The whole creature inside a clear margin, on a solid ` +
+    `flat pure-white background. ` +
+    `A friendly collectible for a young child, toy-like and huggable, never scary, a ` +
+    `bold silhouette readable at thumbnail size, bright saturated colours, clean bold ` +
+    `black outlines, flat cel-shaded colouring, retro 16-bit pixel art, grid-aligned ` +
+    `pixels, even lighting, no shadows, no scenery, pot, ground, gradient, shadow or ` +
+    `reflection, with only the two or three creature features the plant actually ` +
+    `supports and no wings, tail, or other feature its form does not suggest.`
   );
 }
 
