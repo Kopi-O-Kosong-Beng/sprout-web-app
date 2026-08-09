@@ -4,6 +4,7 @@ import { serverStartTime, adminLogBuffer, logAdminEvent } from "./adminStore";
 import dexRepository from "../repositories/dex";
 import dexCandidateRepository from "../repositories/dexCandidates";
 import { snapshotMetrics } from "./metricsStore";
+import { currentRunId, listRunReports } from "./metricsArchive";
 import { AUDITED_KEYS, serverEnv } from "./env";
 import { isTestRunInFlight, runTests } from "./testRunner";
 import {
@@ -233,6 +234,33 @@ adminRouter.get("/logs", (req, res) => {
  *  fed by real pipeline calls only — empty until the first scan. */
 adminRouter.get("/metrics", (req, res) => {
   res.json(snapshotMetrics());
+});
+
+/**
+ * The exportable observability report: this run's live metrics and logs, plus
+ * the archived reports of previous runs (metricsArchive persists one document
+ * per server run, flushed periodically and on SIGTERM). This is what lets the
+ * p95 decision be made from data that predates the last redeploy.
+ */
+adminRouter.get("/metrics-report", async (req, res) => {
+  try {
+    const previousRuns = (await listRunReports()).filter(
+      (run) => run.id !== currentRunId()
+    );
+    res.json({
+      generatedAt: new Date().toISOString(),
+      current: {
+        id: currentRunId(),
+        startedAt: new Date(serverStartTime).toISOString(),
+        metrics: snapshotMetrics(),
+        logs: adminLogBuffer,
+      },
+      previousRuns,
+    });
+  } catch (err: any) {
+    console.error("metrics-report failed:", err);
+    res.status(500).json({ error: "Could not assemble the report." });
+  }
 });
 
 // Admin VLM Prompt Cleaning Playground Test

@@ -48,6 +48,16 @@ export interface ShutdownOptions {
   exit?: (code: number) => void;
   log?: (message: string) => void;
   logError?: (message: string) => void;
+  /**
+   * Last-chance persistence, run once per shutdown. The concrete user is the
+   * observability run report: metrics and logs live in process memory, and
+   * SIGTERM on a redeploy is the final moment they can reach Firestore. It
+   * starts immediately — in parallel with the drain, since it needs the
+   * process alive, not the listener open — and exit waits for BOTH, still
+   * bounded by the force timer so a hung flush cannot outlive the grace
+   * period. A rejection is logged and never blocks the exit.
+   */
+  flush?: () => Promise<unknown>;
 }
 
 export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -66,6 +76,7 @@ export function createShutdownHandler(
     exit = (code: number) => process.exit(code),
     log = (message: string) => console.log(message),
     logError = (message: string) => console.error(message),
+    flush,
   } = options;
 
   let settled = false;
@@ -79,24 +90,49 @@ export function createShutdownHandler(
 
     log(`[lifecycle] ${signal} received — refusing new connections, draining open ones`);
 
+    // The flush starts now, not after the drain: it needs the process alive,
+    // not the listener open, and the two waits overlap instead of stacking.
+    const flushed = flush
+      ? flush().catch((error) =>
+          logError(
+            `[lifecycle] shutdown flush failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+        )
+      : null;
+
     const forceTimer = setTimeout(() => {
       logError(
-        `[lifecycle] connections still open after ${timeoutMs}ms — forcing exit`
+        `[lifecycle] shutdown still incomplete after ${timeoutMs}ms — forcing exit`
       );
-      exit(1);
+      doExit(1);
     }, timeoutMs);
     // A pending timer must not be the reason the process stays alive.
     forceTimer.unref?.();
 
-    server.close((error) => {
+    let exited = false;
+    function doExit(code: number): void {
+      if (exited) return;
+      exited = true;
       clearTimeout(forceTimer);
+      exit(code);
+    }
+    /** Exits once the flush (if any) settles. Deliberately synchronous when no
+     *  flush is configured — the common path stays exactly as it was. */
+    const exitAfterFlush = (code: number) => {
+      if (flushed) flushed.then(() => doExit(code));
+      else doExit(code);
+    };
+
+    server.close((error) => {
       if (error) {
         logError(`[lifecycle] server did not close cleanly: ${error.message}`);
-        exit(1);
+        exitAfterFlush(1);
         return;
       }
       log('[lifecycle] drained cleanly');
-      exit(0);
+      exitAfterFlush(0);
     });
   };
 }

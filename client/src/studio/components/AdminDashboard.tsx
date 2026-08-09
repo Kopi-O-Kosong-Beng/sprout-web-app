@@ -389,6 +389,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
     }
   };
 
+  const [exportingReport, setExportingReport] = useState(false);
+
+  /** Downloads the full observability report: this run's live metrics and
+   *  logs, plus the archived reports of previous runs — the data from before
+   *  the last server reset, which the in-memory page alone cannot show. */
+  const exportObservabilityReport = async () => {
+    setExportingReport(true);
+    try {
+      const res = await studioFetch('/api/platform/metrics-report');
+      if (!res.ok) return;
+      const report = await res.json();
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sprout-observability-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to export observability report:', err);
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   const exportHealthReport = () => {
     const report = { timestamp: new Date().toISOString(), config, health, logs };
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
@@ -810,14 +835,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-meta text-txt-4">
-            In-memory since server start; fed by real scans only.
+            Live view is in-memory since server start; the export also includes
+            archived reports from previous runs.
           </p>
-          <Button
-            onClick={refreshMetrics}
-            icon={<RefreshCw className={cx('h-3.5 w-3.5', loadingMetrics && 'animate-spin')} />}
-          >
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={exportObservabilityReport}
+              disabled={exportingReport}
+              icon={
+                exportingReport ? (
+                  <Spinner className="h-3.5 w-3.5" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )
+              }
+            >
+              Export report
+            </Button>
+            <Button
+              onClick={refreshMetrics}
+              icon={<RefreshCw className={cx('h-3.5 w-3.5', loadingMetrics && 'animate-spin')} />}
+            >
+              Refresh
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
