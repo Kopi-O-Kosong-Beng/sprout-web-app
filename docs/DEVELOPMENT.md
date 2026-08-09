@@ -188,6 +188,11 @@ test panel.
 
 ### Step 4: Start the backend
 
+> **Shortcut:** `npm run dev` at the repo root now starts the backend and the
+> frontend together (via `concurrently`, with `[server]`/`[client]`-prefixed
+> logs; one Ctrl-C stops both). Steps 4 and 5 describe running them in
+> separate terminals, which still works and keeps the logs apart.
+
 In terminal 1:
 
 ```bash
