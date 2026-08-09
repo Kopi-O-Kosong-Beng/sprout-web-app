@@ -149,6 +149,11 @@ http://localhost:3001
 | `GET` | `/api/admin/almanac` | Bearer token + ADMIN_EMAILS | Full taxonomy with finders, plus off-list discoveries |
 | `POST` | `/api/admin/cleanup` | Bearer token + ADMIN_EMAILS | Dry-run/delete expired web uploads |
 | `GET` | `/api/platform/health-check` | Bearer token + ADMIN_EMAILS | Live upstream provider probes |
+| `GET` | `/api/platform/logs` | Bearer token + superadmin | In-memory admin log ring, fed by real pipeline runs (identify/prompt/render/cutout/eval/persist per scan) |
+| `GET` | `/api/platform/metrics` | Bearer token + superadmin | Per-API latency/request/error metrics (`{ apis: [{api, requests, errors, avgMs, p50Ms, p95Ms, maxMs, recent}] }`, slowest-first) |
+| `GET` | `/api/platform/metrics-report` | Bearer token + superadmin | Exportable observability report: `{ current: {metrics, logs}, previousRuns: [...] }` — previous runs come from `platform_run_reports`, flushed periodically and on SIGTERM, so the report covers data from before the last redeploy |
+| `GET` | `/api/platform/dex-docs` | Bearer token + superadmin | Real dex species with their sprite candidates: `{ species: [{speciesKey, speciesName, discoveryCount, spriteUrl, candidates: [...]}] }` |
+| `POST` | `/api/platform/dex-approve` | Bearer token + superadmin | `{candidateId, action: 'publish'\|'reject'}` — publish swaps `dex.spriteUrl` (the global reference) atomically; rejecting the published sprite is a 409 |
 
 ## Saving A Scan (`POST /api/avatar`)
 

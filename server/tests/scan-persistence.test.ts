@@ -27,16 +27,30 @@ const RESOLVED = {
 
 function deps(overrides: Partial<ScanPersistenceDependencies> = {}): ScanPersistenceDependencies {
   return {
-    storage: { save: jest.fn().mockResolvedValue('https://cdn.test/fern.png') },
+    storage: {
+      save: jest
+        .fn()
+        .mockResolvedValue({ url: 'https://cdn.test/fern.png', created: true }),
+      saveVersion: jest.fn().mockResolvedValue('https://cdn.test/fern-v2.png'),
+    },
     dex: {
       recordDiscovery: jest.fn().mockResolvedValue(DEX),
       get: jest.fn(),
       list: jest.fn(),
     },
+    candidates: {
+      maxVersion: jest.fn().mockResolvedValue(0),
+      create: jest.fn().mockResolvedValue(undefined),
+    },
     avatars: { upsertFromScan: jest.fn().mockResolvedValue({ record: RECORD, created: true }) },
     resolveDiscovery: jest.fn().mockResolvedValue(RESOLVED),
     ...overrides,
   };
+}
+
+/** A storage fake whose save() rejects — the two-method shape in one place. */
+function failingStorage(error: Error) {
+  return { save: jest.fn().mockRejectedValue(error), saveVersion: jest.fn() };
 }
 
 /** Identification succeeded and named a real species — the canonical case. */
@@ -77,7 +91,7 @@ describe('persistScan', () => {
 
   it('reports a storage failure without throwing', async () => {
     const dependencies = deps({
-      storage: { save: jest.fn().mockRejectedValue(new Error('bucket unreachable')) },
+      storage: failingStorage(new Error('bucket unreachable')),
     });
     const result = await persistScan(dependencies, 'user-a', 'Fern', null, PNG, IDENTIFIED);
 
@@ -133,7 +147,7 @@ describe('persistScan save error reporting', () => {
   it('does not put the exception text on the wire', async () => {
     const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const dependencies = deps({ storage: { save: jest.fn().mockRejectedValue(leaky) } });
+      const dependencies = deps({ storage: failingStorage(leaky) });
       const result = await persistScan(dependencies, 'user-a', 'Fern', null, PNG, IDENTIFIED);
 
       expect(result.saveError).toBeTruthy();
@@ -149,7 +163,7 @@ describe('persistScan save error reporting', () => {
   it('keeps the raw detail in the log', async () => {
     const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const dependencies = deps({ storage: { save: jest.fn().mockRejectedValue(leaky) } });
+      const dependencies = deps({ storage: failingStorage(leaky) });
       await persistScan(dependencies, 'user-a', 'Fern', null, PNG, IDENTIFIED);
 
       expect(errorLog).toHaveBeenCalledWith(
@@ -165,7 +179,7 @@ describe('persistScan save error reporting', () => {
     const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const storageFault = await persistScan(
-        deps({ storage: { save: jest.fn().mockRejectedValue(new Error('bucket unreachable')) } }),
+        deps({ storage: failingStorage(new Error('bucket unreachable')) }),
         'user-a',
         'Fern',
         null,
@@ -268,6 +282,121 @@ describe('persistScan unidentified scans', () => {
 
     expect(first.storage.save).toHaveBeenCalledWith('fern', PNG);
     expect(second.storage.save).toHaveBeenCalledWith('fern', PNG);
+  });
+});
+
+/**
+ * The candidate flow: every identified render is kept for the studio's Dex
+ * Gate. First discovery publishes v1; a rescan's render — which used to be
+ * thrown away entirely — is stored as v<N> and queued PENDING.
+ */
+describe('persistScan dex candidates', () => {
+  const alreadyExists = () => Object.assign(new Error('already exists'), { code: 6 });
+
+  it('records the first discovery as v1, PUBLISHED', async () => {
+    const dependencies = deps();
+    const result = await persistScan(dependencies, 'user-a', 'Fern', null, PNG, IDENTIFIED);
+
+    expect(dependencies.candidates.create).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'fern__v1', version: 1, status: 'PUBLISHED' })
+    );
+    expect(dependencies.storage.saveVersion).not.toHaveBeenCalled();
+    expect(result.candidate).toEqual({ version: 1, status: 'PUBLISHED' });
+  });
+
+  it('stores a rescan render as the next version, PENDING', async () => {
+    const dependencies = deps({
+      storage: {
+        save: jest.fn().mockResolvedValue({ url: 'https://cdn.test/fern.png', created: false }),
+        saveVersion: jest.fn().mockResolvedValue('https://cdn.test/fern-v3.png'),
+      },
+      candidates: {
+        maxVersion: jest.fn().mockResolvedValue(2),
+        create: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+    const result = await persistScan(dependencies, 'user-b', 'Fern', null, PNG, IDENTIFIED);
+
+    expect(dependencies.storage.saveVersion).toHaveBeenCalledWith('fern', 3, PNG);
+    expect(dependencies.candidates.create).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'fern__v3', version: 3, status: 'PENDING' })
+    );
+    expect(result.candidate).toEqual({ version: 3, status: 'PENDING' });
+  });
+
+  it('backfills v1 as PUBLISHED for a species that predates the collection', async () => {
+    const create = jest.fn().mockResolvedValue(undefined);
+    const dependencies = deps({
+      storage: {
+        save: jest.fn().mockResolvedValue({ url: 'https://cdn.test/fern.png', created: false }),
+        saveVersion: jest.fn().mockResolvedValue('https://cdn.test/fern-v2.png'),
+      },
+      candidates: { maxVersion: jest.fn().mockResolvedValue(0), create },
+    });
+    await persistScan(dependencies, 'user-b', 'Fern', null, PNG, IDENTIFIED);
+
+    // The incumbent goes in first so the gate shows what v2 competes against.
+    expect(create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ id: 'fern__v1', status: 'PUBLISHED', scannedBy: '', evaluation: null })
+    );
+    expect(create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ id: 'fern__v2', status: 'PENDING' })
+    );
+  });
+
+  it('retries one version higher when a concurrent rescan wins the id', async () => {
+    const create = jest
+      .fn()
+      .mockRejectedValueOnce(alreadyExists())
+      .mockResolvedValueOnce(undefined);
+    const saveVersion = jest
+      .fn()
+      .mockResolvedValueOnce('https://cdn.test/fern-v2.png')
+      .mockResolvedValueOnce('https://cdn.test/fern-v3.png');
+    const dependencies = deps({
+      storage: {
+        save: jest.fn().mockResolvedValue({ url: 'https://cdn.test/fern.png', created: false }),
+        saveVersion,
+      },
+      candidates: { maxVersion: jest.fn().mockResolvedValue(1), create },
+    });
+    const result = await persistScan(dependencies, 'user-b', 'Fern', null, PNG, IDENTIFIED);
+
+    expect(saveVersion).toHaveBeenLastCalledWith('fern', 3, PNG);
+    expect(result.candidate).toEqual({ version: 3, status: 'PENDING' });
+  });
+
+  it('keeps unidentified scans out of the gate entirely', async () => {
+    const dependencies = deps();
+    const result = await persistScan(dependencies, 'user-a', 'Mystery', null, PNG, {
+      identified: false,
+      source: 'mobile' as const,
+    });
+
+    expect(dependencies.candidates.create).not.toHaveBeenCalled();
+    expect(result.candidate).toBeNull();
+  });
+
+  it('still saves the scan when candidate recording fails', async () => {
+    const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const dependencies = deps({
+        candidates: {
+          maxVersion: jest.fn(),
+          create: jest.fn().mockRejectedValue(new Error('candidates collection unwritable')),
+        },
+      });
+      const result = await persistScan(dependencies, 'user-a', 'Fern', null, PNG, IDENTIFIED);
+
+      // Best-effort by design: a candidate row exists purely for the gate.
+      expect(result.saved).toBe(true);
+      expect(result.candidate).toBeNull();
+      expect(dependencies.avatars.upsertFromScan).toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 });
 

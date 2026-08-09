@@ -119,9 +119,19 @@ export async function streamPipeline(
   }
 
   if (!response.ok) {
+    // The server puts the human-readable reason in { error } — the scan
+    // limiter's 429 in particular ("Scan limit reached...") is written for the
+    // player, so prefer it over a bare status code when it is present.
+    let serverMessage: string | null = null;
+    try {
+      const body = (await response.json()) as { error?: unknown };
+      if (typeof body?.error === 'string' && body.error) serverMessage = body.error;
+    } catch {
+      // Not JSON — fall back to the status line.
+    }
     throw new PipelineRequestError(
       response.status === 401 || response.status === 403 ? 'unauthorised' : 'http',
-      `Pipeline API HTTP ${response.status}`,
+      serverMessage ?? `Pipeline API HTTP ${response.status}`,
       response.status
     );
   }

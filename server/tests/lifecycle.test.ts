@@ -128,6 +128,126 @@ describe('graceful shutdown', () => {
   });
 });
 
+describe('graceful shutdown with a flush', () => {
+  const flushControl = () => {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+
+  const tick = () => new Promise<void>((res) => setTimeout(res, 0));
+
+  it('starts the flush immediately and waits for it before exiting', async () => {
+    const server = fakeServer();
+    const exits: number[] = [];
+    const control = flushControl();
+    let flushCalls = 0;
+    const shutdown = createShutdownHandler(server, {
+      exit: (c) => exits.push(c),
+      log: () => {},
+      logError: () => {},
+      flush: () => {
+        flushCalls += 1;
+        return control.promise;
+      },
+    });
+
+    shutdown('SIGTERM');
+    // In parallel with the drain, not after it — the flush needs the process
+    // alive, not the listener open.
+    expect(flushCalls).toBe(1);
+
+    server.finish();
+    await tick();
+    // Drained, but the report is still writing: the exit must wait.
+    expect(exits).toEqual([]);
+
+    control.resolve();
+    await tick();
+    expect(exits).toEqual([0]);
+  });
+
+  it('a failed flush is logged and never blocks the exit', async () => {
+    const server = fakeServer();
+    const exits: number[] = [];
+    const errors: string[] = [];
+    const control = flushControl();
+    const shutdown = createShutdownHandler(server, {
+      exit: (c) => exits.push(c),
+      log: () => {},
+      logError: (m) => errors.push(m),
+      flush: () => control.promise,
+    });
+
+    shutdown('SIGTERM');
+    control.reject(new Error('firestore unreachable'));
+    server.finish();
+    await tick();
+
+    // The drain was clean; a lost report must not turn that into exit 1.
+    expect(exits).toEqual([0]);
+    expect(errors.join('\n')).toContain('firestore unreachable');
+  });
+
+  it('the force timer still bounds a flush that never settles', async () => {
+    jest.useFakeTimers();
+    try {
+      const server = fakeServer();
+      const exits: number[] = [];
+      const shutdown = createShutdownHandler(server, {
+        timeoutMs: 10_000,
+        exit: (c) => exits.push(c),
+        log: () => {},
+        logError: () => {},
+        flush: () => new Promise(() => {}), // hangs forever
+      });
+
+      shutdown('SIGTERM');
+      server.finish();
+      await Promise.resolve();
+      expect(exits).toEqual([]);
+
+      jest.advanceTimersByTime(10_000);
+      expect(exits).toEqual([1]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('exits exactly once even when the flush settles after the force timer fired', async () => {
+    jest.useFakeTimers();
+    try {
+      const server = fakeServer();
+      const exits: number[] = [];
+      const control = flushControl();
+      const shutdown = createShutdownHandler(server, {
+        timeoutMs: 10_000,
+        exit: (c) => exits.push(c),
+        log: () => {},
+        logError: () => {},
+        flush: () => control.promise,
+      });
+
+      shutdown('SIGTERM');
+      server.finish();
+      jest.advanceTimersByTime(10_000);
+      expect(exits).toEqual([1]);
+
+      control.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      // The late flush completion must not schedule a second exit.
+      expect(exits).toEqual([1]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
 describe('unhandled rejection guard', () => {
   // Defence in depth for the failure CI found: a dependency rejecting a promise
   // this code never holds. Node's default is to terminate, which turns a logged

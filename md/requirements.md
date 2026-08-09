@@ -256,6 +256,8 @@ not the primary scope of this requirements document.
 5. THE Backend SHALL paginate `GET /api/avatar` responses to avoid response payloads exceeding reasonable size limits for users with large collections.
 6. THE Backend SHALL validate and reject oversized file uploads at the Multer middleware layer before any business logic or external API call is made.
 7. WHEN the Frontend makes a plant upload request, THE Frontend SHALL display a processing spinner with progress stage labels until the pipeline responds, given that end-to-end pipeline latency may reach 60 seconds.
+8. THE Backend SHALL limit each account to 100 AI pipeline runs per rolling hour on `/api/pipeline`, responding HTTP 429 with a human-readable message beyond that budget. (Added 2026-08-09: the pipeline is the only route that spends paid API credits per request, and previously sat behind only the global per-IP limit.)
+9. THE AI Pipeline SHALL complete scans with a p95 end-to-end latency below 60 seconds under nominal load, bounded by the 110-second route budget. (Amended 2026-08-09: the earlier informal "~10 ms" figure was a mock-mode measurement of pipeline overhead only, with every external provider stubbed; it is not a latency target for real scans. Measured per-provider latency is observable on the studio's Observability page.)
 
 ---
 
