@@ -257,6 +257,30 @@ this result suggests it would move far.
   so a sprite touching the frame edge lost chunks of itself. Connectivity is the
   fix; a different colour would not have been.
 
+# Sprite candidates and the Dex Gate
+
+A rescan's render used to be discarded outright — storage saw
+`sprites/<key>/v1.png` existed and returned the old URL — so the studio's Dex
+Gate had nothing real to act on (it showed a hardcoded demo store). The gate
+model now, decided 2026-08-09:
+
+- **First publishes, rest queue.** The first-ever scan of a species stores
+  `v1.png` and publishes it as the global reference immediately (the almanac is
+  never left without a sprite). Every later render is stored as `v<N>.png` plus
+  a PENDING row in `dex_candidates`, carrying the pipeline's evaluation
+  (judge score, cutout, confidence, auto-approve verdict).
+- **Publishing is manual and atomic.** The studio's Dex Gate lists real species
+  and candidates; publishing one transactionally sets it PUBLISHED, demotes the
+  incumbent to PENDING (re-publishable, never lost), and points `dex.spriteUrl`
+  at it. Rejecting the currently published sprite is refused (409).
+- **Players are untouched.** Archive records keep whatever sprite the player
+  earned; only the shared reference (almanac, discovery views) is governed.
+- **Unidentified/mock scans never become candidates** — their species keys are
+  user-scoped and are filtered out of the gate.
+
+Auto-approve (`shouldAutoApprove`) is recorded on the candidate as advisory
+context; it does not publish anything by itself.
+
 # Related
 
 - [FUZZ_TESTING.md](FUZZ_TESTING.md) — the gate every scanned photo passes first

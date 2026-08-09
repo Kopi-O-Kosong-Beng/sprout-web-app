@@ -9,12 +9,15 @@ import { deriveSpeciesStats } from '../data/species-stats';
 import type { CaptureSource } from '../data/capture-source';
 import type { AvatarRepository } from '../models/avatar';
 import type { DexRepository } from '../models/dex';
+import type { DexCandidate, DexCandidateRepository } from '../models/dexCandidate';
+import { candidateId, isAlreadyExists } from '../repositories/dexCandidates';
 import type { DiscoveryResolver, PublicDiscovery } from './discovery';
 import type { SpriteStorage } from './sprite-storage';
 
 export interface ScanPersistenceDependencies {
   storage: SpriteStorage;
   dex: DexRepository;
+  candidates: Pick<DexCandidateRepository, 'maxVersion' | 'create'>;
   avatars: Pick<AvatarRepository, 'upsertFromScan'>;
   /** Turns the stored dex record into the block the client reads. Injected so
    *  this service stays testable without Firestore, and so the UID→display-name
@@ -34,6 +37,9 @@ export interface ScanPersistOptions {
   /** What Plant.id said about the species, for the archive to show. Omitted on
    *  an unidentified scan, where there is nothing true to record. */
   details?: PlantDetails;
+  /** The pipeline's verdict on this render, recorded onto its candidate row so
+   *  the dex gate can compare candidates without re-running the judge. */
+  evaluation?: ScanEvaluation;
 }
 
 /**
@@ -114,12 +120,28 @@ export function buildScanMetadata(
   return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
+/** What the pipeline knew about the render when it finished — carried onto the
+ *  candidate row so the dex gate can rank candidates without re-judging. */
+export interface ScanEvaluation {
+  autoApproved: boolean;
+  judgeCute: number | null;
+  removeBgOk: boolean;
+  paletteValid: boolean | null;
+  dimsOk: boolean | null;
+  notBlank: boolean | null;
+}
+
 export interface ScanPersistResult {
   saved: boolean;
   avatarId: string | null;
   created: boolean;
   saveError?: string;
   discovery: PublicDiscovery | null;
+  /** Set when this scan's render was kept as a dex candidate: version 1 on a
+   *  first discovery (published immediately), version >= 2 on a rescan
+   *  (queued PENDING for the studio's dex gate). Null when the render was not
+   *  a global candidate (unidentified scans) or candidate recording failed. */
+  candidate: { version: number; status: DexCandidate['status'] } | null;
 }
 
 /** Firestore and Cloud Storage exceptions routinely name the bucket, the
@@ -154,6 +176,126 @@ export function scopeSpeciesKeyToUser(speciesKey: string, userId: string): strin
   return `${speciesKey}__u_${Buffer.from(userId, 'utf8').toString('hex')}`;
 }
 
+function toCandidateEvaluation(
+  options: ScanPersistOptions
+): DexCandidate['evaluation'] {
+  const evaluation = options.evaluation;
+  if (!evaluation) return null;
+  // Firestore rejects `undefined`, so every absent field becomes an explicit
+  // null — same reasoning as buildScanMetadata above.
+  return {
+    autoApproved: evaluation.autoApproved,
+    judgeCute: evaluation.judgeCute ?? null,
+    removeBgOk: evaluation.removeBgOk,
+    paletteValid: evaluation.paletteValid ?? null,
+    dimsOk: evaluation.dimsOk ?? null,
+    notBlank: evaluation.notBlank ?? null,
+    confidence:
+      typeof options.details?.confidence === 'number' &&
+      Number.isFinite(options.details.confidence)
+        ? options.details.confidence
+        : null,
+  };
+}
+
+/** Records this scan's render as a dex candidate.
+ *
+ *  First discovery → the canonical v1 object was just created, so the row is
+ *  version 1 and PUBLISHED (the gate model: the first sprite publishes so the
+ *  almanac is never empty; everything later queues).
+ *
+ *  Rescan → the render that used to be thrown away is stored as
+ *  `v<N>.png` plus a PENDING row for the studio's dex gate. The version is
+ *  allocated by create()'s id conflict: a concurrent rescan that claims the
+ *  same number fails the create and retries one higher. For a species that
+ *  predates this collection, the canonical v1 is first backfilled as a
+ *  PUBLISHED row (with no evaluation — nothing was recorded about it) so the
+ *  gate always shows what the new candidate is competing against.
+ */
+async function recordCandidate(
+  dependencies: ScanPersistenceDependencies,
+  speciesKey: string,
+  speciesName: string,
+  userId: string,
+  png: Buffer,
+  stored: { url: string; created: boolean },
+  options: ScanPersistOptions
+): Promise<NonNullable<ScanPersistResult['candidate']>> {
+  const now = new Date().toISOString();
+
+  if (stored.created) {
+    const row: DexCandidate = {
+      id: candidateId(speciesKey, 1),
+      speciesKey,
+      speciesName,
+      version: 1,
+      spriteUrl: stored.url,
+      status: 'PUBLISHED',
+      scannedBy: userId,
+      createdAt: now,
+      evaluation: toCandidateEvaluation(options),
+    };
+    try {
+      await dependencies.candidates.create(row);
+    } catch (error) {
+      // Two first-discoveries racing: storage picked one winner, and both
+      // callers reached here with its URL. The row exists; nothing to add.
+      if (!isAlreadyExists(error)) throw error;
+    }
+    return { version: 1, status: 'PUBLISHED' };
+  }
+
+  const maxVersion = await dependencies.candidates.maxVersion(speciesKey);
+  let version = Math.max(2, maxVersion + 1);
+
+  if (maxVersion === 0) {
+    // No candidate rows yet: this species predates the collection. Backfill
+    // the canonical sprite as v1/PUBLISHED so the gate shows the incumbent.
+    try {
+      await dependencies.candidates.create({
+        id: candidateId(speciesKey, 1),
+        speciesKey,
+        speciesName,
+        version: 1,
+        spriteUrl: stored.url,
+        status: 'PUBLISHED',
+        scannedBy: '',
+        createdAt: now,
+        evaluation: null,
+      });
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw error;
+    }
+  }
+
+  const MAX_ALLOCATION_ATTEMPTS = 3;
+  for (let attempt = 1; ; attempt++) {
+    const spriteUrl = await dependencies.storage.saveVersion(speciesKey, version, png);
+    try {
+      await dependencies.candidates.create({
+        id: candidateId(speciesKey, version),
+        speciesKey,
+        speciesName,
+        version,
+        spriteUrl,
+        status: 'PENDING',
+        scannedBy: userId,
+        createdAt: now,
+        evaluation: toCandidateEvaluation(options),
+      });
+      return { version, status: 'PENDING' };
+    } catch (error) {
+      if (!isAlreadyExists(error) || attempt >= MAX_ALLOCATION_ATTEMPTS) throw error;
+      // A concurrent rescan claimed this version between maxVersion and
+      // create. The object we just uploaded at v<N> is now an orphan the
+      // winner's row does not reference; the retry uploads to v<N+1>, and
+      // saveVersion's unconditional write makes a later reuse of the orphaned
+      // slot self-healing.
+      version++;
+    }
+  }
+}
+
 export async function persistScan(
   dependencies: ScanPersistenceDependencies,
   userId: string,
@@ -168,6 +310,7 @@ export async function persistScan(
     created: false,
     saveError,
     discovery: null,
+    candidate: null,
   });
 
   try {
@@ -190,7 +333,8 @@ export async function persistScan(
     // write it happens to be constructed for.
     const stats = deriveSpeciesStats(speciesKey);
 
-    const spriteUrl = await dependencies.storage.save(speciesKey, png);
+    const stored = await dependencies.storage.save(speciesKey, png);
+    const spriteUrl = stored.url;
     // The sprite goes on the dex record too: it is canonical per species, and
     // the almanac needs it without reading any player's avatar document.
     const dex = await dependencies.dex.recordDiscovery(
@@ -199,6 +343,31 @@ export async function persistScan(
       speciesName,
       spriteUrl
     );
+
+    // Keep this render as a dex candidate. Best-effort by design: the player's
+    // scan is already durably saved above, and a candidate row exists purely
+    // for the studio's dex gate — its failure must degrade to "not reviewable",
+    // never to saved: false.
+    let candidate: ScanPersistResult['candidate'] = null;
+    if (options.identified) {
+      try {
+        candidate = await recordCandidate(
+          dependencies,
+          speciesKey,
+          speciesName,
+          userId,
+          png,
+          stored,
+          options
+        );
+      } catch (error) {
+        console.error(
+          'Candidate recording failed after a successful save:',
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    }
+
     const { record, created } = await dependencies.avatars.upsertFromScan(userId, {
       speciesName,
       speciesFamily,
@@ -225,7 +394,7 @@ export async function persistScan(
       );
     }
 
-    return { saved: true, avatarId: record.id, created, discovery };
+    return { saved: true, avatarId: record.id, created, discovery, candidate };
   } catch (error) {
     // Deliberately swallowed: the sprite was generated successfully and the user
     // should still see it. Section F — a save fault must not look like a

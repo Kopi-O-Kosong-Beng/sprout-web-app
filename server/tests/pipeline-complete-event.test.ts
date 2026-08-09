@@ -65,8 +65,10 @@ jest.mock('../services/sprite-storage', () => ({
   default: () => ({
     save: async (speciesKey: string) => {
       mockSpriteSaves.push(speciesKey);
-      return `https://cdn.test/${speciesKey}.png`;
+      return { url: `https://cdn.test/${speciesKey}.png`, created: true };
     },
+    saveVersion: async (speciesKey: string, version: number) =>
+      `https://cdn.test/${speciesKey}-v${version}.png`,
   }),
 }));
 

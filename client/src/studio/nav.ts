@@ -25,6 +25,7 @@ export type RouteId =
   | 'keys'
   | 'topology'
   | 'logs'
+  | 'observability'
   | 'gate'
   | 'bench'
 ;
@@ -117,6 +118,14 @@ export const NAV: NavGroup[] = [
         sub: 'Error codes, safety blocks and fallback events from the in-memory log buffer.',
       },
       {
+        id: 'observability',
+        label: 'Observability',
+        icon: Activity,
+        kicker: 'Operations',
+        title: 'API Observability',
+        sub: 'Latency, request and failure metrics for every external API the pipeline calls, from real scans.',
+      },
+      {
         id: 'gate',
         label: 'Dex Gate',
         icon: Stamp,
@@ -144,4 +153,4 @@ export const ROUTES: Record<RouteId, RouteDef> = Object.fromEntries(
 export const STUDIO_ROUTES: RouteId[] = ['scanner'];
 export const TEST_ROUTE: RouteId = 'unittests';
 export const FUZZ_ROUTE: RouteId = 'fuzz';
-export const ADMIN_ROUTES: RouteId[] = ['health', 'keys', 'topology', 'logs', 'gate', 'bench'];
+export const ADMIN_ROUTES: RouteId[] = ['health', 'keys', 'topology', 'logs', 'observability', 'gate', 'bench'];

@@ -44,32 +44,79 @@ export interface LogEntry {
   latencyMs?: number;
 }
 
-export interface DexEntry {
+/** One render of a species — see server/models/dexCandidate.ts. */
+export interface DexCandidateEntry {
   id: string;
-  species: string;
-  commonName: string;
-  status: 'APPROVED' | 'PENDING' | 'REJECTED';
-  cuteScore: number;
-  paletteMatch: string;
-  dimensions: string;
-  craftedPrompt: string;
-  createdAt: string;
+  speciesKey: string;
+  speciesName: string;
+  version: number;
   spriteUrl: string;
+  status: 'PENDING' | 'PUBLISHED' | 'REJECTED';
+  scannedBy: string;
+  createdAt: string;
+  evaluation: {
+    autoApproved: boolean | null;
+    judgeCute: number | null;
+    removeBgOk: boolean | null;
+    paletteValid: boolean | null;
+    dimsOk: boolean | null;
+    notBlank: boolean | null;
+    confidence: number | null;
+  } | null;
+}
+
+/** A real dex species with every render the pipeline has kept for it. */
+export interface DexSpeciesEntry {
+  speciesKey: string;
+  speciesName: string;
+  discoveryCount: number;
+  firstDiscoveredAt: string;
+  /** The global reference — what the almanac shows. */
+  spriteUrl: string;
+  candidates: DexCandidateEntry[];
+}
+
+export interface ApiCallSample {
+  at: number;
+  latencyMs: number;
+  ok: boolean;
+}
+
+export interface ApiMetrics {
+  api: string;
+  requests: number;
+  errors: number;
+  avgMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  maxMs: number;
+  lastMs: number | null;
+  lastAt: number | null;
+  recent: ApiCallSample[];
+}
+
+export interface MetricsSnapshot {
+  timestamp: string;
+  /** Slowest-first by p95. */
+  apis: ApiMetrics[];
 }
 
 export interface PlatformStatus {
   config: ConfigStatus | null;
   health: HealthCheckData | null;
   logs: LogEntry[];
-  dexEntries: DexEntry[];
+  dexSpecies: DexSpeciesEntry[];
+  metrics: MetricsSnapshot | null;
   loadingConfig: boolean;
   loadingHealth: boolean;
   loadingLogs: boolean;
   loadingDex: boolean;
+  loadingMetrics: boolean;
   refreshConfig: () => void;
   refreshHealth: () => void;
   refreshLogs: () => void;
   refreshDex: () => void;
+  refreshMetrics: () => void;
   refreshAll: () => void;
 }
 
@@ -88,12 +135,14 @@ export function usePlatformStatus(): PlatformStatus {
   const [config, setConfig] = useState<ConfigStatus | null>(null);
   const [health, setHealth] = useState<HealthCheckData | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [dexEntries, setDexEntries] = useState<DexEntry[]>([]);
+  const [dexSpecies, setDexSpecies] = useState<DexSpeciesEntry[]>([]);
+  const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
 
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [loadingHealth, setLoadingHealth] = useState(true);
   const [loadingLogs, setLoadingLogs] = useState(true);
   const [loadingDex, setLoadingDex] = useState(true);
+  const [loadingMetrics, setLoadingMetrics] = useState(true);
 
   const refreshConfig = useCallback(async () => {
     setLoadingConfig(true);
@@ -118,9 +167,16 @@ export function usePlatformStatus(): PlatformStatus {
 
   const refreshDex = useCallback(async () => {
     setLoadingDex(true);
-    const data = await getJson<DexEntry[]>('/api/platform/dex-docs');
-    setDexEntries(data ?? []);
+    const data = await getJson<{ species?: DexSpeciesEntry[] }>('/api/platform/dex-docs');
+    setDexSpecies(data?.species ?? []);
     setLoadingDex(false);
+  }, []);
+
+  const refreshMetrics = useCallback(async () => {
+    setLoadingMetrics(true);
+    const data = await getJson<MetricsSnapshot>('/api/platform/metrics');
+    if (data) setMetrics(data);
+    setLoadingMetrics(false);
   }, []);
 
   const refreshAll = useCallback(() => {
@@ -128,7 +184,8 @@ export function usePlatformStatus(): PlatformStatus {
     refreshHealth();
     refreshLogs();
     refreshDex();
-  }, [refreshConfig, refreshHealth, refreshLogs, refreshDex]);
+    refreshMetrics();
+  }, [refreshConfig, refreshHealth, refreshLogs, refreshDex, refreshMetrics]);
 
   useEffect(() => {
     refreshAll();
@@ -138,15 +195,18 @@ export function usePlatformStatus(): PlatformStatus {
     config,
     health,
     logs,
-    dexEntries,
+    dexSpecies,
+    metrics,
     loadingConfig,
     loadingHealth,
     loadingLogs,
     loadingDex,
+    loadingMetrics,
     refreshConfig,
     refreshHealth,
     refreshLogs,
     refreshDex,
+    refreshMetrics,
     refreshAll,
   };
 }

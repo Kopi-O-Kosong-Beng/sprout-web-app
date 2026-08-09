@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Activity,
   AlertTriangle,
   Check,
   CheckCircle2,
@@ -12,7 +13,12 @@ import {
 } from 'lucide-react';
 import { studioFetch } from '../lib/api';
 import type { RouteId } from '../nav';
-import type { HealthCheckData, PlatformStatus } from '../hooks/usePlatformStatus';
+import type {
+  ApiCallSample,
+  ApiMetrics,
+  HealthCheckData,
+  PlatformStatus,
+} from '../hooks/usePlatformStatus';
 import {
   Badge,
   Button,
@@ -159,18 +165,164 @@ const KEY_DESCRIPTIONS: Record<string, string> = {
   DATABASE_URL: 'Postgres connection for Dex persistence',
 };
 
+/* -------------------------------------------------------------------------- */
+/* Observability chart primitives                                              */
+/*                                                                            */
+/* Hand-rolled rather than a chart library: three small marks in the studio's */
+/* own design language beat a dependency. Colour rules: latency is magnitude, */
+/* so it wears ONE hue in two lightness steps of --color-info; failures are a */
+/* status and wear --color-danger only. The info/danger pair was validated    */
+/* CVD-safe on the panel surface (deutan ΔE 23; the old ok-green/danger-red   */
+/* stack failed at ΔE 5, which is why success is blue here, not green).       */
+/* -------------------------------------------------------------------------- */
+
+const CHART = {
+  p50: '#7fd3e6', //   --color-info, light step
+  p95: '#3f92ab', //   same hue, dark step (magnitude = one hue, stepped)
+  calls: '#7fd3e6', // successful calls share the telemetry hue
+  error: '#ee3046', // --color-danger, failures only
+  surface: '#120b36', // --color-panel, for the 2px ring on overlapping marks
+};
+
+const fmtMs = (ms: number) =>
+  ms >= 10_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+
+const Swatch: React.FC<{ color: string; label: string }> = ({ color, label }) => (
+  <span className="flex items-center gap-1.5">
+    <span className="inline-block h-2 w-3 rounded-[2px]" style={{ background: color }} />
+    {label}
+  </span>
+);
+
+/** Horizontal p50/p95 bars per API, slowest first — "which API is slow". */
+const LatencyBars: React.FC<{ apis: ApiMetrics[] }> = ({ apis }) => {
+  const max = Math.max(...apis.map((a) => a.p95Ms), 1);
+  return (
+    <div className="space-y-3 p-4">
+      <div className="flex items-center gap-4 text-label text-txt-4">
+        <Swatch color={CHART.p50} label="p50" />
+        <Swatch color={CHART.p95} label="p95" />
+      </div>
+      {apis.map((a) => (
+        <div key={a.api} title={`${a.api} — p50 ${fmtMs(a.p50Ms)} · p95 ${fmtMs(a.p95Ms)} · max ${fmtMs(a.maxMs)} over ${a.requests} calls`}>
+          <div className="flex items-baseline justify-between text-meta">
+            <span className="truncate text-txt-2">{a.api}</span>
+            <span className="font-mono text-txt-3">
+              {fmtMs(a.p50Ms)} · {fmtMs(a.p95Ms)}
+            </span>
+          </div>
+          <div className="mt-1 space-y-[2px]">
+            <div
+              className="h-2 rounded-r-[4px]"
+              style={{ width: `${Math.max(1, (a.p50Ms / max) * 100)}%`, background: CHART.p50 }}
+            />
+            <div
+              className="h-2 rounded-r-[4px]"
+              style={{ width: `${Math.max(1, (a.p95Ms / max) * 100)}%`, background: CHART.p95 }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+/** Successful calls vs failed/degraded calls per API. */
+const RequestBars: React.FC<{ apis: ApiMetrics[] }> = ({ apis }) => {
+  const byVolume = [...apis].sort((a, b) => b.requests - a.requests);
+  const max = Math.max(...apis.map((a) => a.requests), 1);
+  return (
+    <div className="space-y-3 p-4">
+      <div className="flex items-center gap-4 text-label text-txt-4">
+        <Swatch color={CHART.calls} label="ok" />
+        <Swatch color={CHART.error} label="failed / degraded" />
+      </div>
+      {byVolume.map((a) => {
+        const ok = a.requests - a.errors;
+        return (
+          <div key={a.api} title={`${a.api} — ${ok} ok, ${a.errors} failed/degraded`}>
+            <div className="flex items-baseline justify-between text-meta">
+              <span className="truncate text-txt-2">{a.api}</span>
+              <span className="font-mono text-txt-3">
+                {a.requests} calls{a.errors > 0 ? ` · ${a.errors} failed` : ''}
+              </span>
+            </div>
+            <div className="mt-1 flex gap-[2px]" style={{ width: `${Math.max(2, (a.requests / max) * 100)}%` }}>
+              {ok > 0 && (
+                <div
+                  className="h-2 rounded-r-[4px]"
+                  style={{ flexGrow: ok, background: CHART.calls }}
+                />
+              )}
+              {a.errors > 0 && (
+                <div
+                  className="h-2 rounded-r-[4px]"
+                  style={{ flexGrow: a.errors, background: CHART.error }}
+                />
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/** Recent per-call latencies, oldest → newest. Failed calls get a danger dot
+ *  with a 2px surface ring so overlap stays legible. */
+const Sparkline: React.FC<{ samples: ApiCallSample[] }> = ({ samples }) => {
+  if (samples.length < 2) {
+    return <span className="text-label text-txt-5">not enough calls</span>;
+  }
+  const w = 132;
+  const h = 28;
+  const max = Math.max(...samples.map((s) => s.latencyMs), 1);
+  const x = (i: number) => 2 + (i / (samples.length - 1)) * (w - 8);
+  const y = (v: number) => h - 4 - (v / max) * (h - 8);
+  const points = samples.map((s, i) => `${x(i)},${y(s.latencyMs)}`).join(' ');
+  return (
+    <svg width={w} height={h} role="img" aria-label="Recent latency trend">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={CHART.p50}
+        strokeWidth="2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      {samples.map(
+        (s, i) =>
+          !s.ok && (
+            <circle
+              key={i}
+              cx={x(i)}
+              cy={y(s.latencyMs)}
+              r="4"
+              fill={CHART.error}
+              stroke={CHART.surface}
+              strokeWidth="2"
+            />
+          ),
+      )}
+    </svg>
+  );
+};
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform }) => {
   const {
     config,
     health,
     logs,
-    dexEntries,
+    dexSpecies,
+    metrics,
     loadingHealth,
     loadingLogs,
     loadingDex,
+    loadingMetrics,
     refreshHealth,
     refreshLogs,
     refreshDex,
+    refreshMetrics,
   } = platform;
 
   // Prompt bench
@@ -215,16 +367,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
     }
   };
 
-  const handleApproveDex = async (id: string, newStatus: 'APPROVED' | 'REJECTED') => {
+  const [gateError, setGateError] = useState<string | null>(null);
+
+  const handleCandidateAction = async (candidateId: string, action: 'publish' | 'reject') => {
+    setGateError(null);
     try {
       const res = await studioFetch('/api/platform/dex-approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status: newStatus }),
+        body: JSON.stringify({ candidateId, action }),
       });
-      if (res.ok) refreshDex();
+      if (res.ok) {
+        refreshDex();
+      } else {
+        const body = await res.json().catch(() => null);
+        setGateError(body?.error ?? `Update failed (${res.status}).`);
+      }
     } catch (err) {
-      console.error('Failed to update Dex status:', err);
+      console.error('Failed to update candidate:', err);
+      setGateError('Update failed — is the server reachable?');
     }
   };
 
@@ -254,10 +415,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
     [logs, logFilterLevel, logSearch],
   );
 
+  // Species whose candidate list survives the status filter. The species stays
+  // visible as the grouping row; the filter narrows which renders show inside.
   const filteredDex = useMemo(
     () =>
-      dexEntries.filter((d) => dexFilterStatus === 'all' || d.status === dexFilterStatus),
-    [dexEntries, dexFilterStatus],
+      dexSpecies
+        .map((species) => ({
+          ...species,
+          candidates: species.candidates.filter(
+            (candidate) => dexFilterStatus === 'all' || candidate.status === dexFilterStatus,
+          ),
+        }))
+        .filter((species) => species.candidates.length > 0),
+    [dexSpecies, dexFilterStatus],
   );
 
   /* ====================================================================== */
@@ -626,6 +796,120 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
   }
 
   /* ====================================================================== */
+  /* API observability                                                       */
+  /* ====================================================================== */
+
+  if (route === 'observability') {
+    const apis = metrics?.apis ?? [];
+    const totalRequests = apis.reduce((total, a) => total + a.requests, 0);
+    const totalErrors = apis.reduce((total, a) => total + a.errors, 0);
+    // The server sorts p95-descending, so the first entry IS the slowest API.
+    const slowest = apis[0] ?? null;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-meta text-txt-4">
+            In-memory since server start; fed by real scans only.
+          </p>
+          <Button
+            onClick={refreshMetrics}
+            icon={<RefreshCw className={cx('h-3.5 w-3.5', loadingMetrics && 'animate-spin')} />}
+          >
+            Refresh
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Stat label="API calls" value={totalRequests} sub="across all providers" tone="info" />
+          <Stat
+            label="Failed / degraded"
+            value={totalErrors}
+            sub="fallbacks and failures"
+            tone={totalErrors > 0 ? 'danger' : 'ok'}
+          />
+          <Stat
+            label="Slowest API (p95)"
+            value={slowest ? fmtMs(slowest.p95Ms) : '—'}
+            sub={slowest?.api ?? 'no calls yet'}
+            tone="warn"
+          />
+          <Stat label="APIs tracked" value={apis.length} sub="providers called so far" />
+        </div>
+
+        {apis.length === 0 ? (
+          <Empty
+            icon={<Activity className="h-10 w-10" />}
+            title="No API calls recorded yet"
+            sub="Metrics are collected as scans run. Run a scan (or the Live Scanner) and refresh."
+          />
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <Panel>
+                <PanelHead
+                  kicker="Latency"
+                  title="Slowest APIs"
+                  sub="p50 and p95 per provider, slowest first."
+                />
+                <LatencyBars apis={apis} />
+              </Panel>
+              <Panel>
+                <PanelHead
+                  kicker="Volume"
+                  title="Requests & failures"
+                  sub="Successful calls vs failed or degraded calls per provider."
+                />
+                <RequestBars apis={apis} />
+              </Panel>
+            </div>
+
+            <Panel>
+              <PanelHead
+                kicker="Trend"
+                title="Recent latency per API"
+                sub="Oldest to newest. A red dot is a failed or degraded call."
+              />
+              <div className="overflow-x-auto p-2">
+                <table className="w-full text-meta">
+                  <thead>
+                    <tr className="text-left text-label text-txt-4 uppercase tracking-wide">
+                      <th className="px-2 py-1.5 font-medium">API</th>
+                      <th className="px-2 py-1.5 font-medium">Recent calls</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Last</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Avg</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Max</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Calls</th>
+                      <th className="px-2 py-1.5 text-right font-medium">Failed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {apis.map((a) => (
+                      <tr key={a.api} className="border-t border-line-soft">
+                        <td className="px-2 py-2 text-txt-2">{a.api}</td>
+                        <td className="px-2 py-2"><Sparkline samples={a.recent} /></td>
+                        <td className="px-2 py-2 text-right font-mono text-txt-2">
+                          {a.lastMs === null ? '—' : fmtMs(a.lastMs)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono text-txt-3">{fmtMs(a.avgMs)}</td>
+                        <td className="px-2 py-2 text-right font-mono text-txt-3">{fmtMs(a.maxMs)}</td>
+                        <td className="px-2 py-2 text-right font-mono text-txt-2">{a.requests}</td>
+                        <td className={cx('px-2 py-2 text-right font-mono', a.errors > 0 ? 'text-danger' : 'text-txt-4')}>
+                          {a.errors}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  /* ====================================================================== */
   /* Dex approval gate                                                       */
   /* ====================================================================== */
 
@@ -634,7 +918,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex gap-1.5">
-            {['all', 'PENDING', 'APPROVED', 'REJECTED'].map((s) => (
+            {['all', 'PENDING', 'PUBLISHED', 'REJECTED'].map((s) => (
               <button
                 key={s}
                 onClick={() => setDexFilterStatus(s)}
@@ -658,81 +942,118 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
           </Button>
         </div>
 
+        {gateError && (
+          <div className="rounded-card border border-danger/40 bg-danger/10 p-3 text-meta text-danger">
+            {gateError}
+          </div>
+        )}
+
         {filteredDex.length === 0 ? (
           <Empty
             icon={<Sparkles className="h-10 w-10" />}
-            title="Nothing awaiting review"
-            sub="Generated species that fall below the auto-approve threshold queue up here."
+            title="Nothing to review"
+            sub="A species' first sprite publishes automatically. Rescans queue their new renders here, and you choose which one the almanac shows."
           />
         ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {filteredDex.map((entry) => (
-              <Panel key={entry.id}>
-                <PanelHead
-                  kicker={entry.dimensions || '192×192'}
-                  title={entry.species}
-                  sub={entry.commonName}
-                  right={
-                    <Badge
-                      tone={
-                        entry.status === 'APPROVED'
-                          ? 'ok'
-                          : entry.status === 'REJECTED'
-                            ? 'danger'
-                            : 'gate'
-                      }
-                      dot
+          filteredDex.map((species) => (
+            <Panel key={species.speciesKey}>
+              <PanelHead
+                kicker={`${species.discoveryCount} ${species.discoveryCount === 1 ? 'discovery' : 'discoveries'}`}
+                title={species.speciesName}
+                sub="The published sprite is the global reference the almanac and discovery views show."
+              />
+              <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                {species.candidates.map((candidate) => {
+                  const published = candidate.status === 'PUBLISHED';
+                  const ev = candidate.evaluation;
+                  return (
+                    <div
+                      key={candidate.id}
+                      className={cx(
+                        'rounded-card border p-3',
+                        published ? 'border-brand/40 bg-brand/5' : 'border-line bg-raised',
+                      )}
                     >
-                      {entry.status}
-                    </Badge>
-                  }
-                />
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-label text-txt-3">v{candidate.version}</span>
+                        <Badge
+                          tone={published ? 'ok' : candidate.status === 'REJECTED' ? 'danger' : 'gate'}
+                          dot
+                        >
+                          {candidate.status}
+                        </Badge>
+                      </div>
 
-                <div className="flex gap-3 p-4">
-                  <SpriteFrame src={entry.spriteUrl} alt={entry.species} size="md" />
-                  <div className="min-w-0 flex-1 space-y-1.5">
-                    <Row
-                      label="Judge"
-                      value={`${entry.cuteScore}/5`}
-                      tone={entry.cuteScore >= 4 ? 'ok' : 'warn'}
-                    />
-                    <Row label="Palette" value={entry.paletteMatch} tone="info" />
-                    <Row label="Dimensions" value={entry.dimensions} />
-                  </div>
-                </div>
+                      <div className="mt-2 flex gap-3">
+                        <SpriteFrame
+                          src={candidate.spriteUrl}
+                          alt={`${species.speciesName} v${candidate.version}`}
+                          size="md"
+                          glow={published}
+                        />
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <Row
+                            label="Judge"
+                            value={ev?.judgeCute != null ? `${ev.judgeCute}/5` : '—'}
+                            tone={ev?.judgeCute != null ? (ev.judgeCute >= 4 ? 'ok' : 'warn') : 'neutral'}
+                          />
+                          <Row
+                            label="ID confidence"
+                            value={ev?.confidence != null ? `${(ev.confidence * 100).toFixed(0)}%` : '—'}
+                            tone="info"
+                          />
+                          <Row
+                            label="Cutout"
+                            value={ev?.removeBgOk == null ? '—' : ev.removeBgOk ? 'clean' : 'degraded'}
+                            tone={ev?.removeBgOk === false ? 'warn' : 'neutral'}
+                          />
+                          <Row
+                            label="Auto bar"
+                            value={ev?.autoApproved == null ? '—' : ev.autoApproved ? 'met' : 'missed'}
+                            tone={ev?.autoApproved ? 'ok' : 'neutral'}
+                          />
+                          <Row
+                            label="Scanned"
+                            value={candidate.createdAt ? candidate.createdAt.slice(0, 16).replace('T', ' ') : '—'}
+                          />
+                        </div>
+                      </div>
 
-                {entry.craftedPrompt && (
-                  <p className="mx-4 mb-3 line-clamp-3 rounded-card border border-line-soft bg-void p-2.5 font-mono text-[11px] text-txt-3">
-                    {entry.craftedPrompt}
-                  </p>
-                )}
-
-                <div className="flex gap-2 border-t border-line-soft p-3">
-                  {entry.status !== 'APPROVED' && (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => handleApproveDex(entry.id, 'APPROVED')}
-                      icon={<Check className="h-3.5 w-3.5" />}
-                    >
-                      Approve
-                    </Button>
-                  )}
-                  {entry.status !== 'REJECTED' && (
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={() => handleApproveDex(entry.id, 'REJECTED')}
-                      icon={<X className="h-3.5 w-3.5" />}
-                    >
-                      Reject
-                    </Button>
-                  )}
-                </div>
-              </Panel>
-            ))}
-          </div>
+                      <div className="mt-3 flex gap-2 border-t border-line-soft pt-3">
+                        {published ? (
+                          <span className="flex-1 self-center text-center text-label text-txt-4">
+                            Current global reference
+                          </span>
+                        ) : (
+                          <>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              className="flex-1"
+                              onClick={() => handleCandidateAction(candidate.id, 'publish')}
+                              icon={<Check className="h-3.5 w-3.5" />}
+                            >
+                              Publish
+                            </Button>
+                            {candidate.status !== 'REJECTED' && (
+                              <Button
+                                variant="danger"
+                                size="sm"
+                                onClick={() => handleCandidateAction(candidate.id, 'reject')}
+                                icon={<X className="h-3.5 w-3.5" />}
+                              >
+                                Reject
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Panel>
+          ))
         )}
       </div>
     );

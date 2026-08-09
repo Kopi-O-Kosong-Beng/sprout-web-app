@@ -33,11 +33,14 @@ import {
   TOTAL_BUDGET_MS,
 } from '../pipeline/deadline';
 import { serverEnv } from '../platform/env';
+import { logAdminEvent } from '../platform/adminStore';
+import { recordApiCall } from '../platform/metricsStore';
 import { CAPTURE_SOURCES, type CaptureSource } from '../data/capture-source';
 import { persistScan, type PlantDetails } from '../services/scan-persistence';
 import { resolveDiscovery } from '../services/discovery';
 import createFirebaseSpriteStorage from '../services/sprite-storage';
 import dexRepository from '../repositories/dex';
+import dexCandidateRepository from '../repositories/dexCandidates';
 import avatarRepository from '../repositories/avatars';
 
 const router = Router();
@@ -156,6 +159,14 @@ router.post('/run-stream', async (req: Request, res: Response) => {
        */
       const supplied = typeof customName === 'string' ? customName.trim() : '';
       if (!supplied) {
+        if (identifiedSpecies) recordApiCall('Plant.id', lat1, false);
+        logAdminEvent(
+          'warn',
+          'Hop 1 — Identify',
+          `Identification failed (${identification.error || 'no confident match'}); asked the player to name the plant.`,
+          'NEEDS_NAME',
+          lat1
+        );
         sendEvent({
           event: 'needs_name',
           step: '1',
@@ -198,6 +209,21 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       idMsg = `Species override applied: "${overrideName}"`;
     }
 
+    // Metrics only when Plant.id was actually called — the keyless mock path
+    // answers instantly and would pollute the latency series with fiction.
+    if (!isMockIdentification(serverEnv.plantApiKey)) {
+      recordApiCall('Plant.id', lat1, idSuccess);
+    }
+    logAdminEvent(
+      idSuccess ? 'info' : 'warn',
+      'Hop 1 — Identify',
+      identifiedSpecies || overrideName
+        ? idMsg
+        : `${idMsg} (mock identification — no PLANT_API_KEY, scan stays user-scoped)`,
+      undefined,
+      lat1
+    );
+
     sendEvent({
       event: 'step_done',
       step: '1',
@@ -237,6 +263,12 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       typeof identification.probability === 'number' &&
       identification.probability < minConfidence
     ) {
+      logAdminEvent(
+        'warn',
+        'Hop 1 — Identify',
+        `${identification.name} at ${(identification.probability * 100).toFixed(0)}% is below the ${(minConfidence * 100).toFixed(0)}% gate — stopped before spending on generation.`,
+        'LOW_CONFIDENCE'
+      );
       sendEvent({
         event: 'low_confidence',
         step: '1',
@@ -272,6 +304,27 @@ router.post('/run-stream', async (req: Request, res: Response) => {
     const lat2a = Date.now() - startTime2a;
 
     const isTier1 = promptResult.tier === 'gemini';
+    // The hop's latency lands on the tier that actually answered. A fallback
+    // means Gemini did not deliver, which is exactly what the error count on
+    // its series is for — but its failed attempt's split is not visible from
+    // here, so only the answering tier gets a latency sample.
+    if (promptResult.tier === 'gemini') {
+      recordApiCall('Gemini (prompt)', lat2a, true);
+    } else if (promptResult.tier === 'gemma') {
+      recordApiCall('Gemini (prompt)', 0, false);
+      recordApiCall('NVIDIA Gemma (prompt)', lat2a, true);
+    }
+    logAdminEvent(
+      isTier1 ? 'info' : 'warn',
+      'Hop 2a — Prompt',
+      isTier1
+        ? `Prompt crafted by ${serverEnv.geminiVisionModel}.`
+        : promptResult.tier === 'gemma'
+          ? `Gemini unavailable — fell back to the NVIDIA Gemma vision tier.`
+          : `No vision model answered — used the name-only template prompt.`,
+      isTier1 ? undefined : 'PROMPT_TIER_FALLBACK',
+      lat2a
+    );
     sendEvent({
       event: 'step_done',
       step: '2a',
@@ -349,6 +402,22 @@ router.post('/run-stream', async (req: Request, res: Response) => {
           : `Every configured image model failed: ${renderError}. Fell back to a centre photo crop.`,
     }[renderSource];
 
+    // 'placeholder' means no image key is configured and no API was called, so
+    // it stays out of the latency series; a photoCrop fallback IS a failed
+    // provider call and counts as one.
+    const imageApi =
+      serverEnv.imageProvider === 'gemini' ? `Gemini (image)` : 'Flux';
+    if (renderSource !== 'placeholder') {
+      recordApiCall(imageApi, lat2b, renderSource === 'model');
+    }
+    logAdminEvent(
+      renderSource === 'model' ? 'info' : 'warn',
+      'Hop 2b — Render',
+      renderDetail,
+      renderSource === 'model' ? undefined : 'RENDER_FALLBACK',
+      lat2b
+    );
+
     sendEvent({
       event: 'step_done',
       step: '2b',
@@ -409,6 +478,7 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       saved: tail.persistence.saved,
       saveError: tail.persistence.saveError,
       discovery: tail.persistence.discovery,
+      candidate: tail.persistence.candidate,
     });
 
     res.end();
@@ -503,6 +573,7 @@ router.post('/run-stage2c', async (req: Request, res: Response) => {
       saved: tail.persistence.saved,
       saveError: tail.persistence.saveError,
       discovery: tail.persistence.discovery,
+      candidate: tail.persistence.candidate,
     });
 
     res.end();
@@ -558,6 +629,21 @@ async function runStage2cOnward(
     deadline
   );
   const lat2c = Date.now() - startTime2c;
+
+  // A missing key means no call was made — the pipeline degraded, but there is
+  // no withoutBG latency to chart. Everything else on this path is a real call.
+  if (serverEnv.withoutbgKey && serverEnv.withoutbgKey !== 'MOCK_KEY') {
+    recordApiCall('withoutBG', lat2c, removeBgResult.removeBgOk);
+  }
+  logAdminEvent(
+    removeBgResult.removeBgOk ? 'info' : 'warn',
+    'Hop 2c — Cutout',
+    removeBgResult.removeBgOk
+      ? 'withoutBG returned a clean alpha cutout.'
+      : 'withoutBG unavailable — background left baked in (non-fatal, sprite not auto-approvable).',
+    removeBgResult.removeBgOk ? undefined : 'CUTOUT_DEGRADED',
+    lat2c
+  );
 
   sendEvent({
     event: 'step_done',
@@ -637,6 +723,7 @@ async function runStage2cOnward(
 
   const startTime4 = Date.now();
   const pScores = await programmaticEval(finishedPngBuffer);
+  const startTimeJudge = Date.now();
   const judgeScores = await geminiJudgeEval(
     finishedPngBuffer,
     plant.name,
@@ -647,10 +734,23 @@ async function runStage2cOnward(
     // failed when the bounded judge was ported and this call site was not.
     deadline
   );
+  const judgeLatency = Date.now() - startTimeJudge;
 
   const combinedScores = { ...pScores, ...judgeScores };
   const autoApproved = shouldAutoApprove(combinedScores, removeBgResult.removeBgOk);
   const lat4 = Date.now() - startTime4;
+
+  const judged = typeof combinedScores.judgeCute === 'number';
+  if (serverEnv.geminiKey) {
+    recordApiCall('Gemini (judge)', judgeLatency, judged);
+  }
+  logAdminEvent(
+    autoApproved ? 'info' : 'warn',
+    'Hop 4 — Eval',
+    `${plant.name}: cutout ${removeBgResult.removeBgOk ? 'ok' : 'DEGRADED'}, palette ${pScores.paletteValid ? 'valid' : 'INVALID'}, judge ${judged ? `${combinedScores.judgeCute}/5` : 'unavailable'} → ${autoApproved ? 'auto-approve quality bar met' : 'below the auto-approve bar'}.`,
+    autoApproved ? undefined : 'BELOW_AUTO_APPROVE',
+    lat4
+  );
 
   sendEvent({
     event: 'step_done',
@@ -659,9 +759,12 @@ async function runStage2cOnward(
     status: autoApproved ? 'success' : 'warn',
     icon: autoApproved ? 'tick' : 'warn',
     latencyMs: lat4,
+    // This used to claim "Status: APPROVED" / "Saved as PENDING" when nothing
+    // persisted any status at all. Now it states the verdict; what actually
+    // happens to the render is reported by the persistence log line below.
     details: autoApproved
-      ? 'Passed all programmatic checks & cute score >= 4. Status: APPROVED.'
-      : `Saved as PENDING (Cutout OK: ${removeBgResult.removeBgOk}, Cute Judge: ${combinedScores.judgeCute || 4}/5).`,
+      ? 'Passed all programmatic checks & cute score >= 4.'
+      : `Below the auto-approve bar (Cutout OK: ${removeBgResult.removeBgOk}, Cute Judge: ${combinedScores.judgeCute || 4}/5).`,
     evalScores: combinedScores,
     autoApproved,
   });
@@ -674,6 +777,7 @@ async function runStage2cOnward(
     {
       storage: createFirebaseSpriteStorage(),
       dex: dexRepository,
+      candidates: dexCandidateRepository,
       avatars: avatarRepository,
       resolveDiscovery,
     },
@@ -688,8 +792,38 @@ async function runStage2cOnward(
          name is a stand-in, so care notes attached to it would describe a
          plant the player did not scan — worse than showing nothing. */
       details: identifiedSpecies ? details : undefined,
+      // Recorded onto the candidate row so the dex gate can rank renders
+      // without re-running the judge.
+      evaluation: {
+        autoApproved,
+        judgeCute: typeof combinedScores.judgeCute === 'number' ? combinedScores.judgeCute : null,
+        removeBgOk: removeBgResult.removeBgOk,
+        paletteValid: pScores.paletteValid ?? null,
+        dimsOk: pScores.dimsOk ?? null,
+        notBlank: pScores.notBlank ?? null,
+      },
     }
   );
+
+  if (persistence.saved) {
+    const candidate = persistence.candidate;
+    logAdminEvent(
+      'info',
+      'Persist',
+      candidate === null
+        ? `${identification.name}: scan saved (user-scoped — not global reference material).`
+        : candidate.version === 1
+          ? `${identification.name}: first discovery — sprite v1 published as the global reference.`
+          : `${identification.name}: rescan — new render kept as candidate v${candidate.version}, PENDING in the dex gate.`
+    );
+  } else {
+    logAdminEvent(
+      'error',
+      'Persist',
+      `${identification.name}: save failed — the player was asked to rescan.`,
+      'SAVE_FAILED'
+    );
+  }
 
   return {
     plant,

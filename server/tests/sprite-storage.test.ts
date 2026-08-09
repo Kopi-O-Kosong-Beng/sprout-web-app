@@ -80,13 +80,15 @@ describe('firebase sprite storage', () => {
     );
   });
 
-  it('returns a download URL carrying the token', async () => {
+  it('returns a download URL carrying the token, and reports the create', async () => {
     const file = fakeFile();
-    const url = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
+    const { url, created } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
 
     expect(url).toContain('sprites%2Ffern%2Fv1.png');
     expect(url).toContain(`token=${TOKEN}`);
     expect(url).toContain('alt=media');
+    // The candidate flow branches on this: created means "this render IS v1".
+    expect(created).toBe(true);
   });
 
   it('reuses an existing object instead of re-uploading', async () => {
@@ -94,10 +96,13 @@ describe('firebase sprite storage', () => {
       exists: true,
       metadata: { firebaseStorageDownloadTokens: 'existing-token' },
     });
-    const url = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
+    const { url, created } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
 
     expect(file.save).not.toHaveBeenCalled();
     expect(url).toContain('token=existing-token');
+    // Reuse means the render was NOT stored — the caller queues it as a
+    // versioned candidate instead.
+    expect(created).toBe(false);
   });
 
   it('rejects an empty species key rather than writing to a junk path', async () => {
@@ -118,7 +123,7 @@ describe('firebase sprite storage', () => {
       file.state.metadata = { firebaseStorageDownloadTokens: winnerToken };
       throw Object.assign(new Error('Precondition Failed'), { code: 412 });
     });
-    const url = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
+    const { url } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
 
     expect(file.save).toHaveBeenCalledTimes(1);
     expect(url).toContain(`token=${winnerToken}`);
@@ -147,7 +152,7 @@ describe('firebase sprite storage', () => {
 describe('firebase sprite storage token-less recovery', () => {
   it('stores the token it hands back when the object has lost its own', async () => {
     const file = fakeFile({ exists: true, metadata: {} });
-    const url = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
+    const { url } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
 
     expect(file.save).toHaveBeenCalledTimes(1);
     // The write cannot be create-only: the object already exists, so
@@ -168,7 +173,7 @@ describe('firebase sprite storage token-less recovery', () => {
       file.state.metadata = {};
       throw Object.assign(new Error('Precondition Failed'), { code: 412 });
     });
-    const url = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
+    const { url } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
 
     expect(file.save).toHaveBeenCalledTimes(2);
     expect(storedToken(file)).toBe(TOKEN);
@@ -177,7 +182,7 @@ describe('firebase sprite storage token-less recovery', () => {
 
   it('leaves the object servable — the returned token is the stored one', async () => {
     const file = fakeFile({ exists: true, metadata: { cacheControl: 'public' } });
-    const url = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
+    const { url } = await createFirebaseSpriteStorage(deps(file)).save('fern', PNG);
 
     const [metadata] = await file.getMetadata();
     const token = metadata.metadata?.firebaseStorageDownloadTokens;

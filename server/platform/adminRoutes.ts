@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { cleanVlmPromptText } from "../pipeline/stages/promptCraft";
-import { serverStartTime, adminLogBuffer, logAdminEvent, adminDexStore } from "./adminStore";
+import { serverStartTime, adminLogBuffer, logAdminEvent } from "./adminStore";
+import dexRepository from "../repositories/dex";
+import dexCandidateRepository from "../repositories/dexCandidates";
+import { snapshotMetrics } from "./metricsStore";
 import { AUDITED_KEYS, serverEnv } from "./env";
 import { isTestRunInFlight, runTests } from "./testRunner";
 import {
@@ -226,6 +229,12 @@ adminRouter.get("/logs", (req, res) => {
   });
 });
 
+/** Per-API latency/request metrics for the observability page. In-memory,
+ *  fed by real pipeline calls only — empty until the first scan. */
+adminRouter.get("/metrics", (req, res) => {
+  res.json(snapshotMetrics());
+});
+
 // Admin VLM Prompt Cleaning Playground Test
 adminRouter.post("/clean-prompt", (req, res) => {
   const { rawText } = req.body;
@@ -253,19 +262,87 @@ adminRouter.post("/clean-prompt", (req, res) => {
 
 
 
-// Admin Dex Document Manager Routes
-adminRouter.get("/dex-docs", (req, res) => {
-  res.json(Object.values(adminDexStore));
+/**
+ * The Dex Gate, over real data.
+ *
+ * Species come from the Firestore `dex` collection (the same records the
+ * almanac reads) and candidates from `dex_candidates` (every render the
+ * pipeline has kept — see models/dexCandidate.ts). The previous version of
+ * these two handlers served a hardcoded in-memory demo store with three
+ * placeholder SVGs, and "approving" mutated only that store — which is why the
+ * gate showed smiley faces and nothing an admin did survived a restart.
+ */
+adminRouter.get("/dex-docs", async (req, res) => {
+  try {
+    const [species, candidates] = await Promise.all([
+      dexRepository.list(),
+      dexCandidateRepository.listAll(),
+    ]);
+
+    const bySpecies = new Map<string, typeof candidates>();
+    for (const candidate of candidates) {
+      const bucket = bySpecies.get(candidate.speciesKey);
+      if (bucket) bucket.push(candidate);
+      else bySpecies.set(candidate.speciesKey, [candidate]);
+    }
+
+    const entries = species
+      // Per-user scoped keys (unidentified/mock scans) are private plants, not
+      // global reference material — the gate has no business showing them.
+      .filter((s) => !s.speciesKey.includes("__u_"))
+      .map((s) => ({
+        speciesKey: s.speciesKey,
+        speciesName: s.speciesName,
+        discoveryCount: s.discoveryCount,
+        firstDiscoveredAt: s.firstDiscoveredAt,
+        spriteUrl: s.spriteUrl,
+        candidates: (bySpecies.get(s.speciesKey) ?? []).sort(
+          (a, b) => b.version - a.version
+        ),
+      }))
+      .sort((a, b) => (a.speciesName < b.speciesName ? -1 : 1));
+
+    res.json({ timestamp: new Date().toISOString(), species: entries });
+  } catch (err: any) {
+    console.error("dex-docs failed:", err);
+    res.status(500).json({ error: "Could not read the dex." });
+  }
 });
 
-adminRouter.post("/dex-approve", (req, res) => {
-  const { id, status } = req.body;
-  if (!id || !adminDexStore[id]) {
-    return res.status(404).json({ error: "Dex entry not found" });
+adminRouter.post("/dex-approve", async (req, res) => {
+  const { candidateId, action } = req.body ?? {};
+  if (typeof candidateId !== "string" || !candidateId) {
+    return res.status(400).json({ error: "candidateId required" });
   }
-  adminDexStore[id].status = status || "APPROVED";
-  logAdminEvent("info", "Dex", `Species ${adminDexStore[id].species} status updated to ${status}`);
-  res.json({ success: true, entry: adminDexStore[id] });
+  if (action !== "publish" && action !== "reject") {
+    return res.status(400).json({ error: "action must be 'publish' or 'reject'" });
+  }
+
+  try {
+    const candidate =
+      action === "publish"
+        ? await dexCandidateRepository.publish(candidateId)
+        : await dexCandidateRepository.reject(candidateId);
+
+    logAdminEvent(
+      "info",
+      "Dex Gate",
+      action === "publish"
+        ? `${candidate.speciesName}: v${candidate.version} published as the global reference sprite.`
+        : `${candidate.speciesName}: candidate v${candidate.version} rejected.`
+    );
+    res.json({ success: true, candidate });
+  } catch (err: any) {
+    const message = err?.message ?? String(err);
+    if (message.startsWith("No such candidate")) {
+      return res.status(404).json({ error: "Candidate not found" });
+    }
+    if (message.includes("Cannot reject the published sprite")) {
+      return res.status(409).json({ error: message });
+    }
+    console.error("dex-approve failed:", err);
+    res.status(500).json({ error: "Could not update the candidate." });
+  }
 });
 
 /**

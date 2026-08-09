@@ -22,9 +22,25 @@ export interface SpriteStorageDependencies {
   bucketName(): string;
 }
 
+export interface SpriteSaveResult {
+  url: string;
+  /** True when this call created the canonical v1 object. False when v1
+   *  already existed (the render was NOT stored — the caller decides whether
+   *  to keep it as a versioned candidate via saveVersion). */
+  created: boolean;
+}
+
 export interface SpriteStorage {
-  /** Saves the PNG for a species and returns a durable download URL. */
-  save(speciesKey: string, png: Buffer): Promise<string>;
+  /** Saves the canonical (v1) PNG for a species and returns a durable
+   *  download URL, reusing the existing object when there is one. */
+  save(speciesKey: string, png: Buffer): Promise<SpriteSaveResult>;
+  /** Stores a rescan's render as `sprites/<key>/v<version>.png`.
+   *
+   *  Unconditional write: version numbers are allocated by the candidate
+   *  record's create() (which fails on a duplicate id), so an object already
+   *  sitting at this path can only be an orphan from a run that died between
+   *  upload and record — overwriting it is the repair, not a hazard. */
+  saveVersion(speciesKey: string, version: number, png: Buffer): Promise<string>;
 }
 
 const SPRITE_VERSION = 'v1';
@@ -41,8 +57,8 @@ export const defaultSpriteStorageDependencies: SpriteStorageDependencies = {
   },
 };
 
-function objectNameFor(speciesKey: string): string {
-  return `sprites/${speciesKey}/${SPRITE_VERSION}.png`;
+function objectNameFor(speciesKey: string, version = SPRITE_VERSION): string {
+  return `sprites/${speciesKey}/${version}.png`;
 }
 
 function downloadUrl(bucketName: string, objectName: string, token: string): string {
@@ -104,10 +120,12 @@ export function createFirebaseSpriteStorage(
       if (exists) {
         const [metadata] = await file.getMetadata();
         const existingToken = metadata.metadata?.firebaseStorageDownloadTokens;
-        if (existingToken) return downloadUrl(bucketName, objectName, existingToken);
+        if (existingToken) {
+          return { url: downloadUrl(bucketName, objectName, existingToken), created: false };
+        }
         // A token-less object cannot be served over the download URL. Rewrite
         // it rather than handing back a dead link.
-        return rewriteTokenlessObject();
+        return { url: await rewriteTokenlessObject(), created: false };
       }
 
       const token = dependencies.createToken();
@@ -119,13 +137,32 @@ export function createFirebaseSpriteStorage(
           // re-read it and hand back its token so both callers get a live URL.
           const [metadata] = await file.getMetadata();
           const winningToken = metadata.metadata?.firebaseStorageDownloadTokens;
-          if (winningToken) return downloadUrl(bucketName, objectName, winningToken);
+          if (winningToken) {
+            return { url: downloadUrl(bucketName, objectName, winningToken), created: false };
+          }
           // The winner stored an object with no token — dead for every caller,
           // not just this one. Same repair as above.
-          return rewriteTokenlessObject();
+          return { url: await rewriteTokenlessObject(), created: false };
         }
         throw err;
       }
+      return { url: downloadUrl(bucketName, objectName, token), created: true };
+    },
+
+    async saveVersion(speciesKey, version, png) {
+      if (!speciesKey.trim()) {
+        throw new Error('speciesKey is required to store a sprite');
+      }
+      if (!Number.isInteger(version) || version < 2) {
+        // v1 is the canonical object and has its own create-race handling in
+        // save(); routing it through here would bypass that.
+        throw new Error(`Candidate versions start at 2, got ${version}`);
+      }
+      const bucketName = dependencies.bucketName();
+      const objectName = objectNameFor(speciesKey, `v${version}`);
+      const file = dependencies.createFile(bucketName, objectName);
+      const token = dependencies.createToken();
+      await writeSprite(file, png, token, false);
       return downloadUrl(bucketName, objectName, token);
     },
   };
