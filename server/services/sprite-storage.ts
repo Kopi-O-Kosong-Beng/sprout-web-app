@@ -14,6 +14,9 @@ export interface SpriteStorageFile {
   exists(): Promise<[boolean]>;
   save(data: Buffer, options: unknown): Promise<unknown>;
   getMetadata(): Promise<[{ metadata?: Record<string, string> }]>;
+  /** Metadata-only update — no bytes rewritten. Used to stamp a download token
+   *  onto an object that has none, without replacing its content. */
+  setMetadata(metadata: { metadata: Record<string, string> }): Promise<unknown>;
 }
 
 export interface SpriteStorageDependencies {
@@ -28,19 +31,25 @@ export interface SpriteSaveResult {
    *  already existed (the render was NOT stored — the caller decides whether
    *  to keep it as a versioned candidate via saveVersion). */
   created: boolean;
+  /** True when the object existed but had no download token and this call
+   *  stamped one on. The returned url is fresh; whatever url the dex already
+   *  holds for this species is dead (a different, unwritten token), so the
+   *  caller must force this one onto the dex record. */
+  repaired: boolean;
 }
 
 export interface SpriteStorage {
   /** Saves the canonical (v1) PNG for a species and returns a durable
    *  download URL, reusing the existing object when there is one. */
   save(speciesKey: string, png: Buffer): Promise<SpriteSaveResult>;
-  /** Stores a rescan's render as `sprites/<key>/v<version>.png`.
+  /** Stores a rescan's render as `sprites/<key>/v<version>.png`, create-only.
    *
-   *  Unconditional write: version numbers are allocated by the candidate
-   *  record's create() (which fails on a duplicate id), so an object already
-   *  sitting at this path can only be an orphan from a run that died between
-   *  upload and record — overwriting it is the repair, not a hazard. */
-  saveVersion(speciesKey: string, version: number, png: Buffer): Promise<string>;
+   *  Returns null when an object already occupies that version — the slot is
+   *  taken by a concurrent rescan that got there first, and the caller must
+   *  try the next version. Create-only is what makes version allocation safe:
+   *  an unconditional write would let a losing rescan clobber the winner's
+   *  bytes and token after the winner had already recorded its URL. */
+  saveVersion(speciesKey: string, version: number, png: Buffer): Promise<string | null>;
 }
 
 const SPRITE_VERSION = 'v1';
@@ -106,13 +115,15 @@ export function createFirebaseSpriteStorage(
       const objectName = objectNameFor(speciesKey);
       const file = dependencies.createFile(bucketName, objectName);
 
-      /** Stamps our own token onto an object that already exists but has none.
-       *  Unconditional by necessity — see writeSprite. The returned URL then
-       *  carries a token that is genuinely on the object, not one we invented
-       *  and never wrote. */
-      const rewriteTokenlessObject = async (): Promise<string> => {
+      /** Makes a token-less object servable by stamping a token onto it —
+       *  metadata only, so the object's BYTES are left exactly as they are.
+       *  This used to re-upload `png`, which silently replaced the canonical
+       *  sprite with the current scan's render (and, in the create-race path,
+       *  the winner's render with the loser's). The object keeps its content;
+       *  only the download token is added. */
+      const stampToken = async (): Promise<string> => {
         const token = dependencies.createToken();
-        await writeSprite(file, png, token, false);
+        await file.setMetadata({ metadata: { firebaseStorageDownloadTokens: token } });
         return downloadUrl(bucketName, objectName, token);
       };
 
@@ -121,11 +132,12 @@ export function createFirebaseSpriteStorage(
         const [metadata] = await file.getMetadata();
         const existingToken = metadata.metadata?.firebaseStorageDownloadTokens;
         if (existingToken) {
-          return { url: downloadUrl(bucketName, objectName, existingToken), created: false };
+          return { url: downloadUrl(bucketName, objectName, existingToken), created: false, repaired: false };
         }
-        // A token-less object cannot be served over the download URL. Rewrite
-        // it rather than handing back a dead link.
-        return { url: await rewriteTokenlessObject(), created: false };
+        // A token-less object cannot be served over the download URL. Stamp a
+        // token rather than handing back a dead link — and flag the repair so
+        // the dex record's stale (dead-token) url gets replaced with this one.
+        return { url: await stampToken(), created: false, repaired: true };
       }
 
       const token = dependencies.createToken();
@@ -138,15 +150,15 @@ export function createFirebaseSpriteStorage(
           const [metadata] = await file.getMetadata();
           const winningToken = metadata.metadata?.firebaseStorageDownloadTokens;
           if (winningToken) {
-            return { url: downloadUrl(bucketName, objectName, winningToken), created: false };
+            return { url: downloadUrl(bucketName, objectName, winningToken), created: false, repaired: false };
           }
           // The winner stored an object with no token — dead for every caller,
-          // not just this one. Same repair as above.
-          return { url: await rewriteTokenlessObject(), created: false };
+          // not just this one. Stamp one on (preserving the winner's bytes).
+          return { url: await stampToken(), created: false, repaired: true };
         }
         throw err;
       }
-      return { url: downloadUrl(bucketName, objectName, token), created: true };
+      return { url: downloadUrl(bucketName, objectName, token), created: true, repaired: false };
     },
 
     async saveVersion(speciesKey, version, png) {
@@ -162,7 +174,16 @@ export function createFirebaseSpriteStorage(
       const objectName = objectNameFor(speciesKey, `v${version}`);
       const file = dependencies.createFile(bucketName, objectName);
       const token = dependencies.createToken();
-      await writeSprite(file, png, token, false);
+      try {
+        // Create-only: this is the allocation gate. If the object already
+        // exists, a concurrent rescan claimed this version first — report the
+        // slot as taken so the caller advances to the next one rather than
+        // overwriting a live, already-recorded object.
+        await writeSprite(file, png, token, true);
+      } catch (err) {
+        if ((err as { code?: number }).code === 412) return null;
+        throw err;
+      }
       return downloadUrl(bucketName, objectName, token);
     },
   };

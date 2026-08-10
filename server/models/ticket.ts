@@ -14,14 +14,6 @@ export const TICKET_CATEGORIES = [
   'other',
 ] as const;
 
-/** The subset offered in the Contact Us dropdown (UC8 step 1). */
-export const TICKET_INQUIRY_TYPES = [
-  'general',
-  'partnership',
-  'technical_support',
-  'feedback',
-] as const;
-
 export type TicketCategory = (typeof TICKET_CATEGORIES)[number];
 export type DeliveryStatus = 'pending' | 'sent' | 'failed';
 

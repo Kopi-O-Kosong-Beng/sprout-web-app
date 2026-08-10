@@ -35,8 +35,6 @@ export interface GoldenCase {
 
 export const GOLDEN_CASES = manifest.cases as GoldenCase[];
 
-export const PALETTE_UNDER_TEST = manifest.paletteUnderTest;
-
 /**
  * The eight real species. Excludes the `edge_*` entries: two genuine edge cases
  * plus four fault-injection cases that reuse the melastoma photo, which would

@@ -9,8 +9,6 @@
  * `--color-f24-*` design tokens in index.css.
  */
 
-export const SPRITE_SIZE = 192;
-
 /**
  * Spica 72 by A Blurby Sir (Lospec: /palette-list/spica-72). 72 colours.
  *

@@ -20,7 +20,7 @@ function toDiscovery(speciesKey: string, data: FirebaseFirestore.DocumentData): 
 }
 
 export const firestoreDexRepository: DexRepository = {
-  async recordDiscovery(speciesKey, userId, speciesName, spriteUrl = '') {
+  async recordDiscovery(speciesKey, userId, speciesName, spriteUrl = '', forceSpriteUrl = false) {
     const db = getDb();
     const ref = db.collection(COLLECTION).doc(speciesKey);
 
@@ -44,11 +44,11 @@ export const firestoreDexRepository: DexRepository = {
       const updated: DexDiscovery = {
         ...existing,
         discoveryCount: existing.discoveryCount + 1,
-        // Backfill only. A record written before the dex carried a sprite has
-        // none, and the almanac has nothing to show for it until some later
-        // scan supplies one; an existing URL is never replaced, since the
-        // sprite is canonical per species.
-        spriteUrl: existing.spriteUrl || spriteUrl,
+        // Backfill only, normally. A record written before the dex carried a
+        // sprite has none, and an existing URL is never replaced since the
+        // sprite is canonical per species — EXCEPT when forceSpriteUrl says the
+        // stored url is a dead link storage just repaired, which must win.
+        spriteUrl: forceSpriteUrl ? spriteUrl : existing.spriteUrl || spriteUrl,
       };
       // First-discoverer fields are deliberately untouched — being first is the
       // whole point of the feature, so a later scan must never overwrite it.

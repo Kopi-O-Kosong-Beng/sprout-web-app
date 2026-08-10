@@ -22,9 +22,24 @@ jest.mock('../firebase', () => {
 import app from '../app';
 import { TINY_JPEG_DATA_URL } from './fixtures/tiny-image';
 
-/** Verified caller. The pipeline router requires auth but NOT superadmin,
- *  which is the whole reason the sprite leg needed guarding. */
+/** Any verified caller — enough for /run-stream, which the game runs. */
 const AUTH = 'Bearer verified:ingest-gate-user';
+
+/** /run-stage2c is superadmin-only: it takes a client-supplied sprite that
+ *  becomes global-dex content, and its only caller is the studio. The token
+ *  carries an email so requireSuperAdmin's allowlist short-circuit matches. */
+const SUPERADMIN_EMAIL = 'ops@sprout.test';
+const SUPERADMIN_AUTH = `Bearer verified:operator-uid:${SUPERADMIN_EMAIL}`;
+
+let previousSuperAdminEmails: string | undefined;
+beforeAll(() => {
+  previousSuperAdminEmails = process.env.SUPER_ADMIN_EMAILS;
+  process.env.SUPER_ADMIN_EMAILS = SUPERADMIN_EMAIL;
+});
+afterAll(() => {
+  if (previousSuperAdminEmails === undefined) delete process.env.SUPER_ADMIN_EMAILS;
+  else process.env.SUPER_ADMIN_EMAILS = previousSuperAdminEmails;
+});
 
 /** Reads the SSE frames a run wrote. */
 function frames(body: string): Array<Record<string, unknown>> {
@@ -46,7 +61,10 @@ describe('image ingest gate, at the route', () => {
     jest.clearAllMocks();
     mockAuthAdmin.verifyIdToken.mockImplementation(async (token: string) => {
       if (!token.startsWith('verified:')) throw new Error('bad token');
-      return { uid: token.slice('verified:'.length), email_verified: true };
+      // `verified:<uid>` or `verified:<uid>:<email>` — the email drives the
+      // superadmin allowlist short-circuit for the /run-stage2c tests.
+      const [uid, email] = token.slice('verified:'.length).split(':');
+      return { uid, email, email_verified: true };
     });
   });
 
@@ -76,13 +94,26 @@ describe('image ingest gate, at the route', () => {
    * must stop at 2c rather than handing bytes to sharp.
    */
   describe('POST /run-stage2c (the sprite echoed back)', () => {
+    it('refuses a verified caller who is not a superadmin', async () => {
+      // The route takes a client-supplied sprite that becomes global-dex
+      // content, so it is superadmin-only — a plain verified account is not
+      // enough, and the guard runs before the ingest gate or the decoder.
+      const response = await request(app)
+        .post('/api/pipeline/run-stage2c')
+        .set('Authorization', AUTH)
+        .send({ rawSpriteB64: TINY_JPEG_DATA_URL, plantName: 'Testus planta' });
+
+      expect(response.status).toBe(403);
+      expect(response.body.error).toBe('Admin access required.');
+    });
+
     it.each([
       ['prose', 'hello world!!', 'not_base64'],
       ['a truthy non-image', 'data:image/png;base64,AAAA', 'unreadable'],
     ])('refuses %s', async (_label, payload, reason) => {
       const response = await request(app)
         .post('/api/pipeline/run-stage2c')
-        .set('Authorization', AUTH)
+        .set('Authorization', SUPERADMIN_AUTH)
         .send({ rawSpriteB64: payload, plantName: 'Testus planta' });
 
       const error = frames(response.text).find((f) => f.event === 'error');
@@ -95,7 +126,7 @@ describe('image ingest gate, at the route', () => {
     it('still accepts a real image, so the human-gate resume path works', async () => {
       const response = await request(app)
         .post('/api/pipeline/run-stage2c')
-        .set('Authorization', AUTH)
+        .set('Authorization', SUPERADMIN_AUTH)
         .send({ rawSpriteB64: TINY_JPEG_DATA_URL, plantName: 'Testus planta' });
 
       const sent = frames(response.text);
@@ -110,7 +141,7 @@ describe('image ingest gate, at the route', () => {
     it('rejects a missing payload without reaching the decoder', async () => {
       const response = await request(app)
         .post('/api/pipeline/run-stage2c')
-        .set('Authorization', AUTH)
+        .set('Authorization', SUPERADMIN_AUTH)
         .send({ plantName: 'Testus planta' });
 
       const error = frames(response.text).find((f) => f.event === 'error');

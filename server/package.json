@@ -29,8 +29,6 @@
     "test:pipeline": "vitest run"
   },
   "dependencies": {
-    "@google/genai": "^2.14.0",
-    "axios": "^1.7.9",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -38,19 +36,14 @@
     "express-rate-limit": "^7.5.0",
     "firebase-admin": "^10.3.0",
     "joi": "^17.13.3",
-    "jsonwebtoken": "^9.0.2",
-    "multer": "^2.0.1",
     "nodemailer": "^9.0.3",
-    "sharp": "^0.35.3",
-    "uuid": "^11.0.5"
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.14",
-    "@types/jsonwebtoken": "^9.0.7",
-    "@types/multer": "^1.4.12",
     "@types/node": "^24.0.0",
     "@types/nodemailer": "^6.4.17",
     "@types/supertest": "^6.0.2",

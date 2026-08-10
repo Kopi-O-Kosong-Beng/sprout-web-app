@@ -205,5 +205,3 @@ export const startPveBattle = battleService.startPveBattle;
 export const getPveBattle = battleService.getPveBattle;
 export const submitPveAction = battleService.submitPveAction;
 export const abandonPveBattle = battleService.abandonPveBattle;
-
-export default battleService;

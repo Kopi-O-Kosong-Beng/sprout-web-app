@@ -30,7 +30,7 @@ function deps(overrides: Partial<ScanPersistenceDependencies> = {}): ScanPersist
     storage: {
       save: jest
         .fn()
-        .mockResolvedValue({ url: 'https://cdn.test/fern.png', created: true }),
+        .mockResolvedValue({ url: 'https://cdn.test/fern.png', created: true, repaired: false }),
       saveVersion: jest.fn().mockResolvedValue('https://cdn.test/fern-v2.png'),
     },
     dex: {
@@ -73,7 +73,8 @@ describe('persistScan', () => {
       'fern',
       'user-a',
       'Fern',
-      'https://cdn.test/fern.png'
+      'https://cdn.test/fern.png',
+      false // not a token-less repair, so the url is not forced
     );
     expect(result.saved).toBe(true);
     expect(result.avatarId).toBe('avatar-1');
@@ -259,7 +260,8 @@ describe('persistScan unidentified scans', () => {
       scoped,
       'user-a',
       'Unknown Plant Species',
-      'https://cdn.test/fern.png'
+      'https://cdn.test/fern.png',
+      false
     );
   });
 
@@ -324,21 +326,29 @@ describe('persistScan dex candidates', () => {
     expect(result.candidate).toEqual({ version: 3, status: 'PENDING' });
   });
 
-  it('backfills v1 as PUBLISHED for a species that predates the collection', async () => {
+  it('backfills v1 attributed to the dex first-discoverer, not the rescanner or empty', async () => {
     const create = jest.fn().mockResolvedValue(undefined);
     const dependencies = deps({
       storage: {
-        save: jest.fn().mockResolvedValue({ url: 'https://cdn.test/fern.png', created: false }),
+        save: jest.fn().mockResolvedValue({ url: 'https://cdn.test/fern.png', created: false, repaired: false }),
         saveVersion: jest.fn().mockResolvedValue('https://cdn.test/fern-v2.png'),
       },
       candidates: { maxVersion: jest.fn().mockResolvedValue(0), create },
     });
+    // user-b rescans, but DEX.firstDiscoveredBy is 'user-a' — the backfilled v1
+    // must credit the real discoverer (from the dex record), never '' (which a
+    // race could otherwise burn in) and never the rescanner.
     await persistScan(dependencies, 'user-b', 'Fern', null, PNG, IDENTIFIED);
 
     // The incumbent goes in first so the gate shows what v2 competes against.
     expect(create).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ id: 'fern__v1', status: 'PUBLISHED', scannedBy: '', evaluation: null })
+      expect.objectContaining({
+        id: 'fern__v1',
+        status: 'PUBLISHED',
+        scannedBy: 'user-a',
+        evaluation: null,
+      })
     );
     expect(create).toHaveBeenNthCalledWith(
       2,
