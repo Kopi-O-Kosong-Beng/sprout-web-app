@@ -394,15 +394,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
   };
 
   const [exportingReport, setExportingReport] = useState(false);
+  /** Why the last export produced nothing. Both export paths used to fail
+   *  into a bare `return` / console.error, so a dead endpoint looked like a
+   *  button that spun and gave up — the operator had no way to tell a slow
+   *  export from a failed one. */
+  const [exportError, setExportError] = useState<string | null>(null);
 
   /** Downloads the full observability report: this run's live metrics and
    *  logs, plus the archived reports of previous runs — the data from before
    *  the last server reset, which the in-memory page alone cannot show. */
   const exportObservabilityReport = async () => {
     setExportingReport(true);
+    setExportError(null);
     try {
       const res = await studioFetch('/api/platform/metrics-report');
-      if (!res.ok) return;
+      if (!res.ok) {
+        setExportError(`Export failed — the metrics report answered ${res.status}.`);
+        return;
+      }
       const report = await res.json();
       const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -413,6 +422,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Failed to export observability report:', err);
+      setExportError('Export failed — is the server reachable?');
     } finally {
       setExportingReport(false);
     }
@@ -425,13 +435,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
    *  renders the HTML report to PDF. */
   const exportObservabilityPdf = async () => {
     setExportingPdf(true);
+    setExportError(null);
     try {
       const res = await studioFetch('/api/platform/metrics-report');
-      if (!res.ok) return;
+      if (!res.ok) {
+        setExportError(`Export failed — the metrics report answered ${res.status}.`);
+        return;
+      }
       const report = (await res.json()) as ObservabilityReport;
       printReportHtml(buildObservabilityReportHtml(report));
     } catch (err) {
       console.error('Failed to export observability PDF:', err);
+      setExportError('Export failed — is the server reachable?');
     } finally {
       setExportingPdf(false);
     }
@@ -896,6 +911,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
             </Button>
           </div>
         </div>
+
+        {exportError && (
+          <div
+            role="alert"
+            className="rounded-card border border-danger/40 bg-danger/10 p-3 text-meta text-danger"
+          >
+            {exportError}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Stat label="API calls" value={totalRequests} sub="across all providers" tone="info" />
