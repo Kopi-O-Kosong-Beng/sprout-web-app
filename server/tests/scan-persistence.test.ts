@@ -36,6 +36,7 @@ function deps(overrides: Partial<ScanPersistenceDependencies> = {}): ScanPersist
     dex: {
       recordDiscovery: jest.fn().mockResolvedValue(DEX),
       get: jest.fn(),
+      getSpriteUrls: jest.fn().mockResolvedValue(new Map()),
       list: jest.fn(),
     },
     candidates: {
@@ -105,6 +106,7 @@ describe('persistScan', () => {
     const dependencies = deps({
       dex: {
         recordDiscovery: jest.fn().mockRejectedValue(new Error('dex write conflict')),
+        getSpriteUrls: jest.fn().mockResolvedValue(new Map()),
         get: jest.fn(),
         list: jest.fn(),
       },

@@ -28,6 +28,11 @@ export interface DexRepository {
     forceSpriteUrl?: boolean
   ): Promise<DexDiscovery>;
   get(speciesKey: string): Promise<DexDiscovery | null>;
+  /** Current sprite url per species key, for a set of keys, in one batched
+   *  read. Keys with no record (or an empty url) are simply absent from the
+   *  map. Used by the archive to overlay the currently-published sprite onto a
+   *  player's records without a per-record round trip. */
+  getSpriteUrls(speciesKeys: string[]): Promise<Map<string, string>>;
   /** Every species found so far. The almanac renders 200 cards in one pass, so
    *  it reads the collection rather than calling get() per species. */
   list(): Promise<DexDiscovery[]>;

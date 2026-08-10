@@ -12,6 +12,11 @@ import {
   XCircle,
 } from 'lucide-react';
 import { studioFetch } from '../lib/api';
+import {
+  buildObservabilityReportHtml,
+  printReportHtml,
+  type ObservabilityReport,
+} from '../lib/observabilityReport';
 import type { RouteId } from '../nav';
 import type {
   ApiCallSample,
@@ -410,6 +415,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
       console.error('Failed to export observability report:', err);
     } finally {
       setExportingReport(false);
+    }
+  };
+
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  /** Renders the same report as a print-ready document and opens the print
+   *  dialog, so the operator can Save-as-PDF. Zero-dependency: the browser
+   *  renders the HTML report to PDF. */
+  const exportObservabilityPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const res = await studioFetch('/api/platform/metrics-report');
+      if (!res.ok) return;
+      const report = (await res.json()) as ObservabilityReport;
+      printReportHtml(buildObservabilityReportHtml(report));
+    } catch (err) {
+      console.error('Failed to export observability PDF:', err);
+    } finally {
+      setExportingPdf(false);
     }
   };
 
@@ -849,7 +873,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ route, platform 
                 )
               }
             >
-              Export report
+              Export JSON
+            </Button>
+            <Button
+              onClick={exportObservabilityPdf}
+              disabled={exportingPdf}
+              icon={
+                exportingPdf ? (
+                  <Spinner className="h-3.5 w-3.5" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )
+              }
+            >
+              Export PDF
             </Button>
             <Button
               onClick={refreshMetrics}

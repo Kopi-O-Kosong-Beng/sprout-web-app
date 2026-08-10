@@ -140,7 +140,7 @@ http://localhost:3001
 | `GET` | `/api/auth/me` | Bearer token | Get current profile |
 | `POST` | `/api/auth/request-reset` | none | Send OTP to email/log |
 | `POST` | `/api/auth/verify-reset` | none | Verify OTP and update password |
-| `GET` | `/api/avatar` | Bearer token | Fetch current user's avatars |
+| `GET` | `/api/avatar` | Bearer token | Fetch current user's avatars. Each record's `spriteUrl` is overlaid with the species' currently-published dex sprite (resolved on read), so a dex-gate publish shows up on the next archive load — no client change and no response-shape change. |
 | `POST` | `/api/avatar` | Bearer token | Save a scanned plant into the archive |
 | `DELETE` | `/api/avatar/:avatarId` | Bearer token | Remove one owned avatar (archive shovel); 204 on success, 404 if not yours |
 | `POST` | `/api/query/submit` | none | Submit contact/query ticket |

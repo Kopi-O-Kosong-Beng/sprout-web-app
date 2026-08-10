@@ -66,6 +66,23 @@ export const firestoreDexRepository: DexRepository = {
     return toDiscovery(speciesKey, snapshot.data() ?? {});
   },
 
+  async getSpriteUrls(speciesKeys) {
+    const map = new Map<string, string>();
+    // Distinct, non-empty keys only — getAll() rejects an empty ref list.
+    const keys = [...new Set(speciesKeys.filter((k) => k))];
+    if (keys.length === 0) return map;
+
+    const db = getDb();
+    const refs = keys.map((key) => db.collection(COLLECTION).doc(key));
+    const snapshots = await db.getAll(...refs);
+    for (const snapshot of snapshots) {
+      if (!snapshot.exists) continue;
+      const url = String(snapshot.data()?.spriteUrl ?? '');
+      if (url) map.set(snapshot.id, url);
+    }
+    return map;
+  },
+
   async list() {
     const snapshot = await getDb().collection(COLLECTION).get();
     return snapshot.docs.map((doc) => toDiscovery(doc.id, doc.data()));
