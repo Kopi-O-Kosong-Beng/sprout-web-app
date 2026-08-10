@@ -34,7 +34,13 @@ export default function SuperAdminRoute({ children }: { children: ReactNode }) {
   if (!profile) {
     return null;
   }
-  if (!profile.isAdmin) {
+  // isSuperAdmin, not isAdmin: the tiers are distinct (see AuthProfile). The
+  // plain ADMIN_EMAILS badge is advisory and opens nothing — checking it here
+  // let a badge-holder through to an operator shell where every API call
+  // answers 403. Same flag the nav filter (AppHeader) uses, so the door and
+  // the signpost finally agree — and the use-case model has one operator
+  // actor: Super-admin (UC15 Authorise Operator).
+  if (!profile.isSuperAdmin) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
