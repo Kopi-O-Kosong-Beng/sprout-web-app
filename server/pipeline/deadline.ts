@@ -71,15 +71,24 @@ export interface Deadline {
  * The two mandatory hops (vision, Flux) get first claim; the optional polish
  * hops take what remains and are skipped when it runs out, which degrades to a
  * slightly rougher sprite instead of losing the whole scan.
+ *
+ * `externalSignal` joins every hop's signal when given: the route passes the
+ * scanner's own disconnect here, so a provider call in flight when the player
+ * abandons the scan is aborted immediately instead of running (and billing)
+ * to completion against a socket nobody is reading.
  */
-export function createDeadline(totalMs: number = TOTAL_BUDGET_MS): Deadline {
+export function createDeadline(
+  totalMs: number = TOTAL_BUDGET_MS,
+  externalSignal?: AbortSignal
+): Deadline {
   const expiresAt = Date.now() + totalMs;
   return {
     remainingMs: () => expiresAt - Date.now(),
     signal(capMs: number, hop: string): AbortSignal {
       const left = expiresAt - Date.now();
       if (left <= 0) throw new Error(`Ran out of time before ${hop}.`);
-      return AbortSignal.timeout(Math.min(capMs, left));
+      const timeout = AbortSignal.timeout(Math.min(capMs, left));
+      return externalSignal ? AbortSignal.any([timeout, externalSignal]) : timeout;
     },
   };
 }

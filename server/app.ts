@@ -95,7 +95,9 @@ app.use('/api/query', queryRoutes);
 app.use('/api/avatar', avatarRoutes);
 // Deliberately public at the collection level — see routes/almanac.routes.ts.
 app.use('/api/almanac', almanacRoutes);
-// Authenticated in full: every row names a player — see routes/leaderboard.routes.ts.
+// Public by deliberate decision (optionalAuthMiddleware): anonymous callers
+// see the rankings; signing in only adds the caller's own standing — see
+// routes/leaderboard.routes.ts for the reasoning.
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/battle/pve', battleRoutes);
 app.use('/api/admin', adminRoutes);

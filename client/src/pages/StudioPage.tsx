@@ -17,6 +17,8 @@ import {
   type RouteId,
 } from '../studio/nav';
 import { useAuth } from '../hooks/useAuth';
+import { checkRedirectAuth } from '../studio/lib/firebase';
+import { isFirebaseConfigured } from '../services/firebaseClient';
 
 /**
  * The AI sprite-pipeline operations portal, migrated whole from
@@ -54,6 +56,15 @@ export default function StudioPage() {
 
   const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'sprout-dev';
   const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || '(default)';
+
+  // Completes a popup-blocked signInWithRedirect round trip (AuthCard and
+  // Sidebar fall back to redirect when the popup dies). Firebase restores the
+  // session on its own, but only getRedirectResult hands over the result that
+  // drives syncUserProfile — and until this call existed, nothing anywhere
+  // invoked it, so a redirect sign-in never wrote the user's profile doc.
+  useEffect(() => {
+    if (isFirebaseConfigured()) void checkRedirectAuth();
+  }, []);
 
   // Keep hash and state in sync in both directions.
   useEffect(() => {

@@ -47,6 +47,27 @@ describe('SignupPage verification handoff', () => {
     expect(screen.getByLabelText(/display name/i)).toHaveAttribute('maxlength', '50');
   });
 
+  it('explains the display-name policy instead of a generic failure', async () => {
+    // "José" and "O'Brien" are real names the ASCII-only policy turns away —
+    // a deliberate policy (matching the password rules), but the reason has
+    // to reach the player: the server's version of this rejection is a Joi
+    // pattern dump that extractApiError collapses into "Signup failed."
+    const user = userEvent.setup();
+    renderSignup();
+
+    await user.type(screen.getByLabelText(/display name/i), "José O'Brien");
+    await user.type(screen.getByLabelText(/email address/i), 'jose@example.com');
+    await user.type(screen.getByLabelText(/^password$/i), 'StrongPass1!');
+    await user.type(screen.getByLabelText(/confirm password/i), 'StrongPass1!');
+    await user.click(screen.getByRole('button', { name: /create account/i }));
+
+    expect(
+      await screen.findByText(/letters \(A-Z\), numbers, spaces, hyphens and underscores/i)
+    ).toBeInTheDocument();
+    // Caught client-side: the doomed request is never sent.
+    expect(signupUser).not.toHaveBeenCalled();
+  });
+
   it('shows inbox guidance without local EMAIL_MODE instructions', async () => {
     const user = userEvent.setup();
     renderSignup();

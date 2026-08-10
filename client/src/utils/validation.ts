@@ -53,3 +53,19 @@ export function getPasswordCriteria(password: string): PasswordCriterion[] {
 export function isStrongPassword(password: string): boolean {
   return getPasswordCriteria(password).every((c) => c.met);
 }
+
+/** Client-side mirror of the backend's display-name rule
+ *  (server/routes/auth.routes.ts): ASCII letters, digits, space, underscore,
+ *  hyphen. ASCII-only is a deliberate policy, same as the password rules
+ *  above — this mirror exists so the reason reaches the player as a sentence.
+ *  Without it, the server's rejection is a Joi pattern dump that
+ *  extractApiError rightly refuses to display, and "O'Brien" or "José" was
+ *  turned away with nothing but "Signup failed." */
+export const DISPLAY_NAME_PATTERN = /^[A-Za-z0-9 _-]+$/;
+
+export const DISPLAY_NAME_POLICY_MESSAGE =
+  'Display names can only use letters (A-Z), numbers, spaces, hyphens and underscores.';
+
+export function isAllowedDisplayName(displayName: string): boolean {
+  return DISPLAY_NAME_PATTERN.test(displayName);
+}

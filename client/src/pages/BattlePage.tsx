@@ -60,6 +60,31 @@ function writeStoredSessionId(sessionId: string | null): void {
   }
 }
 
+/** Which history entry's "Battle with X" gesture has already been honored.
+ *  The avatarId the Archive sends rides in history state, and history state
+ *  survives a full reload — so the state alone cannot distinguish the player
+ *  mid-gesture from a reload of the same entry. Each entry's location.key is
+ *  recorded the first time its gesture is honored; seeing that key again means
+ *  this is a revisit (reload, back/forward), where an active stored session
+ *  must resume instead of the gesture replaying and masking it. */
+const CONSUMED_GESTURE_STORAGE_KEY = 'sprout.battle.consumedEntryKey';
+
+function readConsumedGestureKey(): string | null {
+  try {
+    return window.sessionStorage.getItem(CONSUMED_GESTURE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeConsumedGestureKey(entryKey: string): void {
+  try {
+    window.sessionStorage.setItem(CONSUMED_GESTURE_STORAGE_KEY, entryKey);
+  } catch {
+    // Storage blocked — reload-resume degrades, the gesture still works.
+  }
+}
+
 /** True when the environment cannot or should not animate: the user asked for
  *  reduced motion, or matchMedia is absent (jsdom). The battle then resolves
  *  turns instantly — the same end state, none of the choreography. */
@@ -720,8 +745,14 @@ export default function BattlePage() {
     const storedSessionId = readStoredSessionId();
     // An explicit route avatarId is the player mid-gesture (Archive's Battle
     // button) — that intent outranks resuming a stored session, which stays
-    // stored for the next direct visit.
-    if (storedSessionId && !preferredAvatarId) {
+    // stored for the next direct visit. But only the first visit to this
+    // history entry is the gesture: the avatarId rides in history state and
+    // survives reloads, so on a revisit (reload, back/forward) an active
+    // session resumes instead of the stale gesture masking it.
+    const isFreshGesture =
+      preferredAvatarId !== null && readConsumedGestureKey() !== location.key;
+    if (isFreshGesture) writeConsumedGestureKey(location.key);
+    if (storedSessionId && !isFreshGesture) {
       void resumeStoredSession(storedSessionId);
     } else {
       void loadRoster();
@@ -733,7 +764,7 @@ export default function BattlePage() {
       releaseNavigationLock.current?.();
       releaseNavigationLock.current = null;
     };
-  }, [loadRoster, preferredAvatarId, resumeStoredSession]);
+  }, [loadRoster, location.key, preferredAvatarId, resumeStoredSession]);
 
   /** Back/forward can restore this document from the back/forward cache with
    *  a finished battle frozen on screen, fully playable-looking — turn number,

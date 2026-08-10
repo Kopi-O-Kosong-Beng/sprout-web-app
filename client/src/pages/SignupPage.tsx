@@ -4,7 +4,12 @@ import axios from 'axios';
 import { signupUser, type SignupResponse } from '../services/sproutApi';
 import { extractApiError } from '../services/apiClient';
 import { useAuth } from '../hooks/useAuth';
-import { getPasswordCriteria, isStrongPassword } from '../utils/validation';
+import {
+  DISPLAY_NAME_POLICY_MESSAGE,
+  getPasswordCriteria,
+  isAllowedDisplayName,
+  isStrongPassword,
+} from '../utils/validation';
 
 export default function SignupPage() {
   const { loginWithGoogle, status } = useAuth();
@@ -42,6 +47,10 @@ export default function SignupPage() {
       setError('Display name is required.');
       return;
     }
+    if (!isAllowedDisplayName(displayName.trim())) {
+      setError(DISPLAY_NAME_POLICY_MESSAGE);
+      return;
+    }
     if (email.trim().length === 0) {
       setError('Email address is required.');
       return;
@@ -77,7 +86,24 @@ export default function SignupPage() {
             message.error === 'An account with this email already exists.'
         );
       }
-      setError(extractApiError(err, 'Signup failed.'));
+      // The server's copy of the display-name rule arrives as a Joi pattern
+      // dump ("displayName" fails to match ...), which extractApiError
+      // rightly refuses to show. The check above makes this unreachable from
+      // this form; it still translates the rejection for anything that gets
+      // past it, instead of collapsing the reason into "Signup failed."
+      const data = axios.isAxiosError(err) ? err.response?.data : undefined;
+      const displayNameRejected =
+        axios.isAxiosError(err) &&
+        err.response?.status === 400 &&
+        typeof data === 'object' &&
+        data !== null &&
+        typeof (data as { error?: unknown }).error === 'string' &&
+        (data as { error: string }).error.startsWith('"displayName"');
+      setError(
+        displayNameRejected
+          ? DISPLAY_NAME_POLICY_MESSAGE
+          : extractApiError(err, 'Signup failed.')
+      );
     } finally {
       setSubmitting(false);
     }

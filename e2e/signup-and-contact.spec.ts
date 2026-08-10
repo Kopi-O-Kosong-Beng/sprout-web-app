@@ -72,15 +72,26 @@ test.describe('UC8 — submit query ticket', () => {
     await page.getByLabel(/name/i).first().fill('E2E Visitor');
     await page.getByLabel(/email/i).first().fill('e2e-visitor@example.com');
     await page.getByLabel(/subject/i).fill('E2E ticket');
+    // Careful with this wording: an earlier version began "Submitted by…" and
+    // the success assertion was a loose /submitted|success|thank/i — which
+    // matched the form's own textarea and nothing on the actual success panel
+    // ("Ticket created" / "Message received!"). The spec passed only when the
+    // assertion polled before React cleared the form, and timed out whenever
+    // the server answered quickly. The assertion now names the real
+    // postcondition, and the message avoids its words on principle.
     await page
       .getByLabel(/message/i)
-      .fill('Submitted by the end-to-end suite to prove the UC8 main flow.');
+      .fill('Written by the end-to-end suite to prove the UC8 main flow.');
 
     await page.getByRole('button', { name: /send|submit/i }).click();
 
-    // Success feedback, not merely the absence of an error.
-    await expect(page.getByText(/submitted|success|thank/i).first()).toBeVisible({
+    // The UC8 postcondition: a ticket exists and the visitor holds its
+    // reference number — not merely the absence of an error.
+    await expect(page.getByText('Ticket created')).toBeVisible({
       timeout: 20_000,
     });
+    await expect(
+      page.getByRole('heading', { name: /reference number: SPR-\d{8}-\d{4}/i })
+    ).toBeVisible();
   });
 });

@@ -204,3 +204,36 @@ describe('firebase sprite storage token-less recovery', () => {
     expect(file.state.metadata.cacheControl).toBe('public');
   });
 });
+
+describe('download URL host', () => {
+  // A URL must resolve where the bytes actually went: the service follows the
+  // same FIREBASE_STORAGE_EMULATOR_HOST signal firebase-admin honors for the
+  // write itself. Before this branched, emulator-backed stacks (dev, e2e)
+  // persisted production URLs for objects that only exist in the emulator.
+  const ENV_KEY = 'FIREBASE_STORAGE_EMULATOR_HOST';
+  const original = process.env[ENV_KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = original;
+  });
+
+  it('points at production when no Storage emulator is configured', async () => {
+    delete process.env[ENV_KEY];
+    const { url } = await createFirebaseSpriteStorage(deps(fakeFile())).save('fern', PNG);
+    expect(url).toMatch(/^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\//);
+  });
+
+  it('points at the emulator when this process stores sprites there', async () => {
+    process.env[ENV_KEY] = '127.0.0.1:9199';
+    const { url } = await createFirebaseSpriteStorage(deps(fakeFile())).save('fern', PNG);
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:9199\/v0\/b\//);
+    expect(url).toContain('sprites%2Ffern%2Fv1.png');
+  });
+
+  it('keeps an explicit scheme on the emulator host', async () => {
+    process.env[ENV_KEY] = 'http://localhost:9199';
+    const { url } = await createFirebaseSpriteStorage(deps(fakeFile())).save('fern', PNG);
+    expect(url).toMatch(/^http:\/\/localhost:9199\/v0\/b\//);
+  });
+});
