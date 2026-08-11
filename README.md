@@ -3,7 +3,7 @@
 [![tests](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/tests.yml/badge.svg)](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/tests.yml)
 [![docker](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/docker.yml/badge.svg)](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/docker.yml)
 ![TypeScript](https://img.shields.io/badge/TypeScript-100%25-3178c6)
-![tests](https://img.shields.io/badge/tests-1074%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-1101%20passing-2ea44f)
 ![container](https://img.shields.io/badge/image-ghcr.io-blue)
 
 **Scan a real plant. Get a creature. Battle with it.**
@@ -89,14 +89,16 @@ npm test -w client            # Vitest + React Testing Library
 
 | Suite | Files | Tests | Tooling |
 |---|---:|---:|---|
-| Server integration & API | 44 | 603 | Jest + Supertest against the Firestore Emulator |
+| Server integration & API | 46 | 624 | Jest + Supertest against the Firestore Emulator |
 | Client components & routing | 28 | 309 | Vitest + React Testing Library |
-| Pipeline, ingest gate & fuzzing | 17 | 149 | Vitest |
+| Pipeline, ingest gate & fuzzing | 18 | 155 | Vitest |
 | End-to-end journeys | 6 | 13 | Playwright (Chromium): real client, server, and Firestore/Auth/Storage emulators |
-| **Total** | **95** | **1074** | |
+| **Total** | **98** | **1101** | |
 
-Measured 2026-08-09 on `main` by running each suite, not by counting `it(` declarations —
-parameterised cases expand at runtime, so a static count understates it.
+Measured on `main` at **b184b62** (tip of main, 9 Aug 2026) by running each
+suite to completion — not by counting `it(` declarations, which understates the
+total because parameterised cases expand at runtime. Counts are commit-specific;
+re-measure before quoting them elsewhere.
 
 Test design is documented in [`md/FUZZ_TESTING.md`](md/FUZZ_TESTING.md) (the
 image ingest gate and its mutation fuzzer) and in the evidence records under

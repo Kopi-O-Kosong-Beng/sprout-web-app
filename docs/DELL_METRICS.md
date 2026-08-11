@@ -133,7 +133,7 @@ therefore equal to merge frequency: 39 deploys in 32 days.**
 |---|---|
 | Source code (TS/TSX, excluding tests) | **31,839 lines** |
 | Test code | **20,930 lines** — a 0.66:1 test-to-source ratio |
-| Automated tests | **1,074 across 95 files** |
+| Automated tests | **1,101 across 98 files** (at `b184b62`) |
 | API route handlers | 32 across 10 routers |
 | Firestore collections | 5 (`users`, `avatar_records`, `query_tickets`, `password_history`, `counters`) |
 | Production dependencies | 14 server, 9 client |
@@ -144,11 +144,11 @@ differ by a third because parameterised cases expand at runtime):
 
 | Suite | Files | Tests |
 |---|---:|---:|
-| Server integration & API (Jest + Firestore emulator) | 44 | 603 |
+| Server integration & API (Jest + Firestore emulator) | 46 | 624 |
 | Client components & routing (Vitest + RTL) | 28 | 309 |
-| Pipeline, ingest gate & fuzzing (Vitest) | 17 | 149 |
+| Pipeline, ingest gate & fuzzing (Vitest) | 18 | 155 |
 | End-to-end journeys (Playwright, real stack) | 6 | 13 |
-| **Total** | **95** | **1,074** |
+| **Total** | **98** | **1,101** |
 
 ## 7. Architecture position
 
@@ -195,4 +195,4 @@ If there is time for nothing else:
 2. **2 s** cold start to healthy · **<1 s** graceful shutdown that also flushes metrics, exit 0
 3. **~3 min** full container pipeline · **37 s** on a warm cache (4.3× cache effect)
 4. **100%** CI success across the last 29 runs · **0 secrets**, **0 paid calls** per PR
-5. **39 deploys in 32 days**, mean lead time **3.5 h**, every one gated on **1,074 tests**
+5. **39 deploys in 32 days**, mean lead time **3.5 h**, every one gated on **1,101 tests**

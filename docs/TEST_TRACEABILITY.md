@@ -13,9 +13,10 @@ drives components against a mocked network boundary. End-to-end journeys sit
 above both: a real Chromium drives the real client, server, and emulators with
 nothing between the click and the database substituted.
 
-Suite totals, measured from the runners on `main`, 2026-08-09: **603** server
-Jest (44 files) · **309** client Vitest (28) · **149** pipeline Vitest (17) ·
-**13** Playwright E2E (6). **1074 across 95 files.**
+Suite totals, measured by running each suite to completion on `main` at
+**b184b62** (tip of main, 9 Aug 2026): **624** server Jest (46 files) · **309**
+client Vitest (28) · **155** pipeline Vitest (18) · **13** Playwright E2E (6).
+**1101 across 98 files.** Counts are commit-specific.
 
 ---
 
