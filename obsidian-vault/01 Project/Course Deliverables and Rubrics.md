@@ -69,6 +69,12 @@ challenges (2%) scores full marks only with resolutions stated.
 | Workload | Individual contribution linked to artifacts |
 | Bonus | Sustainability and D&I/UN SDG discussion |
 
+> [!info] Full rubric transcribed separately
+> [[Final Report Grading Rubric]] holds the complete Poor/Fair/Excellent table
+> for the final report, in the brief's own wording, plus the robustness-planning
+> section and the peer-review conditions. Use that when writing; this note stays
+> the wider module picture (PM1–PM3 and direction).
+
 ### Implementation challenges section
 
 The rubric splits this into three subsections and scores 2 only when each
