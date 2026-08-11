@@ -61,10 +61,19 @@ comes up, how cleanly it goes down.
 | Metric | Value | Why it matters |
 |---|---|---|
 | **Cold start to healthy** | **2 s** | Container start → `/api/health` answering 200. Asserted in CI on every build |
-| **Graceful shutdown** | **0–1 s, exit code 0** | `docker stop` → SIGTERM → drain → clean exit, logging `drained cleanly`. Asserted in CI |
+| **Graceful shutdown** | **<1 s, exit code 0** | `docker stop` → SIGTERM → drain → clean exit, logging `drained cleanly`. Asserted in CI on every build |
 | Shutdown budget before force-exit | 10 s | A stuck keep-alive connection cannot hold the container open until SIGKILL |
 | Readiness probe latency | 0–1 ms per dependency (unconfigured), ~2.4 s (live Firestore round trip) | Each probe independently timed out at 2.5 s |
 | Liveness dependency count | **0** | Deliberate — see below |
+
+> **The shutdown does real work and still finishes inside a second.** As of
+> `fccf113` the handler also flushes an in-memory observability report to
+> Firestore on the way out — metrics that would otherwise die with the process.
+> The flush starts in parallel with the connection drain rather than after it,
+> and the same 10 s force-timer bounds both, so a hung write cannot outlive the
+> platform's grace period. The `<1 s` figure above was measured *with* that
+> flush in place, which is the more useful version of the claim: it is not fast
+> because it does nothing.
 
 > **The liveness/readiness split, and why it is worth a minute of the pitch.**
 > `/api/health` answers 200 while touching nothing; `/api/health/ready` probes
@@ -183,7 +192,7 @@ Naming a limit costs nothing; being caught not knowing it costs the room.
 If there is time for nothing else:
 
 1. **423 MB** image, **non-root**, **zero baked secrets**
-2. **2 s** cold start to healthy · **≤1 s** graceful shutdown, exit 0
+2. **2 s** cold start to healthy · **<1 s** graceful shutdown that also flushes metrics, exit 0
 3. **~3 min** full container pipeline · **37 s** on a warm cache (4.3× cache effect)
 4. **100%** CI success across the last 29 runs · **0 secrets**, **0 paid calls** per PR
 5. **39 deploys in 32 days**, mean lead time **3.5 h**, every one gated on **1,074 tests**
