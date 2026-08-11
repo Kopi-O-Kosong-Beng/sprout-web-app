@@ -43,11 +43,26 @@ const API_PORT = 3001;
 const WEB_PORT = 5173;
 
 /** Shared by the seed step and the API, so they agree on which project and
- *  which emulator they are talking to. */
+ *  which emulator they are talking to.
+ *
+ *  The three FIREBASE_SERVICE_ACCOUNT_* blanks are load-bearing. server/.env
+ *  configures the production service account, and dotenv never overrides a
+ *  variable that is already set — so setting them to '' here is how the seed
+ *  and the API are kept from picking that credential up. Without this, both
+ *  initialized firebase-admin with the service account's real project id and
+ *  sent every emulator request under it, which (a) put the production
+ *  credential inside a stack that must never need one, and (b) made the
+ *  emulator log "Requested project ID …, but the emulator is configured for
+ *  sprout-e2e" on every request — hundreds of lines that drowned the output
+ *  the stack exists to show. Credential-less init falls back to
+ *  GCLOUD_PROJECT, so every process agrees on sprout-e2e. */
 const FIRESTORE_ENV = {
   FIRESTORE_EMULATOR_HOST: `127.0.0.1:${EMULATOR_PORT}`,
   GCLOUD_PROJECT: 'sprout-e2e',
   GOOGLE_CLOUD_PROJECT: 'sprout-e2e',
+  FIREBASE_SERVICE_ACCOUNT_JSON: '',
+  FIREBASE_SERVICE_ACCOUNT_BASE64: '',
+  FIREBASE_SERVICE_ACCOUNT_PATH: '',
 };
 
 const children = [];

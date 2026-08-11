@@ -70,9 +70,21 @@ function objectNameFor(speciesKey: string, version = SPRITE_VERSION): string {
   return `sprites/${speciesKey}/${version}.png`;
 }
 
+/** The host download URLs point at: production, unless this process stores
+ *  sprites in the Storage emulator — the same FIREBASE_STORAGE_EMULATOR_HOST
+ *  signal firebase-admin itself honors for writes. A URL must resolve where
+ *  the bytes actually went: hardcoding the production host left every
+ *  emulator-backed stack (dev, e2e) persisting sprite URLs that could never
+ *  load, so scanned creatures silently fell back to placeholder art. */
+function storageBaseUrl(): string {
+  const emulatorHost = process.env.FIREBASE_STORAGE_EMULATOR_HOST?.trim();
+  if (!emulatorHost) return 'https://firebasestorage.googleapis.com';
+  return emulatorHost.includes('://') ? emulatorHost : `http://${emulatorHost}`;
+}
+
 function downloadUrl(bucketName: string, objectName: string, token: string): string {
   const encoded = encodeURIComponent(objectName);
-  return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encoded}?alt=media&token=${token}`;
+  return `${storageBaseUrl()}/v0/b/${bucketName}/o/${encoded}?alt=media&token=${token}`;
 }
 
 /** Writes the PNG and stamps `token` onto the object's metadata.

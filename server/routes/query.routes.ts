@@ -44,7 +44,11 @@ const statusLimiter = rateLimit({
    about what the route actually accepts. */
 export const querySchema = Joi.object({
   name: Joi.string().trim().min(1).max(100).required(),
-  email: Joi.string().trim().email().required(),
+  // allowUnicode: false — Joi's default accepts internationalized addresses
+  // ("tëst🌱@exãmple.com"), which persisted tickets whose confirmation email
+  // could never be delivered. ASCII-only matches the rest of the account
+  // policy (password, display name) until EAI delivery is actually supported.
+  email: Joi.string().trim().email({ allowUnicode: false }).required(),
   organisation: Joi.string().trim().max(120).allow('').optional(),
   subject: Joi.string().trim().min(1).max(150).required(),
   category: Joi.string()
@@ -60,7 +64,7 @@ export const statusSchema = Joi.object({
     .pattern(/^[Ss][Pp][Rr]-\d{8}-\d{4}$/)
     .required()
     .messages({ 'string.pattern.base': 'Reference number must look like SPR-20260712-0001.' }),
-  email: Joi.string().trim().email().required(),
+  email: Joi.string().trim().email({ allowUnicode: false }).required(),
 });
 
 router.post('/submit', queryLimiter, validate(querySchema), handleQuerySubmit);

@@ -218,14 +218,18 @@ export interface AuthProfile {
   displayName: string;
   emailVerified: boolean;
   authProvider?: AuthProviderTag;
-  /** Server-computed: the Firestore `isSuperAdmin` flag OR the ADMIN_EMAILS
-   *  break-glass allowlist. Decides where login lands and whether the operator
-   *  nav appears — it is not a permission. /api/admin and /api/platform
-   *  re-resolve the grant on every request and answer 403 regardless. */
+  /** The advisory ADMIN_EMAILS badge, OR'd with the grant (so every operator
+   *  also carries it). A badge alone opens nothing: it is not the flag any
+   *  gate should check. An earlier comment here called the two fields aliases
+   *  of one level — that was wrong, and it is how SuperAdminRoute ended up
+   *  admitting badge-holders to a shell of 403s. See auth.controller.ts:
+   *  "Two values, because there are still two tiers." */
   isAdmin: boolean;
-  /** Alias of isAdmin — one privilege level, not two, since the merge folded
-   *  the operator tier into the superadmin grant. Advisory only: /api/admin and
-   *  /api/platform re-resolve the grant on every request. */
+  /** The operator grant — the Firestore `isSuperAdmin` flag OR the
+   *  SUPER_ADMIN_EMAILS allowlist, and the only flag that opens the operator
+   *  surfaces (one operator actor in the use-case model: Super-admin).
+   *  Client-side it is presentational: /api/admin and /api/platform
+   *  re-resolve the grant on every request and answer 403 regardless. */
   isSuperAdmin?: boolean;
   lastLogin?: string | null;
   lastLogout?: string | null;

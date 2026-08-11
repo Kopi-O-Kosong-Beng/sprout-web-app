@@ -105,9 +105,50 @@ function openEventStream(res: Response) {
   };
 }
 
+/** Thrown at a hop boundary when the scanner has gone away. Only ever caught by
+ *  the two route handlers, which end the (already dead) stream quietly. */
+class ScanAbandonedError extends Error {
+  constructor(stage: string) {
+    super(stage);
+    this.name = 'ScanAbandonedError';
+  }
+}
+
+/**
+ * Watches the SSE socket and turns "the scanner left" into two things: an
+ * AbortSignal (joined into every hop's deadline signal, so an in-flight
+ * provider call stops immediately) and a checkpoint to call at hop
+ * boundaries (so the run stops before the next paid call — and, above all,
+ * before persistence).
+ *
+ * Until this existed the route had no disconnect handling at all: closing the
+ * tab a second into a scan still spent every provider call and upserted the
+ * creature, so an archive could change after a scan the player watched die.
+ * The client deliberately treats an aborted run as "nothing happened" — this
+ * makes that true.
+ */
+function watchForAbandonment(req: Request, res: Response) {
+  const disconnect = new AbortController();
+  const abandon = () => {
+    if (!res.writableEnded) disconnect.abort();
+  };
+  // 'close' on the response covers the socket dying after the request landed;
+  // 'aborted'-style early termination while the body was still uploading
+  // surfaces as 'close' on the request.
+  res.on('close', abandon);
+  req.on('close', abandon);
+  return {
+    signal: disconnect.signal,
+    assertScannerPresent(stage: string): void {
+      if (disconnect.signal.aborted) throw new ScanAbandonedError(stage);
+    },
+  };
+}
+
 /** Full run: identification through evaluation, reporting each hop as it lands. */
 router.post('/run-stream', async (req: Request, res: Response) => {
   const sendEvent = openEventStream(res);
+  const { signal: disconnectSignal, assertScannerPresent } = watchForAbandonment(req, res);
 
   try {
     const { imageBase64, customName } = req.body;
@@ -136,8 +177,9 @@ router.post('/run-stream', async (req: Request, res: Response) => {
 
     // Bounds every hop below. Each takes its own ceiling or whatever budget is
     // left, whichever is smaller, so one slow provider degrades the optional
-    // polish steps instead of killing the whole run.
-    const deadline = createDeadline();
+    // polish steps instead of killing the whole run. The disconnect signal
+    // rides along so an abandoned scan aborts the hop in flight too.
+    const deadline = createDeadline(TOTAL_BUDGET_MS, disconnectSignal);
 
     // Step 1: Identification
     sendEvent({
@@ -317,6 +359,7 @@ router.post('/run-stream', async (req: Request, res: Response) => {
     }
 
     // Step 2a: Prompt Crafting
+    assertScannerPresent('prompt crafting');
     sendEvent({
       event: 'step_start',
       step: '2a',
@@ -370,6 +413,7 @@ router.post('/run-stream', async (req: Request, res: Response) => {
     });
 
     // Step 2b: Sprite Generation
+    assertScannerPresent('sprite generation');
     sendEvent({
       event: 'step_start',
       step: '2b',
@@ -503,6 +547,7 @@ router.post('/run-stream', async (req: Request, res: Response) => {
       req.user!.uid,
       identifiedSpecies,
       readCaptureSource(req.body),
+      assertScannerPresent,
       {
         description: identification.description,
         commonNames: identification.common_names,
@@ -529,6 +574,18 @@ router.post('/run-stream', async (req: Request, res: Response) => {
 
     res.end();
   } catch (err: any) {
+    if (err instanceof ScanAbandonedError) {
+      // Nobody is listening — no frame to send. The log line is the record:
+      // the run stopped where it says, and nothing was persisted.
+      logAdminEvent(
+        'warn',
+        'Pipeline',
+        `Scanner disconnected mid-run — stopped before ${err.message} (nothing persisted).`,
+        'SCAN_ABANDONED'
+      );
+      res.end();
+      return;
+    }
     console.error('Pipeline run error:', err);
     sendEvent({ event: 'pipeline_error', error: err.message });
     res.end();
@@ -551,6 +608,7 @@ router.post('/run-stream', async (req: Request, res: Response) => {
  */
 router.post('/run-stage2c', requireSuperAdmin, async (req: Request, res: Response) => {
   const sendEvent = openEventStream(res);
+  const { signal: disconnectSignal, assertScannerPresent } = watchForAbandonment(req, res);
 
   try {
     const { rawSpriteB64, plantName } = req.body;
@@ -606,7 +664,7 @@ router.post('/run-stage2c', requireSuperAdmin, async (req: Request, res: Respons
 
     // Resumed at stage 2c after the human gate, so this leg gets its own
     // budget — the wall-clock spent waiting for the user isn't the pipeline's.
-    const deadline = createDeadline();
+    const deadline = createDeadline(TOTAL_BUDGET_MS, disconnectSignal);
     const identification = {
       name: speciesName,
       common_names: [speciesName],
@@ -620,7 +678,8 @@ router.post('/run-stage2c', requireSuperAdmin, async (req: Request, res: Respons
       deadline,
       req.user!.uid,
       identifiedSpecies,
-      readCaptureSource(req.body)
+      readCaptureSource(req.body),
+      assertScannerPresent
     );
 
     sendEvent({
@@ -637,6 +696,16 @@ router.post('/run-stage2c', requireSuperAdmin, async (req: Request, res: Respons
 
     res.end();
   } catch (err: any) {
+    if (err instanceof ScanAbandonedError) {
+      logAdminEvent(
+        'warn',
+        'Pipeline',
+        `Operator disconnected mid-continuation — stopped before ${err.message} (nothing persisted).`,
+        'SCAN_ABANDONED'
+      );
+      res.end();
+      return;
+    }
     console.error('Stage 2c run error:', err);
     sendEvent({ event: 'pipeline_error', error: err.message });
     res.end();
@@ -660,6 +729,10 @@ async function runStage2cOnward(
   identifiedSpecies: boolean,
   /** How the photo reached us, which decides the saved record's lifetime. */
   captureSource: CaptureSource,
+  /** Hop-boundary checkpoint from watchForAbandonment: throws when the
+   *  scanner has disconnected, so an abandoned run stops before the next
+   *  paid call and — the invariant that matters — before persistScan. */
+  assertScannerPresent: (stage: string) => void,
   /*
     What Plant.id said about the species, for the archive to keep.
 
@@ -674,6 +747,7 @@ async function runStage2cOnward(
   details?: PlantDetails
 ) {
   // Step 2c: Background Removal
+  assertScannerPresent('background cutout');
   sendEvent({
     event: 'step_start',
     step: '2c',
@@ -773,6 +847,7 @@ async function runStage2cOnward(
   });
 
   // Step 4: Programmatic Eval & Judge
+  assertScannerPresent('evaluation');
   sendEvent({
     event: 'step_start',
     step: '4',
@@ -832,6 +907,11 @@ async function runStage2cOnward(
   // so the human-gate route cannot produce a sprite that never gets saved.
   // finishedPngBuffer (line 374) is the source of finishedB64 — reuse it rather
   // than decoding the base64 string back into bytes.
+  //
+  // The last checkpoint, and the one that defines the contract: a scan whose
+  // stream died is a scan that never happened. Persisting past a disconnect is
+  // how archives changed behind players' backs.
+  assertScannerPresent('persistence');
   const persistence = await persistScan(
     {
       storage: createFirebaseSpriteStorage(),

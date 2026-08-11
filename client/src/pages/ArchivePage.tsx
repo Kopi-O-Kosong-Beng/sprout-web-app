@@ -120,6 +120,8 @@ export default function ArchivePage() {
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const archiveContentRef = useRef<HTMLDivElement>(null);
+  /** True once "Battle with X" has fired — see the onBattle handler. */
+  const battleNavigated = useRef(false);
   const [filterPanelPosition, setFilterPanelPosition] = useState<{ top: number; left: number } | null>(
     null
   );
@@ -448,15 +450,18 @@ export default function ArchivePage() {
             No plants collected yet
           </h2>
           <p className="mt-2 text-[10px] leading-relaxed opacity-80">
-            You haven't caught any plants yet. Open the Sprout mobile app and scan a real plant to
-            start your collection.
+            You haven't caught any plants yet. Scan a real plant to start your
+            collection.
           </p>
+          {/* The web app scans too (the Scan page, "Web Upload" capture
+              source) — this copy used to send web players to the mobile app,
+              with a CTA that walked them away from the fix. */}
           <button
             className="press pixel-button mt-4 w-full px-2 py-2 text-[9px]"
             type="button"
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/scan')}
           >
-            Back to Home
+            Scan a Plant
           </button>
         </Overlay>
       )}
@@ -636,11 +641,17 @@ export default function ArchivePage() {
               avatar={selected}
               busy={status === 'mutating'}
               onClose={() => setIsDetailClosed(true)}
-              onBattle={() =>
+              onBattle={() => {
+                // One gesture, one history entry: a double-click used to run
+                // this twice and push /battle twice, so Back appeared broken
+                // (it landed on the first /battle entry). The ref dies with
+                // the unmount this navigation causes, so it can never wedge.
+                if (battleNavigated.current) return;
+                battleNavigated.current = true;
                 navigate('/battle', {
                   state: { avatarId: selected.id, avatar: selected },
-                })
-              }
+                });
+              }}
             />
           )}
         </div>

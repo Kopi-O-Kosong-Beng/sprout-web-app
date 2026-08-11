@@ -135,6 +135,16 @@ describe('POST /api/query/submit (T05)', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects a unicode/emoji email with 400 rather than filing an unreachable ticket', async () => {
+    // Joi's default .email() accepts internationalized addresses, so this
+    // used to return 201 and persist a ticket whose confirmation email could
+    // never be delivered. ASCII-only until EAI delivery actually works.
+    const res = await request(app)
+      .post('/api/query/submit')
+      .send({ ...valid, email: 'tëst🌱@exãmple.com' });
+    expect(res.status).toBe(400);
+  });
+
   it('UC8 alt-flow 5a: still returns 201 + persists when email delivery fails', async () => {
     mockSendEmail.mockRejectedValueOnce(new Error('delivery failed'));
     // The shared email service is mocked so this failure path stays deterministic.

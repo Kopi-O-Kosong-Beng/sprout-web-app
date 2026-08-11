@@ -79,6 +79,39 @@ export function Overlay({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onDismiss]);
 
+  useEffect(() => {
+    // Focus trap. aria-modal promises assistive tech that the page behind
+    // the scrim is inert, but Tab used to walk straight out of the panel and
+    // into the header nav — visibly focusing controls the scrim says are
+    // unavailable. Cycle within the panel instead, the way <dialog> does.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable.length === 0) {
+        // Nothing tabbable inside — keep focus on the panel itself.
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      // Leaving the panel's own focus (tabIndex=-1) or its edges wraps to the
+      // matching end; anything in the middle tabs normally.
+      if (event.shiftKey && (active === first || active === dialogRef.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !dialogRef.current.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const preset = OVERLAY_PRESETS[size];
 
   return (

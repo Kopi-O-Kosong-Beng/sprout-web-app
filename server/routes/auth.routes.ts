@@ -48,17 +48,20 @@ const verificationResendAccountLimiter = rateLimit({
 });
 
 const signupSchema = Joi.object({
-  email: Joi.string().trim().email().required(),
+  // allowUnicode: false on every email here — Joi's default accepts
+  // internationalized addresses the mail transport cannot deliver to; see
+  // the same option on querySchema (query.routes.ts) for the full reasoning.
+  email: Joi.string().trim().email({ allowUnicode: false }).required(),
   password: Joi.string().required(),
   displayName: Joi.string().trim().min(1).max(50).pattern(/^[A-Za-z0-9 _-]+$/).required(),
 });
 
 const requestResetSchema = Joi.object({
-  email: Joi.string().trim().email().required(),
+  email: Joi.string().trim().email({ allowUnicode: false }).required(),
 });
 
 const verifyResetSchema = Joi.object({
-  email: Joi.string().trim().email().required(),
+  email: Joi.string().trim().email({ allowUnicode: false }).required(),
   otp: Joi.string().trim().pattern(/^\d{6}$/).required(),
   newPassword: Joi.string().required(),
 });

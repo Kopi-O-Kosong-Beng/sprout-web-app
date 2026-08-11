@@ -1064,6 +1064,42 @@ describe('BattlePage', () => {
     expect(sessionStorage.getItem('sprout.battle.sessionId')).toBe('battle-1');
   });
 
+  it('resumes the stored session when an archive-shortcut entry is revisited', async () => {
+    // The archive gesture rides in history state, and history state survives
+    // a reload — so the same entry, avatarId and all, mounts twice. Only the
+    // first mount is the player mid-gesture; the second must resume.
+    sessionStorage.setItem('sprout.battle.sessionId', 'battle-1');
+    apiMocks.getPveBattle.mockResolvedValue(battleSession({ turnNumber: 4 }));
+    const archiveEntry = {
+      pathname: '/battle',
+      state: { avatarId: 'fern-1' },
+      key: 'archive-entry',
+    };
+    const mountEntry = () =>
+      render(
+        <MemoryRouter initialEntries={[archiveEntry]}>
+          <NavigationLockProvider>
+            <Routes>
+              <Route path="/battle" element={<BattlePage />} />
+            </Routes>
+          </NavigationLockProvider>
+        </MemoryRouter>
+      );
+
+    const firstVisit = mountEntry();
+    expect(
+      await screen.findByRole('heading', { name: /fern ward is ready/i })
+    ).toBeVisible();
+    expect(apiMocks.getPveBattle).not.toHaveBeenCalled();
+    firstVisit.unmount();
+
+    mountEntry();
+    expect(
+      await screen.findByRole('heading', { name: /turn 4/i })
+    ).toBeVisible();
+    expect(apiMocks.getPveBattle).toHaveBeenCalledWith('battle-1');
+  });
+
   it('recovers the roster when abandoning a resumed battle whose quiet refresh failed', async () => {
     sessionStorage.setItem('sprout.battle.sessionId', 'battle-1');
     apiMocks.getPveBattle.mockResolvedValue(battleSession());
