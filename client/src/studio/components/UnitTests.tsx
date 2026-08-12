@@ -244,6 +244,10 @@ export const UnitTests: React.FC = () => {
         return;
       }
       setResult(data);
+      // A runner-level failure (no JSON report, zero test files found) has its
+      // whole story in the raw stream — open it rather than leaving the
+      // explanation collapsed behind the toggle.
+      if (data.error) setShowRaw(true);
     } catch (err: any) {
       setError(err?.message ?? 'Could not reach the test runner.');
     } finally {
@@ -275,7 +279,13 @@ export const UnitTests: React.FC = () => {
           <div className="flex items-center gap-3">
             {result && (
               <Badge tone={result.ok ? 'ok' : 'danger'} dot>
-                {result.ok ? 'ALL PASSING' : `${totals?.failed} FAILING`}
+                {/* Not-ok with zero failures means the RUNNER failed (no
+                    report, no test files) — "0 FAILING" would be nonsense. */}
+                {result.ok
+                  ? 'ALL PASSING'
+                  : totals?.failed
+                    ? `${totals.failed} FAILING`
+                    : 'RUN FAILED'}
               </Badge>
             )}
             <Button

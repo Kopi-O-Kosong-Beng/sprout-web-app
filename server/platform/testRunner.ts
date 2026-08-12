@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -41,6 +42,30 @@ export interface TestRunResult {
 
 const RUN_TIMEOUT_MS = 180_000;
 
+/**
+ * The server package root — the nearest ancestor of this module that holds
+ * vitest.config.ts. Resolved from the module's own location, never from
+ * process.cwd(): the runner used to inherit whatever directory the server
+ * happened to be launched from (a shell elsewhere, an IDE run config), and
+ * from anywhere but server/ vitest quietly matched no test files and
+ * reported an all-zero run as if it had completed. The walk upward also
+ * absorbs the compiled layout, where this file runs from dist/platform/
+ * rather than platform/.
+ *
+ * Exported for the test that pins the anchor to the config file.
+ */
+export function resolveServerRoot(): string {
+  let dir = __dirname;
+  for (let i = 0; i < 5; i++) {
+    if (existsSync(path.join(dir, "vitest.config.ts"))) return dir;
+    dir = path.dirname(dir);
+  }
+  // No config found above this file — fall back to the old behavior rather
+  // than refuse to run; the empty-run guard in execute() will name the
+  // directory if this too finds nothing.
+  return process.cwd();
+}
+
 /** Guards against a second run being kicked off while one is in flight. */
 let inFlight: Promise<TestRunResult> | null = null;
 
@@ -48,7 +73,7 @@ export function isTestRunInFlight(): boolean {
   return inFlight !== null;
 }
 
-export function runTests(projectRoot: string): Promise<TestRunResult> {
+export function runTests(projectRoot: string = resolveServerRoot()): Promise<TestRunResult> {
   if (inFlight) return inFlight;
   inFlight = execute(projectRoot).finally(() => {
     inFlight = null;
@@ -82,6 +107,25 @@ async function execute(projectRoot: string): Promise<TestRunResult> {
     };
   } finally {
     await fs.rm(path.dirname(outputFile), { recursive: true, force: true }).catch(() => {});
+  }
+
+  // A report with zero suites is a valid JSON file — vitest writes one when it
+  // matches no test files at all — but it is not a completed run. Without this
+  // guard it flowed through as one, and the page showed four zero tiles with
+  // no explanation (the raw "No test files found" text sat collapsed behind
+  // the console toggle).
+  if ((report.testResults ?? []).length === 0) {
+    return {
+      ok: false,
+      startedAt,
+      durationMs: Date.now() - t0,
+      totals: { total: 0, passed: 0, failed: 0, skipped: 0, files: 0 },
+      cases: [],
+      rawOutput: raw,
+      error:
+        `Vitest found no test files under ${projectRoot} — the server is ` +
+        `probably running from the wrong directory. See the raw output below.`,
+    };
   }
 
   const consoleByTest = attributeConsoleOutput(raw);

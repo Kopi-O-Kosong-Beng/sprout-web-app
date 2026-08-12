@@ -389,7 +389,11 @@ adminRouter.post("/run-tests", async (req, res) => {
   logAdminEvent("info", "Tests", "Vitest suite run started");
 
   try {
-    const result = await runTests(process.cwd());
+    // No explicit root: the runner anchors itself to the server package
+    // (testRunner.resolveServerRoot). Passing process.cwd() here is what made
+    // the page report an all-zero "run" whenever the server was launched from
+    // anywhere but server/.
+    const result = await runTests();
     logAdminEvent(
       result.ok ? "info" : "error",
       "Tests",
