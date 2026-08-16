@@ -1,6 +1,11 @@
 <div align="center">
 
-# 🌱 Sprout
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/sprout-wordmark-cream.png">
+    <img src="docs/brand/sprout-wordmark.png" width="300" alt="Sprout">
+  </picture>
+</h1>
 
 **Scan a real plant. Get a creature. Battle with it.**
 
