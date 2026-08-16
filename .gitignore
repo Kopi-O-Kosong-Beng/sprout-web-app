@@ -48,3 +48,8 @@ playwright/.cache/
 
 # Local output from scripts/backdrop-experiment.ts — renders, not source.
 server/backdrop-experiment-out/
+
+# Scratch landing area for source documents pulled off the shared drive — decks,
+# pitch PDFs, exports. Anything from here that belongs in the repo gets moved to
+# docs/final-submission/ rather than committed in place.
+raw_damp/
