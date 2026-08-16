@@ -19,18 +19,19 @@
 
 [![tests](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/tests.yml/badge.svg)](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/tests.yml)
 [![docker](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/docker.yml/badge.svg)](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/actions/workflows/docker.yml)
-[![tests: 1074](https://img.shields.io/badge/tests-1074-2ea44f)](#testing)
+[![tests: 1101](https://img.shields.io/badge/tests-1101-2ea44f)](#testing)
 [![Node 22](https://img.shields.io/badge/node-22-339933)](package.json)
 [![image: ghcr.io](https://img.shields.io/badge/image-ghcr.io-blue)](https://github.com/Kopi-O-Kosong-Beng/sprout-web-app/pkgs/container/sprout-web-app-server)
 
-**[Live demo](https://sprout-web-app-jet.vercel.app)** · [Quick start](#quick-start) · [How it works](#how-it-works) · [Engineering notes](#engineering-notes) · [Docs](#documentation)
+**[Live demo](https://sprout-web-app-jet.vercel.app)** · [Quick start](#quick-start) · [How it works](#how-it-works) · [Engineering notes](#engineering-notes) · [Cloud-native](#cloud-native-design) · [Testing](#testing) · [Docs](#documentation)
 
 </div>
 
 > [!NOTE]
-> The API runs on a free tier that sleeps when idle. The **first request after a
-> quiet period takes 10–15 seconds** while the instance wakes; everything after
-> it is fast. If the live demo looks frozen on load, that is the cold start, not
+> **The live demo's first request is slow, and that is expected.** The API runs
+> on a free tier that sleeps when idle. Measured on 16 August 2026: a cold
+> `/api/health` took **12.4 s**, and once warm the same endpoint answered in
+> **0.073 s**. If the demo looks frozen on load, that is the instance waking, not
 > a crash. Running it locally has no such delay.
 
 ---
@@ -42,8 +43,8 @@ generates a pixel-art creature from it, that creature persists in your archive
 with battle statistics derived from the species itself, and you can take it into
 turn-based combat and onto a public leaderboard.
 
-**16** use cases · **1,074** tests across **4** tiers · **~56k** lines of
-TypeScript · **6** contributors · **3** months
+**16** use cases · **16** misuse cases · **1,101** tests across **4** tiers ·
+**11 of 12** factors passing · **56k** lines of TypeScript · **6** team members
 
 ## Quick start
 
@@ -82,24 +83,61 @@ Developing without Docker, seeding data, and troubleshooting are covered in
 
 ## How it works
 
-```
-┌──────────────┐        ┌──────────────┐        ┌──────────────────┐
-│   React SPA  │  HTTPS │  Express API │        │  Firebase        │
-│  Vite + TS   │───────▶│   Node + TS  │───────▶│  Auth · Firestore│
-│   (Vercel)   │        │   (Render)   │        │  Storage         │
-└──────────────┘        └──────┬───────┘        └──────────────────┘
-                               │
-                               ▼
-                     ┌──────────────────────┐
-                     │  GenAI pipeline      │
-                     │  identify → prompt → │
-                     │  generate → removeBg │
-                     │  → finish → assemble │
-                     └──────────────────────┘
+```mermaid
+flowchart LR
+    U(["Player"]) -->|photo| C
+
+    subgraph edge ["Vercel"]
+        C["React SPA<br/>Vite · TypeScript"]
+    end
+
+    subgraph origin ["Render · our own container image"]
+        A["Express API<br/>Node · TypeScript"]
+        P["GenAI pipeline<br/>6 stages, SSE-streamed"]
+        A -. run-stream .-> P
+    end
+
+    subgraph data ["Firebase"]
+        AU["Auth"]
+        F[("Firestore<br/>5 collections")]
+        S[("Cloud Storage<br/>sprites")]
+    end
+
+    C -->|HTTPS| A
+    A --> AU
+    A --> F
+    A --> S
+    P -->|sprite| S
 ```
 
+**The scan-to-battle loop**, which is the whole product:
+
+```mermaid
+flowchart TB
+    PH(["Photo of a real plant"]) --> I
+
+    subgraph pipeline ["GenAI pipeline · six stages, streamed to the client"]
+        direction LR
+        I["identify"] --> PC["promptCraft"] --> G["generate"]
+        G --> R["removeBg"] --> FI["finish"] --> AS["assemble"]
+    end
+
+    AS --> AR[("Archive · species, stats, sprite URL")]
+
+    subgraph play ["What the creature is for"]
+        direction LR
+        B["PVE battle"] --> L["Leaderboard"]
+    end
+
+    AR --> B
+```
+
+Battle statistics are derived deterministically from the species name, so the
+same plant yields the same creature on every machine. That is what makes the
+archive worth keeping and the leaderboard worth trusting.
+
 **A modular monolith, deliberately.** One deployable. `server/pipeline/` is the
-single seam that would justify extraction — it is CPU-bound, accepts large
+single seam that would justify extraction: it is CPU-bound, accepts large
 request bodies, holds SSE connections open, and depends on four third-party
 providers. The argument, including why we did *not* split it, is in
 [`md/CONTAINERIZATION.md`](md/CONTAINERIZATION.md).
@@ -127,19 +165,95 @@ header cannot show, such as a file truncated behind a valid header. A mutation
 fuzzer attacks it and asserts every mutated input lands in one of the eight.
 → [`md/FUZZ_TESTING.md`](md/FUZZ_TESTING.md)
 
-**The deployment was audited against the twelve factors, and the failure was
-fixed rather than described.** Disposability was the factor the system outright
-failed. The response is a shutdown handler that drains in-flight requests under
-a bounded timer and is idempotent under repeated signals, plus liveness and
-readiness split into two endpoints answering two different questions.
-→ `server/lifecycle.ts`, `server/services/readiness.service.ts`,
-[`md/CONTAINERIZATION.md`](md/CONTAINERIZATION.md)
-
 **The end-to-end suite was mutation-verified, not assumed.** The sign-out
 journey was checked by deliberately breaking sign-out: the header assertion
 stayed green while the storage and reload assertions failed, which is how we
 know the spec tests the thing it claims to. Two earlier drafts that *could not
 fail* are kept in comments atop `e2e/archive-to-battle.spec.ts` as a warning.
+
+## Cloud-native design
+
+Render always ran this service in a container. Before we wrote a Dockerfile it
+built one from our source with a buildpack we never saw and could not change, so
+writing our own did not introduce containers to the project — it moved ownership
+of the build recipe into version control.
+
+**Why it mattered here specifically.** `sharp` (libvips) and `bcrypt` install
+per-platform prebuilt binaries, so our Windows and macOS machines and Render's
+Linux hosts each ran a *different compiled artefact* under the same version
+number in `package.json`. A green suite on a laptop therefore said nothing about
+the binary production actually runs. Building the dependency tree once inside a
+Debian-slim image, with `npm ci` against `package-lock.json`, makes the Linux
+build the only build.
+
+### Liveness and readiness answer different questions
+
+Two endpoints, deliberately not one.
+
+| Endpoint | Question | Behaviour |
+|---|---|---|
+| `GET /api/health` | Is the process alive? | 200 every time; touches nothing outside the process |
+| `GET /api/health/ready` | Can this instance serve traffic *now*? | 200 or **503**, with a named line per dependency |
+
+The Firestore line is a real `listCollections()` round trip against the
+configured project, bounded by its own **2.5 s** timeout
+(`DEFAULT_PROBE_TIMEOUT_MS`) so a hanging dependency cannot hang the probe.
+Probes run concurrently, so the worst case is the slowest probe rather than the
+sum. The storage line is a configuration check only, and the response says so
+rather than implying a round trip we do not make.
+
+This is not a claim you have to take on trust. Probing the live deployment while
+the free-tier instance was asleep:
+
+```
+attempt 1  HTTP 503  in 2.68s   ← correctly refusing traffic while waking
+attempt 2  HTTP 200  in 0.158s
+attempt 3  HTTP 200  in 0.168s
+
+{"status":"ready","checks":[
+  {"name":"firestore","status":"ok","durationMs":95},
+  {"name":"storage_bucket_configured","status":"ok","durationMs":1}]}
+```
+
+A single health endpoint would have returned 200 on attempt 1 and sent traffic
+to an instance that could not yet serve it.
+
+### Disposability was the factor we failed
+
+Audited against the twelve factors, **eleven pass**. Concurrency (VIII) is
+partial: the process is stateless so the property holds, but only one instance
+runs today. Disposability (IX) was the one outright failure, and it is fixed
+rather than merely described.
+
+`server/lifecycle.ts` now stops accepting connections, drains what is in flight,
+and exits 0. Three properties make it real rather than decorative:
+
+- **Bounded.** A stuck keep-alive connection cannot hold the container open until
+  SIGKILL. `DEFAULT_SHUTDOWN_TIMEOUT_MS` is **10 s**, after which it forces exit.
+- **Idempotent.** Platforms re-send `SIGTERM`, and an impatient operator sends a
+  second one. Repeat signals do not restart or corrupt the sequence.
+- **Asserted.** Both the cold start and the clean shutdown are checked in CI on
+  every build, so the property cannot rot silently.
+
+### Limits and defaults
+
+| Control | Value | Where |
+|---|---|---|
+| Scan budget | 100 pipeline runs per rolling hour, per account | `server/routes/pipeline.routes.ts` |
+| Global rate limit | 1000 requests / 15 min, per IP | Express middleware |
+| Image payload | ≤ 15 MB, ≥ 16 px per edge, ≤ 40,000,000 px | `server/pipeline/ingest/imageIngest.ts` |
+| Accepted formats | JPEG, PNG, WebP | Same |
+| Rejection reasons | 8, discriminated and never thrown | Same |
+| Firestore collections | 5 | `users`, `avatar_records`, `query_tickets`, `password_history`, `counters` |
+| API surface | 32 route handlers across 10 routers | `server/routes/` |
+
+Every secret is injected at runtime rather than baked into an image, and the
+emulator-versus-managed-Firestore choice is a single environment variable, which
+is what keeps development and production the same shape.
+
+Full write-up, including the known limits we did not solve, is in
+[`md/CONTAINERIZATION.md`](md/CONTAINERIZATION.md); measured operational figures
+are in [`docs/DELL_METRICS.md`](docs/DELL_METRICS.md).
 
 ## Testing
 
@@ -152,20 +266,24 @@ npm run test:e2e              # Playwright against the real stack
 
 | Suite | Files | Tests | Tooling |
 |---|---:|---:|---|
-| Server integration & API | 44 | 603 | Jest + Supertest against the Firestore emulator |
+| Server integration & API | 46 | 624 | Jest + Supertest against the Firestore emulator |
 | Client components & routing | 28 | 309 | Vitest + React Testing Library |
-| Pipeline, ingest gate & fuzzing | 17 | 149 | Vitest |
+| Pipeline, ingest gate & fuzzing | 18 | 155 | Vitest |
 | End-to-end journeys | 6 | 13 | Playwright (Chromium) against the real client, server, and Firestore/Auth/Storage emulators |
-| **Total** | **95** | **1074** | |
+| **Total** | **98** | **1101** | |
+
+Measured on 9 August 2026 at commit `b184b62` by running each suite and reading
+the runner's own total, not by counting `it(` declarations. That distinction is
+load-bearing: a static grep of the server suite returns about **416** where Jest
+executes **624**, because parameterised cases expand at runtime. These are the
+figures in the group report (Table 15), so the repository and the submission
+reconcile.
 
 Integration tests run against the Firestore **emulator** rather than mocks, so a
 query Firestore would reject fails in the suite too. The end-to-end tier
 substitutes nothing between the click and the database except the four paid
-providers.
-
-Measured 2026-08-09 on `main` by running each suite and reading its own total —
-not by counting `it(` declarations, which understates the server suite by roughly
-a third because parameterised cases expand at runtime.
+providers. Test code is **22,111 lines against 33,803 lines of source**, a 0.65:1
+ratio.
 
 Every use case is mapped to its sequence diagram and to the suites that verify
 it in [`docs/TEST_TRACEABILITY.md`](docs/TEST_TRACEABILITY.md).
@@ -234,6 +352,9 @@ The split is deliberate. The documents above explain *how* the system works;
 
 ## Repository layout
 
+<details>
+<summary>Directory tree</summary>
+
 ```
 sprout-web-app/
 ├── client/            React + Vite frontend
@@ -252,6 +373,8 @@ sprout-web-app/
 ├── vercel.json        Frontend hosting
 └── docker-compose.yml
 ```
+
+</details>
 
 ## How this repository was built
 
