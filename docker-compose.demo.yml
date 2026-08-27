@@ -1,0 +1,217 @@
+# Sprout, whole and working, on a laptop that has nothing installed but Docker.
+#
+#     docker compose -f docker-compose.demo.yml up --build
+#     → open http://localhost:5173
+#     → sign in as  test@sprout.com  with any password at all
+#
+# ── Who this is for ──────────────────────────────────────────────────────────
+# The handover: someone who needs to show Sprout to a room without anyone from
+# the team present, without a Firebase project of their own, without API keys,
+# and — if the venue's wifi is not to be trusted — without a network.
+#
+# ── Why this is a second file and not a change to docker-compose.yml ─────────
+# docker-compose.yml makes a specific claim, in the report and in its own
+# header: it runs with no secrets, no auth bypass, and a production shape. That
+# claim is true and worth keeping. This stack deliberately breaks the second
+# half of it — it switches the dev auth bypass on, because a demo that nobody
+# can sign in to is not a demo. Editing the original file would have quietly
+# falsified a claim we make elsewhere. Two files, two honest statements.
+#
+# ── What is real here and what is not ────────────────────────────────────────
+# Real: the React build, the Express API, Firestore, Firebase Auth, Cloud
+# Storage, the whole scan → archive → battle loop, the leaderboard, the 200
+# species almanac. Nothing between a click and the database is mocked.
+#
+# Substituted: the three Firebase services are emulators rather than the managed
+# ones, and the four paid providers behind the sprite pipeline (Plant.id,
+# Gemini, NVIDIA Flux, withoutBG) are stubbed by USE_MOCK_APIS. So a scan
+# completes and persists a real creature with real battle statistics, but the
+# artwork is the procedural placeholder rather than generated pixel art. That is
+# the one visible difference from the hosted app, and it is the price of needing
+# no keys and no account. For generated art, use the hosted demo.
+#
+# This is the same stack `npm run test:e2e` drives, where eleven Playwright
+# specs — including the full scan-to-archive journey — run against it on every
+# pull request. See scripts/e2e-stack.mjs.
+
+name: sprout-demo
+
+services:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Firebase emulators — Firestore, Auth and Storage.
+  #
+  # All three, unlike docker-compose.yml, and each one buys something the demo
+  # cannot do without:
+  #   firestore — every read and write in the product
+  #   auth      — server-side account creation and verification links
+  #   storage   — the sprite write that completes a scan; without it
+  #               sprite-storage.ts throws and no creature ever reaches the
+  #               archive
+  # ───────────────────────────────────────────────────────────────────────────
+  firestore:
+    build:
+      context: .
+      dockerfile: docker/firestore-emulator/Dockerfile
+    container_name: sprout-demo-emulators
+    # Overrides the image's firestore-only default. The ports and the 0.0.0.0
+    # binds are already declared in the image's firebase.json.
+    command:
+      - firebase
+      - emulators:start
+      - --only
+      - firestore,auth,storage
+      - --project
+      - sprout-local
+    ports:
+      # Storage is published because the BROWSER loads sprite images directly
+      # from it — see FIREBASE_STORAGE_PUBLIC_HOST below. The other two are
+      # published only as a convenience for debugging.
+      - "8080:8080"
+      - "9099:9099"
+      - "9199:9199"
+    healthcheck:
+      # Gate on Storage, not Firestore. It is the last of the three to finish
+      # booting, so a stack that waits for it has waited for all of them — and
+      # the API's first sprite write is the thing most likely to lose the race.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9199/').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Seed — a one-shot admin process, not a service.
+  #
+  # The emulators start empty on every `up`, so without this the leaderboard is
+  # blank and the app looks broken rather than new. Runs in the API image
+  # itself: `tsc` compiles server/scripts alongside the app, so the seed is
+  # already inside the image and needs no second build.
+  #
+  # A signed-in demo user still starts with an empty archive, which is correct —
+  # filling it by scanning a plant is the demo.
+  # ───────────────────────────────────────────────────────────────────────────
+  seed:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    # Same tag as the api service, so the image is built once and this is a
+    # cache hit rather than a second five-minute build of identical layers.
+    image: sprout-demo-api:local
+    container_name: sprout-demo-seed
+    depends_on:
+      firestore:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      NODE_ENV: development
+      FIRESTORE_EMULATOR_HOST: firestore:8080
+      FIREBASE_AUTH_EMULATOR_HOST: firestore:9099
+      GCLOUD_PROJECT: sprout-local
+      GOOGLE_CLOUD_PROJECT: sprout-local
+    command: ["node", "server/dist/scripts/seed-firestore.js"]
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # API
+  # ───────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: sprout-demo-api:local
+    container_name: sprout-demo-api
+    depends_on:
+      firestore:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "3001:3001"
+    environment:
+      # development, NOT production, and it is load-bearing rather than sloppy.
+      # The auth bypass below is fenced on AUTH_DEV_BYPASS === 'true' *and*
+      # NODE_ENV !== 'production' (server/middleware/auth.middleware.ts), two
+      # independent conditions. Setting only the first would change nothing.
+      # This stack genuinely is a development environment, so saying so is also
+      # the accurate answer.
+      NODE_ENV: development
+      PORT: "3001"
+
+      # Backing services attached by configuration — 12-factor IV. `firestore`
+      # is the compose service name; compose provides DNS on its default
+      # network, which is service discovery without a service registry.
+      FIRESTORE_EMULATOR_HOST: firestore:8080
+      FIREBASE_AUTH_EMULATOR_HOST: firestore:9099
+      GCLOUD_PROJECT: sprout-local
+      GOOGLE_CLOUD_PROJECT: sprout-local
+
+      # The browser reaches the API on localhost, not on the compose network —
+      # the bundle runs on the user's machine, outside compose's DNS.
+      CORS_ORIGIN: http://localhost:5173
+      FRONTEND_URL: http://localhost:5173
+
+      # No credentials anywhere in this file. The paid providers are stubbed and
+      # mail prints to the container log, so the stack runs with no secrets at
+      # all — which is what makes it safe to hand over.
+      USE_MOCK_APIS: "true"
+      EMAIL_MODE: console
+
+      # The demo identity. `test@sprout.com` with any password establishes a
+      # session the client presents as x-dev-uid / x-dev-email headers, and the
+      # allowlists below promote it to operator so /admin and /studio open too.
+      # Both halves are fenced to non-production independently: a deployed API
+      # refuses these headers, and a deployed bundle never sends them.
+      AUTH_DEV_BYPASS: "true"
+      DEMO_AUTH_BYPASS: "false"
+      SUPER_ADMIN_EMAILS: test@sprout.com
+      ADMIN_EMAILS: test@sprout.com
+
+      # Sprite storage. Three variables because two different consumers and two
+      # different audiences are involved:
+      #   STORAGE_EMULATOR_HOST         @google-cloud/storage, scheme required
+      #   FIREBASE_STORAGE_EMULATOR_HOST  firebase-admin's own wrapper
+      #   FIREBASE_STORAGE_PUBLIC_HOST  the host written INTO the download URL
+      #
+      # The last one is the compose-specific part. The API writes bytes to
+      # `firestore:9199` over the compose network, but the archive page that has
+      # to render the sprite runs in a browser on the user's machine, where
+      # `firestore` resolves to nothing. Without the override every stored URL
+      # is a broken image. Same separation as CORS_ORIGIN — browser-facing
+      # configuration is not the same value as server-facing configuration.
+      FIREBASE_STORAGE_BUCKET: sprout-local.appspot.com
+      STORAGE_EMULATOR_HOST: http://firestore:9199
+      FIREBASE_STORAGE_EMULATOR_HOST: firestore:9199
+      FIREBASE_STORAGE_PUBLIC_HOST: http://localhost:9199
+    healthcheck:
+      # Liveness, deliberately: /api/health touches no dependency, so an
+      # emulator blip cannot make Docker restart a healthy container. The
+      # dependency question lives at /api/health/ready, which nothing restarts
+      # on. See server/services/readiness.service.ts.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # Exercises the graceful drain in server/lifecycle.ts on every `down`.
+    # 15s leaves room above the handler's own 10s bound.
+    stop_grace_period: 15s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Frontend
+  # ───────────────────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+      args:
+        # Baked into the bundle at build time — Vite writes import.meta.env in
+        # as literals, so a static bundle has no runtime configuration.
+        VITE_API_URL: http://localhost:3001
+        # The one line that makes this stack signable-into. See the ARG comment
+        # in client/Dockerfile for why the production build cannot be used here.
+        VITE_BUILD_MODE: development
+        VITE_ENABLE_DEMO_TOOLS: "true"
+    container_name: sprout-demo-web
+    depends_on:
+      - api
+    ports:
+      - "5173:80"

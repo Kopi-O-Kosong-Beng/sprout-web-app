@@ -69,6 +69,18 @@ an account anywhere.
 Developing without Docker, seeding data, and troubleshooting are covered in
 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
+> [!TIP]
+> **Want to sign in and complete a scan locally?** The stack above runs with no
+> auth and no sprite storage on purpose, so it serves the public pages only.
+> [`docker-compose.demo.yml`](docker-compose.demo.yml) adds the Auth and Storage
+> emulators and a demo identity, which makes the whole scan → archive → battle
+> loop playable offline — still with no keys and no accounts. See
+> [`HANDOVER.md`](HANDOVER.md).
+>
+> ```bash
+> docker compose -f docker-compose.demo.yml up --build
+> ```
+
 ## What it does
 
 | Feature | Description |

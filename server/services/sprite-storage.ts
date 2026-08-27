@@ -70,16 +70,34 @@ function objectNameFor(speciesKey: string, version = SPRITE_VERSION): string {
   return `sprites/${speciesKey}/${version}.png`;
 }
 
+function withScheme(host: string): string {
+  return host.includes('://') ? host : `http://${host}`;
+}
+
 /** The host download URLs point at: production, unless this process stores
  *  sprites in the Storage emulator — the same FIREBASE_STORAGE_EMULATOR_HOST
  *  signal firebase-admin itself honors for writes. A URL must resolve where
  *  the bytes actually went: hardcoding the production host left every
  *  emulator-backed stack (dev, e2e) persisting sprite URLs that could never
- *  load, so scanned creatures silently fell back to placeholder art. */
+ *  load, so scanned creatures silently fell back to placeholder art.
+ *
+ *  FIREBASE_STORAGE_PUBLIC_HOST overrides that, and exists because "where the
+ *  bytes went" and "where a browser can fetch them" are not always the same
+ *  address. Under docker compose they never are: this process resolves the
+ *  emulator by its service name on the compose network, while the page that has
+ *  to render the sprite runs on the user's own machine and knows only
+ *  localhost. Without the override the archive persists
+ *  `http://firestore:9199/...`, which every browser outside the compose network
+ *  fails to resolve. Same separation as CORS_ORIGIN and FRONTEND_URL, which are
+ *  browser-facing for exactly this reason. Unset everywhere else, so dev, e2e
+ *  and production are untouched. */
 function storageBaseUrl(): string {
+  const publicHost = process.env.FIREBASE_STORAGE_PUBLIC_HOST?.trim();
+  if (publicHost) return withScheme(publicHost);
+
   const emulatorHost = process.env.FIREBASE_STORAGE_EMULATOR_HOST?.trim();
   if (!emulatorHost) return 'https://firebasestorage.googleapis.com';
-  return emulatorHost.includes('://') ? emulatorHost : `http://${emulatorHost}`;
+  return withScheme(emulatorHost);
 }
 
 function downloadUrl(bucketName: string, objectName: string, token: string): string {

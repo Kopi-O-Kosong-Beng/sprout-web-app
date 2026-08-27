@@ -237,3 +237,43 @@ describe('download URL host', () => {
     expect(url).toMatch(/^http:\/\/localhost:9199\/v0\/b\//);
   });
 });
+
+describe('browser-facing download host', () => {
+  // Under docker compose the address this process writes to and the address the
+  // browser reads from are different by construction: the API resolves the
+  // emulator by its compose service name, the browser only knows localhost.
+  // Without the override the archive stores `http://firestore:9199/...` and
+  // every sprite is a broken image outside the compose network.
+  const PUBLIC_KEY = 'FIREBASE_STORAGE_PUBLIC_HOST';
+  const EMULATOR_KEY = 'FIREBASE_STORAGE_EMULATOR_HOST';
+  const originalPublic = process.env[PUBLIC_KEY];
+  const originalEmulator = process.env[EMULATOR_KEY];
+
+  afterEach(() => {
+    if (originalPublic === undefined) delete process.env[PUBLIC_KEY];
+    else process.env[PUBLIC_KEY] = originalPublic;
+    if (originalEmulator === undefined) delete process.env[EMULATOR_KEY];
+    else process.env[EMULATOR_KEY] = originalEmulator;
+  });
+
+  it('overrides the emulator host the bytes were written to', async () => {
+    process.env[EMULATOR_KEY] = 'firestore:9199';
+    process.env[PUBLIC_KEY] = 'http://localhost:9199';
+    const { url } = await createFirebaseSpriteStorage(deps(fakeFile())).save('fern', PNG);
+    expect(url).toMatch(/^http:\/\/localhost:9199\/v0\/b\//);
+    expect(url).not.toContain('firestore:9199');
+  });
+
+  it('assumes http when the override omits a scheme', async () => {
+    process.env[PUBLIC_KEY] = 'localhost:9199';
+    const { url } = await createFirebaseSpriteStorage(deps(fakeFile())).save('fern', PNG);
+    expect(url).toMatch(/^http:\/\/localhost:9199\/v0\/b\//);
+  });
+
+  it('is inert when unset, leaving production and emulator behaviour alone', async () => {
+    delete process.env[PUBLIC_KEY];
+    delete process.env[EMULATOR_KEY];
+    const { url } = await createFirebaseSpriteStorage(deps(fakeFile())).save('fern', PNG);
+    expect(url).toMatch(/^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\//);
+  });
+});

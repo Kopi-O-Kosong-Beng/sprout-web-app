@@ -31,7 +31,10 @@ services:
   # ───────────────────────────────────────────────────────────────────────────
   firestore:
     build:
-      context: ./docker/firestore-emulator
+      # Repository root, so the image can copy the project's real
+      # firestore.rules / storage.rules rather than vendoring a second copy.
+      context: .
+      dockerfile: docker/firestore-emulator/Dockerfile
     container_name: sprout-firestore
     ports:
       # Host 8080 on purpose: server/tests/setup-env.ts pins

@@ -251,6 +251,140 @@ jobs:
         run: docker compose down -v || true
 
   # ===========================================================================
+  # Demo stack — the handover build, which must be usable by someone with no
+  # keys, no Firebase project and nobody from the team in the room.
+  #
+  # Every assertion below corresponds to a way this stack was previously broken.
+  # They are here so it cannot quietly break again between now and the showcase.
+  # ===========================================================================
+  demo-stack:
+    name: Demo stack (sign-in + storage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring the demo stack up
+        run: docker compose -f docker-compose.demo.yml up --build -d
+
+      - name: Readiness reports BOTH dependencies ok
+        run: |
+          # Unlike the plain compose stack, this one must reach 200. Storage is
+          # emulated here, so the probe that is permanently `failed` over there
+          # has to pass over here — that is the whole point of this stack, and a
+          # scan cannot persist a sprite without it.
+          for attempt in $(seq 1 90); do
+            code=$(curl -s -o /tmp/ready.json -w '%{http_code}' http://localhost:3001/api/health/ready || true)
+            if [ "$code" = "200" ]; then
+              echo "ready after ${attempt} poll(s)"
+              jq . /tmp/ready.json
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::readiness never reached 200 — a dependency probe is failing"
+          jq . /tmp/ready.json || cat /tmp/ready.json || true
+          docker compose -f docker-compose.demo.yml logs
+          exit 1
+
+      - name: The seed ran to completion
+        run: |
+          # A one-shot service, so it should be exited(0) rather than running.
+          # An empty database is not a broken demo, but it is a worse one, and a
+          # silently failed seed is invisible from the outside.
+          status=$(docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' sprout-demo-seed)
+          echo "seed container: ${status}"
+          [ "$status" = "exited:0" ] || {
+            echo "::error::seed did not complete cleanly"
+            docker logs sprout-demo-seed || true
+            exit 1
+          }
+
+      - name: A demo identity can actually reach a protected route
+        run: |
+          # Blocker this guards: with AUTH_DEV_BYPASS off, or NODE_ENV left at
+          # production, every protected route answers 401 and the demo is a
+          # landing page. /api/auth/me is the route the client calls first on
+          # sign-in, so if this passes the session establishes.
+          code=$(curl -s -o /tmp/me.json -w '%{http_code}' \
+            -H 'x-dev-uid: dev-admin-0001' \
+            -H 'x-dev-email: test@sprout.com' \
+            http://localhost:3001/api/auth/me || true)
+          echo "GET /api/auth/me -> ${code}"
+          cat /tmp/me.json || true
+          [ "$code" = "200" ] || {
+            echo "::error::the demo identity cannot sign in"
+            docker compose -f docker-compose.demo.yml logs api
+            exit 1
+          }
+
+      - name: An unauthenticated caller is still refused
+        run: |
+          # The bypass must open a door for the demo identity WITHOUT opening
+          # the route to everyone. If this ever returns 200 the stack is not a
+          # demo, it is an unauthenticated API.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/api/auth/me || true)
+          echo "GET /api/auth/me (no headers) -> ${code}"
+          [ "$code" = "401" ] || {
+            echo "::error::expected 401 without credentials, got ${code}"
+            exit 1
+          }
+
+      - name: The served bundle keeps its sign-in path
+        run: |
+          # Blocker this guards: `import.meta.env.DEV` is compiled to a literal.
+          # A production-mode bundle minifies the gate to `return!1` and no
+          # amount of correct server configuration can rescue it. Assert on the
+          # bytes nginx actually serves, not on the build command.
+          curl -fsS http://localhost:5173/ -o /tmp/index.html
+          bundle=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' /tmp/index.html | head -1)
+          echo "bundle: ${bundle}"
+          curl -fsS "http://localhost:5173${bundle}" -o /tmp/bundle.js
+          grep -q 'sprout-dev-session' /tmp/bundle.js || {
+            echo "::error::dev session module missing from the bundle"
+            exit 1
+          }
+          # The gate sits immediately after the storage-key literal. `return!0`
+          # is enabled; `return!1` is the production fence, correct everywhere
+          # else and fatal here.
+          if grep -qo 'sprout-dev-session`;function [A-Za-z0-9_$]*(){return!1}' /tmp/bundle.js; then
+            echo "::error::bundle was built in production mode — nobody can sign in"
+            exit 1
+          fi
+          grep -qo 'sprout-dev-session`;function [A-Za-z0-9_$]*(){return!0}' /tmp/bundle.js || {
+            echo "::error::could not confirm the sign-in gate is enabled"
+            exit 1
+          }
+          echo "sign-in gate is enabled in the served bundle"
+
+      - name: Sprite URLs are addressed to the browser, not the compose network
+        run: |
+          # Blocker this guards: the API writes sprites to `firestore:9199` over
+          # the compose network, a name no browser outside compose can resolve.
+          # Without FIREBASE_STORAGE_PUBLIC_HOST every archive image is broken,
+          # and it breaks silently — the scan succeeds and the picture does not
+          # load. Assert the container carries the override.
+          public_host=$(docker exec sprout-demo-api printenv FIREBASE_STORAGE_PUBLIC_HOST)
+          echo "FIREBASE_STORAGE_PUBLIC_HOST=${public_host}"
+          case "$public_host" in
+            *localhost*) echo "download URLs are browser-resolvable" ;;
+            *) echo "::error::public storage host is not browser-resolvable"; exit 1 ;;
+          esac
+          # And the emulator is genuinely serving on that port from the host.
+          curl -fsS -o /dev/null -w 'storage emulator on host: %{http_code}\n' http://localhost:9199/ || {
+            echo "::error::storage emulator is not reachable from the host"
+            exit 1
+          }
+
+      - name: Stack logs
+        if: always()
+        run: docker compose -f docker-compose.demo.yml logs || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.demo.yml down -v || true
+
+  # ===========================================================================
   # Publish — only from main, so the submission is a pullable image
   # ===========================================================================
   publish:
