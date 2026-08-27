@@ -1,22 +1,31 @@
 {
   "_comment": [
-    "Emulator configuration for the containerised Firestore emulator.",
-    "The host MUST be 0.0.0.0. The emulator defaults to binding 127.0.0.1,",
+    "Emulator configuration for the containerised Firebase emulators.",
+    "",
+    "Every host MUST be 0.0.0.0. The emulators default to binding 127.0.0.1,",
     "which inside a container means the container itself — unreachable from",
     "the api service on the compose network. There is no --host flag on",
-    "`firebase emulators:start`; this file is the supported way to set it."
+    "`firebase emulators:start`; this file is the supported way to set it.",
+    "",
+    "Three emulators are declared, but which ones start is chosen by the",
+    "--only flag at run time. docker-compose.yml starts firestore alone;",
+    "docker-compose.demo.yml starts all three, because a demo has to be able",
+    "to sign in (auth) and finish a scan (storage).",
+    "",
+    "The storage emulator REFUSES to start without a rules file declared here,",
+    "which is why the two top-level rules keys exist. They point at the",
+    "repository's real rules rather than a permissive stand-in, so there is one",
+    "source of truth — see the Dockerfile for why the build context is the",
+    "repository root."
   ],
+  "firestore": { "rules": "firestore.rules" },
+  "storage": { "rules": "storage.rules" },
   "emulators": {
-    "firestore": {
-      "host": "0.0.0.0",
-      "port": 8080
-    },
-    "hub": {
-      "host": "0.0.0.0",
-      "port": 4400
-    },
-    "ui": {
-      "enabled": false
-    }
+    "firestore": { "host": "0.0.0.0", "port": 8080 },
+    "auth": { "host": "0.0.0.0", "port": 9099 },
+    "storage": { "host": "0.0.0.0", "port": 9199 },
+    "hub": { "host": "0.0.0.0", "port": 4400 },
+    "ui": { "enabled": false },
+    "singleProjectMode": true
   }
 }

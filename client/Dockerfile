@@ -70,9 +70,36 @@ ENV VITE_API_URL=$VITE_API_URL \
     VITE_FIREBASE_DATABASE_ID=$VITE_FIREBASE_DATABASE_ID \
     VITE_ENABLE_DEMO_TOOLS=$VITE_ENABLE_DEMO_TOOLS
 
+# Which Vite mode the bundle is built in. `production` everywhere that matters,
+# and the default here so nothing gets a demo build by forgetting a flag.
+#
+# `development` exists for one caller: docker-compose.demo.yml, the stack handed
+# to people who need to run Sprout without a Firebase project. The local sign-in
+# shortcut is fenced behind `import.meta.env.DEV`, which Vite compiles to a
+# literal `false` under the production mode — correct, and the reason a deployed
+# bundle can never take that path. But it also means a production-mode container
+# with no VITE_FIREBASE_* has no way in at all: Firebase sign-in throws for want
+# of config, and the shortcut is compiled out. Building the demo image in
+# development mode is what keeps the fence intact while still leaving that stack
+# a door. The server half is fenced independently on AUTH_DEV_BYPASS *and*
+# NODE_ENV !== 'production' (server/middleware/auth.middleware.ts), so this
+# bundle opens nothing against a deployed API.
+ARG VITE_BUILD_MODE=production
+
 # `tsc -b && vite build` — the typecheck is part of the build script, so a type
-# error fails the image rather than shipping.
-RUN npm run build -w client
+# error fails the image rather than shipping. The trailing `--` forwards the
+# mode to `vite build` only; tsc has already run by then.
+#
+# NODE_ENV is set as well, and it is the half that actually does the work.
+# `--mode` alone leaves `import.meta.env.DEV` compiled to `false`, because Vite
+# derives DEV/PROD from NODE_ENV rather than from the mode name — verified by
+# reading the emitted bundle both ways: `--mode development` alone still
+# minifies the sign-in gate to `return!1`, and only with NODE_ENV does it become
+# `return!0`. Both are passed because they must agree; setting one without the
+# other is how you get a bundle whose mode and semantics disagree.
+# For the default `production` this is a no-op — it states the value Vite
+# already assumes for a build.
+RUN NODE_ENV="$VITE_BUILD_MODE" npm run build -w client -- --mode "$VITE_BUILD_MODE"
 
 # =============================================================================
 # Stage 2 — serve
