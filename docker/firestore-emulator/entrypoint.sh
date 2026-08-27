@@ -15,22 +15,33 @@ set -eu
 # The --only list, e.g. "firestore" or "firestore,auth,storage".
 ONLY="${1:-firestore}"
 PROJECT="${FIREBASE_PROJECT:-sprout-local}"
-DATA_DIR="${EMULATOR_DATA_DIR:-/srv/data}"
+DATA_ROOT="${EMULATOR_DATA_DIR:-/srv/data}"
+
+# A subdirectory, NOT the volume mount point itself. The export clears its
+# target before writing, and rmdir on a mount point fails with EBUSY — so
+# exporting straight to the mount fails every single time, after the emulators
+# have already begun shutting down:
+#
+#   emulators: Export failed: EBUSY: resource busy or locked, rmdir '/srv/data'
+#
+# One level down is an ordinary directory on the volume, which it can remove and
+# recreate freely.
+EXPORT_DIR="$DATA_ROOT/export"
 
 set -- emulators:start --only "$ONLY" --project "$PROJECT"
 
 if [ "${EMULATOR_PERSIST:-false}" = "true" ]; then
-  mkdir -p "$DATA_DIR"
-  set -- "$@" --export-on-exit "$DATA_DIR"
+  mkdir -p "$DATA_ROOT"
+  set -- "$@" --export-on-exit "$EXPORT_DIR"
 
   # --import only once there is something to import. Pointing it at an empty
   # directory fails the start outright, which would make the very first run of a
   # fresh install the one run that does not work.
-  if [ -f "$DATA_DIR/firebase-export-metadata.json" ]; then
-    set -- "$@" --import "$DATA_DIR"
-    echo "[emulators] importing saved data from ${DATA_DIR}"
+  if [ -f "$EXPORT_DIR/firebase-export-metadata.json" ]; then
+    set -- "$@" --import "$EXPORT_DIR"
+    echo "[emulators] importing saved data from ${EXPORT_DIR}"
   else
-    echo "[emulators] no saved data yet — starting empty, will export to ${DATA_DIR} on exit"
+    echo "[emulators] no saved data yet — starting empty, will export to ${EXPORT_DIR} on exit"
   fi
 fi
 
