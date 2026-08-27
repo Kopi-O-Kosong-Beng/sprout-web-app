@@ -379,12 +379,23 @@ jobs:
           # storage API rather than a web root.
           url='http://localhost:9199/v0/b/sprout-local.appspot.com/o/sprites%2Fabsent%2Fv1.png?alt=media'
           code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
-          echo "GET (absent sprite) -> ${code}"
-          [ "$code" = "404" ] || {
-            echo "::error::expected 404 from the storage emulator's download route, got ${code}"
-            echo "000 means the host cannot reach the emulator at all — sprite images would be broken in the browser."
-            exit 1
-          }
+          echo "GET (absent sprite, no token) -> ${code}"
+          # 403 or 404, and both are a pass. This request carries no download
+          # token, so storage.rules refuses it with 403 — which is correct, and
+          # is why real sprite URLs embed `token=<uuid>` (see downloadUrl()). If
+          # the rules were ever opened up it would be 404 instead. Either answer
+          # proves the two things being asserted: the host can reach the
+          # emulator on the port sprite URLs point at, and the emulator is
+          # routing and guarding the exact path the app builds.
+          #
+          # What must fail: 000, meaning the host cannot reach it at all and
+          # every archive image would be broken; and 501, the answer at `/`,
+          # meaning the probe hit the server but not the storage API.
+          case "$code" in
+            403|404) echo "storage emulator is serving the download route" ;;
+            000) echo "::error::host cannot reach the storage emulator — archive sprites would be broken images"; exit 1 ;;
+            *)   echo "::error::unexpected ${code} from the storage download route"; exit 1 ;;
+          esac
 
       - name: Stack logs
         if: always()
