@@ -397,6 +397,37 @@ jobs:
             *)   echo "::error::unexpected ${code} from the storage download route"; exit 1 ;;
           esac
 
+      - name: Data survives a restart
+        run: |
+          # The emulators keep everything in memory, so persistence depends
+          # entirely on --export-on-exit firing on the way out and --import
+          # picking it back up. Both are easy to believe and easy to get wrong:
+          # if the stop signal is one the Firebase CLI does not act on, the
+          # export never runs and the loss is silent until someone reopens the
+          # laptop before an event and finds an empty archive. So write a
+          # marker, restart for real, and read it back.
+          base='http://localhost:8080/v1/projects/sprout-local/databases/(default)/documents'
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"fields":{"marker":{"stringValue":"persisted"}}}' \
+            "${base}/ci_persistence?documentId=marker" -o /dev/null
+          echo "marker written"
+
+          docker compose -f docker-compose.demo.yml stop
+          docker compose -f docker-compose.demo.yml start
+
+          for attempt in $(seq 1 60); do
+            curl -s -o /dev/null "${base}/ci_persistence/marker" && break
+            sleep 2
+          done
+
+          value=$(curl -fsS "${base}/ci_persistence/marker" | jq -r '.fields.marker.stringValue')
+          echo "marker after restart: ${value}"
+          [ "$value" = "persisted" ] || {
+            echo "::error::data did not survive a restart — the export or import is not working"
+            docker compose -f docker-compose.demo.yml logs firestore
+            exit 1
+          }
+
       - name: Stack logs
         if: always()
         run: docker compose -f docker-compose.demo.yml logs || true

@@ -44,12 +44,25 @@ COPY docker/firestore-emulator/firebase.json /srv/firebase.json
 # bypasses rules entirely, so neither file changes how the API behaves here.
 COPY firestore.rules storage.rules /srv/
 
+# Wraps `emulators:start` so that data can optionally survive a restart. Off
+# unless EMULATOR_PERSIST=true, so this image behaves exactly as it did before
+# for any caller that does not ask for it.
+COPY docker/firestore-emulator/entrypoint.sh /usr/local/bin/emulator-entrypoint.sh
+RUN chmod +x /usr/local/bin/emulator-entrypoint.sh
+
+# Where an export lands when persistence is on. Declared so that a plain
+# `docker run` without a mount still starts; the demo stack mounts a named
+# volume here, which is what makes the data outlive the container.
+ENV EMULATOR_DATA_DIR=/srv/data
+
 # 8080 Firestore, 9099 Auth, 9199 Storage, 4400 the emulator hub. The UI is
 # disabled in firebase.json — it is a convenience the compose stacks do not need
 # and it pulls extra work into a container that exists to answer a protocol.
 EXPOSE 8080 9099 9199 4400
 
-# Firestore only by default, which is what docker-compose.yml expects: that
-# stack runs with no auth and no sprite storage on purpose. The demo stack
-# overrides this command to start all three — see docker-compose.demo.yml.
-CMD ["firebase", "emulators:start", "--only", "firestore", "--project", "sprout-local"]
+ENTRYPOINT ["/usr/local/bin/emulator-entrypoint.sh"]
+
+# The --only list, and Firestore alone is the default because that is what
+# docker-compose.yml expects: that stack runs with no auth and no sprite storage
+# on purpose. The demo stack passes all three — see docker-compose.demo.yml.
+CMD ["firestore"]

@@ -53,15 +53,27 @@ services:
       context: .
       dockerfile: docker/firestore-emulator/Dockerfile
     container_name: sprout-demo-emulators
-    # Overrides the image's firestore-only default. The ports and the 0.0.0.0
-    # binds are already declared in the image's firebase.json.
-    command:
-      - firebase
-      - emulators:start
-      - --only
-      - firestore,auth,storage
-      - --project
-      - sprout-local
+    # The --only list, overriding the image's firestore-only default. Ports and
+    # the 0.0.0.0 binds are already declared in the image's firebase.json.
+    command: ["firestore,auth,storage"]
+    environment:
+      # Keep what the demo puts in. Without this the emulators hold everything
+      # in memory and every restart wipes the accounts, creatures, battles and
+      # sprite images built up beforehand — which is exactly the surprise
+      # someone gets after spending an evening filling an archive for an event.
+      EMULATOR_PERSIST: "true"
+    volumes:
+      # The data itself. A named volume rather than a bind mount so it does not
+      # depend on the host's paths or permissions, and so `down -v` is the one
+      # documented way to wipe it.
+      - emulator-data:/srv/data
+    # The export runs on the way out, so the stop signal has to be one the
+    # Firebase CLI acts on. It handles SIGINT — the Ctrl+C path — and compose's
+    # default is SIGTERM, which would kill it before anything was written.
+    stop_signal: SIGINT
+    # Room for the export to finish. It is a small dataset and takes well under
+    # a second; the margin is here so a slow laptop cannot truncate it.
+    stop_grace_period: 30s
     ports:
       # Storage is published because the BROWSER loads sprite images directly
       # from it — see FIREBASE_STORAGE_PUBLIC_HOST below. The other two are
@@ -215,3 +227,17 @@ services:
       - api
     ports:
       - "5173:80"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Where the demo's data actually lives.
+#
+# Everything — accounts, discovered creatures, battle logs, the leaderboard and
+# the sprite images — is inside this one volume, on the laptop, and nowhere
+# else. Nothing reaches the team's Firebase project and nothing leaves the
+# machine.
+#
+#   docker compose -f docker-compose.demo.yml down      keeps it
+#   docker compose -f docker-compose.demo.yml down -v   erases it
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  emulator-data:

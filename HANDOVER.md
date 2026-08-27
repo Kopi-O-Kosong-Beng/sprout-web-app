@@ -79,7 +79,37 @@ Press `Ctrl+C`, then:
 docker compose -f docker-compose.demo.yml down
 ```
 
-Add `-v` if you also want to erase the data and start fresh next time.
+Your data is kept. Start it again and the accounts, creatures and leaderboard
+are exactly as you left them.
+
+### Where the data is stored
+
+All of it — accounts, discovered creatures, battle history, the leaderboard and
+the creature images — is stored **on the laptop itself**, in a Docker volume
+named `sprout-demo_emulator-data`. Nothing is sent to us, nothing touches our
+Firebase account, and nothing leaves the machine.
+
+To see it:
+
+```bash
+docker volume ls
+```
+
+**To wipe everything and start clean:**
+
+```bash
+docker compose -f docker-compose.demo.yml down -v
+```
+
+The `-v` is what erases it. Without it, your data stays.
+
+Two things worth knowing:
+
+- **Back it up by copying the volume** if you spend real time building an
+  archive you want to keep. Docker volumes survive restarts and updates, but
+  they do not survive someone running `docker system prune --volumes`.
+- **This data is separate from the hosted site.** An account you create here
+  does not exist at sprout-web-app-jet.vercel.app, and vice versa.
 
 ### What is different from the hosted version
 
