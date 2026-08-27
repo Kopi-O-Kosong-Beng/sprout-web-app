@@ -82,6 +82,25 @@ docker compose -f docker-compose.demo.yml down
 Your data is kept. Start it again and the accounts, creatures and leaderboard
 are exactly as you left them.
 
+### Is any of our account data inside it?
+
+No. There are no API keys, no passwords and no Firebase service account in the
+Docker images or anywhere in this repository.
+
+It does not need them, because **the database in Option B is not our database.**
+It is a Firebase emulator running on the laptop, which requires no
+authentication at all. The application talks to it exactly as it would talk to
+the real Firestore, but the address points at `localhost` instead of Google, and
+the emulator lets anyone in because everything it holds is already on that
+machine.
+
+The same is true of accounts and creature images: a local Auth emulator and a
+local Storage emulator, both empty until you use them. Nothing in Option B ever
+contacts Google, our Firebase project, or the four AI services.
+
+That is also why the creature art is a placeholder — the services that draw it
+are the ones that need paid keys, and those keys are not here.
+
 ### Where the data is stored
 
 All of it — accounts, discovered creatures, battle history, the leaderboard and

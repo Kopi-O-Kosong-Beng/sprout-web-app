@@ -397,6 +397,48 @@ jobs:
             *)   echo "::error::unexpected ${code} from the storage download route"; exit 1 ;;
           esac
 
+      - name: The stack holds no credentials
+        run: |
+          # This stack is handed to people outside the team and the repository is
+          # public. The standing temptation is to paste real provider keys in
+          # here to make the generated art work — which would publish them. The
+          # names below are the project's own AUDITED_KEYS (server/platform/env.ts)
+          # plus the Firebase and mail secrets, so this fails the build rather
+          # than leaking.
+          env_dump=$(docker exec sprout-demo-api printenv)
+          forbidden='FIREBASE_SERVICE_ACCOUNT_JSON|FIREBASE_SERVICE_ACCOUNT_BASE64|FIREBASE_SERVICE_ACCOUNT_PATH|GOOGLE_APPLICATION_CREDENTIALS|PLANT_API_KEY|PLANTID_API_KEY|GEMINI_KEY|GEMINI_API_KEY|GEMMA_API_KEY|FLUX_API_KEY|NVIDIA_API_KEY|WITHOUTBG_KEY|REMOVE_BG_API_KEY|SMTP_PASS|RESEND_API_KEY'
+          if echo "$env_dump" | grep -qE "^(${forbidden})="; then
+            echo "::error::a credential reached the demo container"
+            echo "$env_dump" | grep -oE "^(${forbidden})=" || true
+            exit 1
+          fi
+          echo "no credential env vars present"
+
+          # Nor baked into a layer. .dockerignore excludes these patterns, but
+          # .dockerignore is a file someone can edit, and a layer that once held
+          # a secret still holds it after a later instruction deletes the file.
+          found=$(docker run --rm --entrypoint sh sprout-demo-api:local -c \
+            'find / -xdev \( -name "serviceAccountKey*.json" -o -name "*firebase-adminsdk*.json" -o -name ".env" \) 2>/dev/null' || true)
+          if [ -n "$found" ]; then
+            echo "::error::secret-shaped files found in the image"
+            echo "$found"
+            exit 1
+          fi
+          echo "no secret files in the image"
+
+          # And the two settings that make a leaked key harmless anyway: the
+          # datastore is the local emulator, not the team's Firebase project,
+          # and every paid provider is withheld its credential.
+          echo "$env_dump" | grep -qE '^FIRESTORE_EMULATOR_HOST=' || {
+            echo "::error::FIRESTORE_EMULATOR_HOST is unset — this stack would be talking to real Firestore"
+            exit 1
+          }
+          echo "$env_dump" | grep -qE '^USE_MOCK_APIS=true$' || {
+            echo "::error::USE_MOCK_APIS is not true — the stack could make paid calls"
+            exit 1
+          }
+          echo "datastore is the emulator; paid providers are stubbed"
+
       - name: Data survives a restart
         run: |
           # The emulators keep everything in memory, so persistence depends
