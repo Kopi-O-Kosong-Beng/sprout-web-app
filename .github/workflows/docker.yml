@@ -370,9 +370,19 @@ jobs:
             *localhost*) echo "download URLs are browser-resolvable" ;;
             *) echo "::error::public storage host is not browser-resolvable"; exit 1 ;;
           esac
-          # And the emulator is genuinely serving on that port from the host.
-          curl -fsS -o /dev/null -w 'storage emulator on host: %{http_code}\n' http://localhost:9199/ || {
-            echo "::error::storage emulator is not reachable from the host"
+          # And the host can genuinely fetch a sprite URL of the shape the app
+          # builds. Ask for an object that does not exist: a 404 from the
+          # emulator's own download route proves both that the port is reachable
+          # from outside the compose network and that it is routing the exact
+          # path `downloadUrl()` constructs. Probing `/` instead would prove
+          # neither — the emulator answers 501 there, since it implements the
+          # storage API rather than a web root.
+          url='http://localhost:9199/v0/b/sprout-local.appspot.com/o/sprites%2Fabsent%2Fv1.png?alt=media'
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)
+          echo "GET (absent sprite) -> ${code}"
+          [ "$code" = "404" ] || {
+            echo "::error::expected 404 from the storage emulator's download route, got ${code}"
+            echo "000 means the host cannot reach the emulator at all — sprite images would be broken in the browser."
             exit 1
           }
 
