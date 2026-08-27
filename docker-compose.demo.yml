@@ -167,6 +167,14 @@ services:
       USE_MOCK_APIS: "true"
       EMAIL_MODE: console
 
+      # Spread mocked identifications across a pool of real species instead of
+      # answering with one. The fixed answer is right for the test suites, which
+      # assert on it, and wrong here: every scan would resolve to the same
+      # canonical record, so a visitor photographing five plants would finish
+      # with one creature and four silent rescans of it. Still deterministic —
+      # the same photograph always gives the same species.
+      MOCK_IDENTIFY_MODE: varied
+
       # The demo identity. `test@sprout.com` with any password establishes a
       # session the client presents as x-dev-uid / x-dev-email headers, and the
       # allowlists below promote it to operator so /admin and /studio open too.

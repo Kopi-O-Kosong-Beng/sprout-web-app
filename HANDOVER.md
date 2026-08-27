@@ -132,14 +132,25 @@ Two things worth knowing:
 
 ### What is different from the hosted version
 
-**Creature artwork is a placeholder, not AI-generated.** Everything else is
+**Creature artwork is drawn locally, not AI-generated.** Everything else is
 real — scanning, the archive, battles, the leaderboard, the 200-species almanac,
 accounts and admin tools all work exactly as they do online. The four AI
 services that draw the creatures need paid API keys, and this version
 deliberately ships without any keys so that it runs anywhere, offline, with
 nothing to configure or expire.
 
-If you need the real generated art, use Option A.
+**The plant identification is also simulated.** Since Plant.id is one of the
+services being stood in for, this version does not really look at your
+photograph. It picks a species from a fixed set of ten common plants, based on
+the photo, so a scan still behaves like a scan: photograph five different plants
+and you get five different creatures, each with its own name, family and battle
+statistics. Photograph the *same* plant twice and you will get the same creature
+both times, exactly as the real version does.
+
+What it cannot do is tell you what a plant actually is. If someone at the
+showcase holds up a real leaf and asks what it is, use Option A.
+
+If you need the real generated art or real identification, use Option A.
 
 Two smaller differences: your archive starts empty, which is intended — scanning
 a plant to fill it is the demo. And emails (verification, password reset) are

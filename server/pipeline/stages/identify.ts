@@ -1,4 +1,5 @@
 import { Deadline, IDENTIFY_TIMEOUT_MS } from "../deadline";
+import { pickMockSpecies } from "./mockSpecies";
 export interface IdentificationResult {
   name: string;
   probability: number;
@@ -42,6 +43,31 @@ export async function identifyPlant(
   deadline?: Deadline
 ): Promise<IdentificationResult | IdentificationError> {
   if (isMockIdentification(apiKey)) {
+    // Varied mock, opt-in. One fixed answer is right for a test suite and wrong
+    // for a demo: every scan lands on the same canonical dex record, so someone
+    // photographing five plants finishes with one creature and four silent
+    // rescans of it. MOCK_IDENTIFY_MODE=varied spreads scans across a pool
+    // instead, still deterministically — the same photograph always yields the
+    // same species — so nothing that asserts on this becomes flaky.
+    if (process.env.MOCK_IDENTIFY_MODE === "varied") {
+      const species = pickMockSpecies(photoBase64);
+      return {
+        name: species.name,
+        probability: 0.92,
+        common_names: species.commonNames,
+        taxonomy: {
+          kingdom: "Plantae",
+          order: species.order,
+          family: species.family,
+          genus: species.genus,
+        },
+        description: species.description,
+        best_light_condition: species.light,
+        best_soil_type: species.soil,
+        best_watering: species.watering,
+      };
+    }
+
     // Graceful mock mode if API key is mock or missing during dry runs
     return {
       name: "Polygala calcarea",
